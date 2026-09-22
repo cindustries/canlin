@@ -1,0 +1,11 @@
+Lua 5.4.9 (PUC-Rio)
+source: https://www.lua.org/ftp/lua-5.4.9.tar.gz
+sha256: 2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
+verified: 2026-09-22 against the checksum published at https://www.lua.org/ftp/
+
+Contents: src/*.c, src/*.h, src/lua.hpp and README unmodified from the tarball,
+minus src/lua.c and src/luac.c (standalone interpreter/compiler, not used) and
+src/Makefile. LICENSE is the verbatim notice from src/lua.h (the tarball ships
+no separate license file).
+
+Read-only. Configure via compile flags only; any fix is a patch file plus ticket.
