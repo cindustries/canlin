@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-22T19:40:42Z
+claimed_by: canlin-worker-4
+class: standard
+created: 2026-09-22T19:29:04Z
+id: 4
+priority: high
+started: 2026-09-22T19:29:16Z
+status: review
+tags:
+- runtime
+- events
+title: Event scheduler core with fake clock (src/ev)
+updated: 2026-09-22T19:40:42Z
+---
+
+Owner-thread scheduler per event-runtime spec §2-§7: bounded per-module queues, FIFO per (module,generation,source), coalesced invalidation, one-shot monotonic timers with cancel, generation-scoped handles, admission with reserved terminal slot, fake clock + offscreen driver. Numeric limits provisional until core API spec.
+
+Merged 9b59090 (ea9279e). Host + ASan/UBSan green. i686/QEMU skipped (no toolchain). Open questions -> #10.
