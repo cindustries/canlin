@@ -18,7 +18,7 @@ Thumbs.db
 .env
 .envrc
 
-# Claude Code — commit: skills/, agents/, hooks/, settings.json
+# Claude Code — commit: skills/, agents/, rules/, hooks/, settings.json
 # Ignore: local overrides, credentials, session data
 
 # Tracked: shared config & extensibility
@@ -28,6 +28,8 @@ Thumbs.db
 !.claude/settings.local.json
 !.claude/agents/
 !.claude/agents/**
+!.claude/rules/
+!.claude/rules/**
 !.claude/skills/
 !.claude/skills/**
 !.claude/hooks/
@@ -51,5 +53,5 @@ config.yml
 *.o
 *.a
 build/
-gnx
-gnx-i686
+/canlin
+/canlin-i686
