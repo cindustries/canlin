@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-22T19:40:43Z
+claimed_by: canlin-worker-6
+class: standard
+created: 2026-09-22T19:29:04Z
+id: 6
+priority: high
+started: 2026-09-22T19:29:17Z
+status: review
+tags:
+- lua
+- sandbox
+- security
+title: Vendor Lua 5.4 and module sandbox (src/sandbox)
+updated: 2026-09-22T19:40:43Z
+---
+
+Vendor PUC Lua 5.4 under third_party/lua unmodified. Sandbox per system spec §4/§5 and event-runtime §2: no os/io/package/debug, text-only chunks, per-state allocator limit, instruction budget that faults the scope and cannot be swallowed by pcall.
+
+Merged (e31fba6 Lua 5.4.9 sha256 verified, ba8eac5). Host + ASan/UBSan green. i686 skipped. Gaps -> #7 #8, seam -> #9.
