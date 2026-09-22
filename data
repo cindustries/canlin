@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-22T19:40:43Z
+claimed_by: canlin-worker-5
+class: standard
+created: 2026-09-22T19:29:04Z
+id: 5
+priority: high
+started: 2026-09-22T19:29:17Z
+status: review
+tags:
+- llm
+- net
+title: Bounded incremental SSE and JSON parsers (src/net)
+updated: 2026-09-22T19:40:43Z
+---
+
+Push-parser for Server-Sent Events and a bounded streaming JSON tokenizer per LLM/UI spec §4: arbitrary chunk splits, UTF-8 validation, CRLF/LF/CR, multiline data, depth/string/event size limits enforced during assembly, incomplete final record is an error.
+
+Merged (18d03a9). Host + ASan/UBSan green, 18/18 mutants killed. i686 skipped. Open questions -> #10.
