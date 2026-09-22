@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-09-22T04:44:22Z
+id: 3
+priority: medium
+status: backlog
+tags:
+- hardware
+title: Hardware inventory of the two Pentium II laptops
+updated: 2026-09-22T04:44:22Z
+---
+
+Model, CPU generation (P2 vs P3), NIC, sound chip, graphics chip, boot media (USB/CD). lspci + /proc/cpuinfo from a live medium. Needed by gnx-os for the per-target kernel fragment; until then gnx-os works against QEMU only.
