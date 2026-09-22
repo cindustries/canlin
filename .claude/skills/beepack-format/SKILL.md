@@ -1,6 +1,6 @@
 ---
 name: beepack-format
-description: "Use when reading, writing, generating or validating a BeePack (.bee / .MP) file, an override directory (CONFIG/, hashed 8.3 filenames), or a layered key lookup — in any implementation: libbee (C), p5-beepack (Perl), sunriser8 firmware, gnx modules."
+description: "Use when reading, writing, generating or validating a BeePack (.bee / .MP) file, an override directory (CONFIG/, hashed 8.3 filenames), or a layered key lookup — in any implementation: libbee (C), p5-beepack (Perl), sunriser8 firmware, CanLin modules."
 user-invocable: false
 allowed-tools: Read, Grep, Glob
 model: sonnet
@@ -75,7 +75,7 @@ THEME.BEE         theme / customer layer
 FIRMWARE.BEE      factory defaults
 ```
 
-The stack is a **convention of the consumer**, not of the file format: gnx uses
+The stack is a **convention of the consumer**, not of the file format: CanLin uses
 `local/` → `state.bee` → `module.bee` with the same mechanics.
 
 ### Override directory entries
