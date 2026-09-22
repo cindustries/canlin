@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-22T06:30:15Z
+claimed_by: gnx-spec-review
+class: standard
+created: 2026-09-22T04:44:21Z
+id: 1
+priority: high
+started: 2026-09-22T05:34:38Z
+status: review
+tags:
+- spec
+title: Write the CanLin design spec (docs/superpowers/specs)
+updated: 2026-09-22T19:09:06Z
+---
+
+Architectural brainstorming is done in conversation; write the sectioned spec: core/module split, gnx.* Lua API surface, storage stack per module, sync protocol, theme, responsive layout rules, audio streaming, IoT (MQTT + MsgPack), device file layout, test strategy. Orchestrator task, then user review, then writing-plans.
+
+2026-09-22 06:30 System-Spec überarbeitet; Event-Runtime- und LLM/GUI-Spec ergänzt. Standalone Provider/URL+API-Key+Modell, gnx-server optional; deklarative GUI-Tools, WASM und begrenzte Events. Agenten/tools, inode-erhaltende Skills, README/CLAUDE und Hausregel-Tracking angeglichen. Dokument-/YAML-/Hardlink-Checks, SQLite-Schema-Probe und frischer Briefing-Smoke-Test bestanden. Review-Klarstellung zu lokalen Overrides übernommen. Kein Runtime-Code, keine Builds oder Provideraufrufe, kein Commit. Zur Nutzerprüfung vor konkreten Implementierungsplänen.
+
+2026-09-22 19:09 Projekt umbenannt: gnx → CanLin (Repo canlin, Lua-API canlin.*, Skills canlin-core/canlin-coordination).
