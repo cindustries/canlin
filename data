@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-23T04:21:25Z
+id: 31
+priority: medium
+status: backlog
+tags:
+- ui
+- settings
+- store
+title: Persist UI scale per output in system/local + trusted settings control
+updated: 2026-09-23T04:21:25Z
+---
+
+Blocked on store (libbee, canlin#2). From canlin#24.
