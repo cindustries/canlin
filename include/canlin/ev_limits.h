@@ -1,33 +1,38 @@
 /* CanLin event scheduler — numeric limits.
  *
- * PROVISIONAL. The event-runtime spec (section 5) requires declared finite limits for
- * item count and bytes, per module and process-wide; the core API spec is to fix the
- * real numbers. These are deliberately small so tests hit every bound quickly. Nothing
+ * v1 values from docs/superpowers/specs/2026-09-23-canlin-core-api-design.md §7, sized
+ * for the 1 GB P2 floor and to be re-measured on real hardware (canlin#3). Nothing
  * outside this header may hard-code them; they are compile-time constants, not runtime
- * configuration, so every limit has a bounded maximum.
+ * configuration. The spec's "max" column is the ceiling a future configurable value may
+ * never exceed; it is recorded in the comment until configuration exists.
  */
 #ifndef CANLIN_EV_LIMITS_H
 #define CANLIN_EV_LIMITS_H
 
-/* Module instance slots (live plus retiring generations of the same module share one). */
-#define CANLIN_EV_MAX_MODULES        8u
+/* Module instance slots (live plus retiring generations of the same module share one).
+ * Spec max 32. */
+#define CANLIN_EV_MAX_MODULES        16u
 
-/* Per-module queue: queued items plus reserved terminal-outcome slots. */
-#define CANLIN_EV_MOD_MAX_ITEMS      32u
-/* Per-module bytes: queued payload bytes plus reserved operation result bytes. */
-#define CANLIN_EV_MOD_MAX_BYTES      (64u * 1024u)
+/* Per-module queue: queued items plus reserved terminal-outcome slots. Spec max 256. */
+#define CANLIN_EV_MOD_MAX_ITEMS      64u
+/* Per-module bytes: queued payload bytes plus reserved operation result bytes.
+ * Spec max 1 MiB. */
+#define CANLIN_EV_MOD_MAX_BYTES      (256u * 1024u)
 
-/* Process-wide bounds across all modules (smaller than the sum of module bounds). */
-#define CANLIN_EV_PROC_MAX_ITEMS     128u
-#define CANLIN_EV_PROC_MAX_BYTES     (256u * 1024u)
+/* Process-wide bounds across all modules (smaller than the sum of module bounds).
+ * Spec max 2048 items / 16 MiB. */
+#define CANLIN_EV_PROC_MAX_ITEMS     512u
+#define CANLIN_EV_PROC_MAX_BYTES     (4u * 1024u * 1024u)
 
-/* Finite operations (timers included) — per module and process-wide (table size). */
-#define CANLIN_EV_MOD_MAX_OPS        16u
-#define CANLIN_EV_PROC_MAX_OPS       64u
+/* Finite operations (timers included) — per module (spec max 128) and process-wide
+ * (op table size). The spec table has no process-wide op/timer row; these are chosen
+ * as half the sum of the module bounds, like PROC_MAX_ITEMS. */
+#define CANLIN_EV_MOD_MAX_OPS        32u
+#define CANLIN_EV_PROC_MAX_OPS       256u
 
-/* One-shot timers, a subset of the operation bounds above. */
-#define CANLIN_EV_MOD_MAX_TIMERS     8u
-#define CANLIN_EV_PROC_MAX_TIMERS    32u
+/* One-shot timers, a subset of the operation bounds above. Module spec max 64. */
+#define CANLIN_EV_MOD_MAX_TIMERS     16u
+#define CANLIN_EV_PROC_MAX_TIMERS    128u
 
 /* Callback dispatches per scheduler turn, and queued-item dispatches per module per
  * turn. A control delivery and one draw per module come on top of the per-module
