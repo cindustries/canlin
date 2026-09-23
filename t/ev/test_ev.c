@@ -645,6 +645,127 @@ static void test_fifo_and_rotation(void)
     h_done(&h);
 }
 
+/* ---- staged reload: stage / commit / abort (core API §6, canlin#16) ---- */
+
+static void test_stage_commit_abort(void)
+{
+    harness h;
+    canlin_ev_gen g_old, g_new, g_new2, g_other, g_x;
+    canlin_ev_handle t_old, t_new, op_new, op_old;
+    producer p = {0, 0};
+    canlin_ev_producer pr;
+    canlin_ev_stats st, before;
+    canlin_ev_turn_result r;
+    unsigned i, n;
+    int slot;
+    static char buf[8];
+
+    h_init(&h);
+    released = 0;
+    pr.cancel = prod_cancel;
+    pr.ctx = &p;
+    CHECK(canlin_ev_module_start(h.ev, &g_old) == CANLIN_EV_OK);
+    slot = canlin_ev_module_slot(h.ev, g_old);
+    CHECK(canlin_ev_timer_start(h.ev, g_old, 10, &t_old) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_begin(h.ev, g_old, 4, NULL, &op_old) == CANLIN_EV_OK);
+    canlin_ev_get_stats(h.ev, slot, &before);
+
+    /* Stage: a second generation in the same slot, both admit work. */
+    CHECK(canlin_ev_module_stage(h.ev, g_old, NULL) == CANLIN_EV_EINVAL);
+    CHECK(canlin_ev_module_stage(h.ev, 999, &g_new) == CANLIN_EV_ESTALE);
+    CHECK(canlin_ev_module_stage(h.ev, g_old, &g_new) == CANLIN_EV_OK);
+    CHECK(g_new != g_old && canlin_ev_module_slot(h.ev, g_new) == slot);
+    CHECK(canlin_ev_module_stage(h.ev, g_old, &g_x) == CANLIN_EV_EINVAL); /* one at a time */
+    CHECK(canlin_ev_module_stage(h.ev, g_new, &g_x) == CANLIN_EV_EINVAL);
+    CHECK(canlin_ev_module_reload(h.ev, g_old, &g_x) == CANLIN_EV_EINVAL);
+    CHECK(canlin_ev_module_commit(h.ev, g_old) == CANLIN_EV_EINVAL);   /* not staged */
+    CHECK(canlin_ev_module_abort(h.ev, g_old) == CANLIN_EV_EINVAL);
+    CHECK(canlin_ev_timer_start(h.ev, g_new, 5, &t_new) == CANLIN_EV_OK);
+    CHECK(CANLIN_EV_HANDLE_GEN(t_new) == g_new);
+    CHECK(canlin_ev_op_begin(h.ev, g_new, 4, &pr, &op_new) == CANLIN_EV_OK);
+    CHECK(canlin_ev_post(h.ev, g_new, 1, 1, 0, 0, buf, 2, rel) == CANLIN_EV_OK);
+    CHECK(canlin_ev_invalidate(h.ev, g_new) == CANLIN_EV_OK);
+    CHECK(canlin_ev_post(h.ev, g_old, 1, 2, 0, 0, buf, 3, rel) == CANLIN_EV_OK);
+    CHECK(canlin_ev_invalidate(h.ev, g_old) == CANLIN_EV_OK);
+    CHECK(canlin_ev_cancel(h.ev, g_new, t_old) == CANLIN_EV_ESTALE); /* foreign handle */
+    CHECK(canlin_ev_cancel(h.ev, g_old, t_new) == CANLIN_EV_ESTALE);
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(st.gen == g_old && st.staged == g_new);
+    CHECK(st.items == before.items + 4 && st.ops == before.ops + 2 && st.timers == 2);
+
+    /* Staged slot: nothing dispatched to either generation, not reported runnable. */
+    canlin_ev_fake_clock_advance(&h.clock, 20);
+    r = h_turn(&h);
+    CHECK(h.n == 0 && !r.more && r.dispatched == 0);
+
+    /* Abort: every trace of the staged generation retired; the old one resumes. */
+    CHECK(canlin_ev_module_abort(h.ev, g_new) == CANLIN_EV_OK);
+    CHECK(p.cancelled == 1 && p.h == op_new);
+    CHECK(released == 1);
+    CHECK(canlin_ev_module_slot(h.ev, g_new) == CANLIN_EV_ESTALE);
+    CHECK(canlin_ev_module_commit(h.ev, g_new) == CANLIN_EV_ESTALE);
+    CHECK(canlin_ev_op_complete(h.ev, op_new, CANLIN_EV_SUCCESS, NULL, 0, NULL) ==
+          CANLIN_EV_RETIRED);
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(st.gen == g_old && st.staged == 0 && st.timers == 1 && st.ops == before.ops);
+    CHECK(st.items == before.items + 1); /* old event posted during the staging */
+    for (i = 0; i < 4; i++)
+        h_turn(&h);
+    CHECK(count_kind(&h, CANLIN_EV_D_TIMER, g_old) == 1);
+    CHECK(count_kind(&h, CANLIN_EV_D_EVENT, g_old) == 1);
+    CHECK(count_kind(&h, CANLIN_EV_D_DRAW, g_old) == 1);
+    for (i = 0; i < h.n; i++)
+        CHECK(h.log[i].d.gen == g_old);
+    CHECK(released == 2);
+
+    /* Admission: a slot without room for one more item refuses staging. */
+    n = 0;
+    while (canlin_ev_post(h.ev, g_old, 1, 3, 0, 0, NULL, 0, NULL) == CANLIN_EV_OK)
+        n++;
+    CHECK(n > 0);
+    canlin_ev_get_stats(h.ev, slot, &before);
+    CHECK(canlin_ev_module_stage(h.ev, g_old, &g_x) == CANLIN_EV_EFULL);
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(st.staged == 0 && st.items == before.items && st.gen == g_old);
+    for (i = 0; i < 64; i++)
+        h_turn(&h);
+
+    /* Commit: the old generation is stopped in §7 order, the new one becomes live and
+     * gets the latches it set while staged. Ids are never reused after an abort. */
+    CHECK(canlin_ev_module_stage(h.ev, g_old, &g_new2) == CANLIN_EV_OK);
+    CHECK(g_new2 > g_new);
+    CHECK(canlin_ev_post(h.ev, g_old, 1, 4, 0, 0, buf, 1, rel) == CANLIN_EV_OK);
+    CHECK(canlin_ev_invalidate(h.ev, g_new2) == CANLIN_EV_OK);
+    CHECK(canlin_ev_module_commit(h.ev, g_new2) == CANLIN_EV_OK);
+    CHECK(released == 3); /* old event retired without delivery */
+    CHECK(canlin_ev_module_slot(h.ev, g_old) == CANLIN_EV_ESTALE);
+    CHECK(canlin_ev_op_complete(h.ev, op_old, CANLIN_EV_SUCCESS, NULL, 0, NULL) ==
+          CANLIN_EV_RETIRED);
+    h.n = 0;
+    canlin_ev_fake_clock_advance(&h.clock, 100);
+    for (i = 0; i < 4; i++)
+        h_turn(&h);
+    CHECK(h.n == 1 && h.log[0].d.kind == CANLIN_EV_D_DRAW && h.log[0].d.gen == g_new2);
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(st.gen == g_new2 && st.staged == 0);
+
+    /* Another module is dispatched normally while this slot stages. */
+    CHECK(canlin_ev_module_start(h.ev, &g_other) == CANLIN_EV_OK);
+    CHECK(canlin_ev_module_stage(h.ev, g_new2, &g_x) == CANLIN_EV_OK);
+    CHECK(canlin_ev_invalidate(h.ev, g_other) == CANLIN_EV_OK);
+    CHECK(canlin_ev_invalidate(h.ev, g_new2) == CANLIN_EV_OK);
+    h.n = 0;
+    h_turn(&h);
+    CHECK(h.n == 1 && h.log[0].d.gen == g_other);
+    CHECK(canlin_ev_module_stop(h.ev, g_x) == CANLIN_EV_OK); /* stop works on staged too */
+    h_turn(&h);
+    CHECK(h.n == 2 && h.log[1].d.gen == g_new2);
+    CHECK(canlin_ev_module_stop(h.ev, g_new2) == CANLIN_EV_OK);
+    CHECK(canlin_ev_module_stop(h.ev, g_other) == CANLIN_EV_OK);
+    check_proc_empty(h.ev);
+    h_done(&h);
+}
+
 int main(void)
 {
     test_inline_completion_after_boundary();
@@ -653,6 +774,7 @@ int main(void)
     test_timer_expire_then_cancel();
     test_timer_resume_fires_once();
     test_reload_retires_old_generation();
+    test_stage_commit_abort();
     test_exactly_one_terminal();
     test_idle_reports_nothing();
     test_motion_coalescing_preserves_button_edges();

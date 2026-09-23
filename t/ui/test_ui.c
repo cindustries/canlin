@@ -964,6 +964,103 @@ static void test_input_stale_generation(void)
     h_done(&h);
 }
 
+/* Staged reload (core API §6, canlin#16): a failed reload leaves the old generation's view
+ * state alone (a held button stays held) and input posted during the staging reaches the
+ * old generation; after a successful reload that input is retired with the old
+ * generation and the view is reset for the new one. */
+static harness *stage_h;
+static const canlin_ui_rect *stage_b;
+static int stage_rc;
+
+static int stage_require(void *ud, const char *name, size_t len, const char **src,
+                         size_t *slen)
+{
+    static const char body[] = "return {}";
+    (void)ud;
+    if (len != 5 || memcmp(name, "probe", 5) != 0)
+        return 0;
+    if (stage_b)
+        click(stage_h, stage_b); /* input arriving from the backend mid-staging */
+    else
+        input(stage_h, CANLIN_UI_IN_BUTTON, 290, 290, 0);
+    *src = body;
+    *slen = sizeof body - 1;
+    return 1;
+}
+
+static int stage_reload(harness *h, const char *main)
+{
+    canlin_module_source s;
+    memset(&s, 0, sizeof s);
+    s.name = "uitest";
+    s.version = "2";
+    s.main = main;
+    s.main_len = strlen(main);
+    s.require = stage_require;
+    stage_rc = canlin_module_reload(h->m, &s);
+    return stage_rc;
+}
+
+static void test_input_staged_reload(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    canlin_ev_gen old;
+    static const char bad[] = "local p = require('probe') error('broken')";
+    static const char good[] = "local p = require('probe')\n"
+                               "local M = {}\n"
+                               "function M.draw(ui) if ui:button('Go') then print('v2 clicked') end end\n"
+                               "return M\n";
+
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (!b) {
+        h_done(&h);
+        return;
+    }
+    stage_h = &h;
+    old = canlin_module_gen(h.m);
+
+    /* Held press survives a failed reload; the release posted during it is delivered. */
+    input(&h, CANLIN_UI_IN_BUTTON, 290, 290, 1);
+    h_drain(&h);
+    CHECK(nk_left_down(&h) == 1);
+    stage_b = NULL;
+    CHECK(stage_reload(&h, bad) == CANLIN_MODULE_ELOAD);
+    CHECK(canlin_module_gen(h.m) == old);
+    CHECK(nk_left_down(&h) == 1); /* view not reset */
+    CHECK(queued(&h) == 1);       /* the release, for the old generation */
+    h_drain(&h);
+    CHECK(nk_left_down(&h) == 0);
+
+    /* A click posted during a failed reload reaches the old generation. */
+    stage_b = b;
+    CHECK(stage_reload(&h, bad) == CANLIN_MODULE_ELOAD);
+    CHECK(queued(&h) == 3);
+    h_drain(&h);
+    CHECK(count(&h, "clicked") == 1);
+
+    /* After a successful reload the same input is retired with the old generation and
+     * the view is reset; nothing leaks into the new generation. */
+    input(&h, CANLIN_UI_IN_BUTTON, 290, 290, 1);
+    h_drain(&h);
+    CHECK(nk_left_down(&h) == 1);
+    CHECK(stage_reload(&h, good) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_gen(h.m) != old);
+    CHECK(queued(&h) == 0);
+    h_drain(&h);
+    CHECK(nk_left_down(&h) == 0); /* released by the reset in the first new frame */
+    CHECK(count(&h, "clicked") == 1 && !has(&h, "v2 clicked"));
+    click(&h, b);
+    h_drain(&h);
+    CHECK(count(&h, "v2 clicked") == 1);
+    stage_h = NULL;
+    stage_b = NULL;
+    h_done(&h);
+}
+
 /* Lua is never entered for input: every Lua entry is a draw delivery. */
 static void test_input_no_lua(void)
 {
@@ -1810,6 +1907,7 @@ int main(void)
     test_input_order();
     test_input_overflow_latch();
     test_input_stale_generation();
+    test_input_staged_reload();
     test_input_no_lua();
     test_scroll();
     test_draw_charge();
