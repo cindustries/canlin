@@ -10,8 +10,8 @@
  *                                compiler/arch guessing (i686, x86_64, arm, wasm32).
  *   NK_INCLUDE_DEFAULT_ALLOCATOR malloc/free for nk_init_default and the font atlas.
  *   NK_INCLUDE_FONT_BAKING       embedded stb_truetype + stb_rect_pack (UI spec §6.3).
- *   NK_INCLUDE_DEFAULT_FONT      embedded ProggyClean.ttf, the v1 built-in font.
- * Deliberately absent: NK_INCLUDE_STANDARD_IO (no file access from the UI library),
+ * Deliberately absent: NK_INCLUDE_DEFAULT_FONT (ProggyClean; the built-in font is the
+ * DejaVu Sans subset in src/render/font_builtin.c, canlin#22), NK_INCLUDE_STANDARD_IO (no file access from the UI library),
  * NK_INCLUDE_STANDARD_VARARGS (no printf-style widgets; labels are formatted by the
  * caller), NK_INCLUDE_VERTEX_BUFFER_OUTPUT (the software rasterizer consumes the
  * command list directly), NK_INCLUDE_STANDARD_BOOL, NK_INCLUDE_COMMAND_USERDATA.
@@ -27,7 +27,6 @@
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_DEFAULT_ALLOCATOR
 #define NK_INCLUDE_FONT_BAKING
-#define NK_INCLUDE_DEFAULT_FONT
 #include "nuklear.h"
 
 #endif

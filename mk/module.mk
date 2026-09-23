@@ -9,7 +9,7 @@ MODULE_HDR := include/canlin/module.h include/canlin/module_limits.h \
 MODULE_OBJ := $(BUILD)/src/module/module.o
 MODULE_SB_OBJ := $(BUILD)/src/sandbox/sandbox.o
 MODULE_UI_OBJ := $(BUILD)/src/ui/ui.o $(BUILD)/src/ui/graph.o $(BUILD)/src/ui/theme.o $(BUILD)/src/render/render.o \
-	$(BUILD)/src/render/nk_impl.o
+	$(BUILD)/src/render/font_builtin.o $(BUILD)/src/render/nk_impl.o
 LIBOBJ += $(MODULE_OBJ)
 
 $(MODULE_OBJ) $(BUILD)/t/module/test_module.o: \
