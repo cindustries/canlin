@@ -1746,6 +1746,57 @@ static void test_font_cache_module(void)
     h_done(&h);
 }
 
+/* canlin#30: a draw skipped with EFONT is retried by itself once a slot is unpinned: four
+ * pinned sizes (the module at 100 % plus three views), the module moves to 200 % and is
+ * skipped; freeing one view wakes it, with no set_ui, invalidate or input from outside. */
+static void test_font_cache_wake(void)
+{
+    static const int scales[3] = {75, 125, 150};
+    harness h;
+    canlin_ui_output *o[3];
+    canlin_ui_view *v[3];
+    canlin_ui_output_desc d;
+    unsigned draws;
+    int i, err;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    for (i = 0; i < 3; i++) {
+        d.id = "pin";
+        d.w = d.h = 300;
+        d.dpi = 1.0f;
+        d.scale = scales[i];
+        o[i] = canlin_ui_output_new(&d, &err);
+        v[i] = canlin_ui_view_new(h.ui, o[i], &err);
+        CHECK(v[i] != NULL);
+    }
+    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    h_drain(&h);
+    CHECK(has(&h, "draw: skipped: every font size slot is pinned"));
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 16.0f);
+    draws = h.draws;
+    h_drain(&h);
+    CHECK(h.draws == draws); /* waiting, not spinning */
+    /* A view that is only re-used (no slot unpinned) wakes nobody. */
+    v[1] = (canlin_ui_view_free(v[1]), canlin_ui_view_new(h.ui, o[1], &err));
+    CHECK(v[1] != NULL);
+    h_drain(&h);
+    CHECK(h.draws == draws + 1); /* woken once by the free, skipped again: re-pinned */
+    CHECK(count(&h, "draw: skipped") == 2);
+    draws = h.draws;
+    canlin_ui_view_free(v[0]); /* 75 % unpinned: the only external action */
+    h_drain(&h);
+    CHECK(h.draws == draws + 1);
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 32.0f);
+    CHECK(!canlin_ui_view_dirty(canlin_module_view(h.m)));
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) != NULL);
+    CHECK(count(&h, "draw: skipped") == 2);
+    for (i = 1; i < 3; i++)
+        canlin_ui_view_free(v[i]);
+    for (i = 0; i < 3; i++)
+        CHECK(canlin_ui_output_free(o[i]) == CANLIN_UI_OK);
+    h_done(&h);
+}
+
 /* Lua has no path to scale, DPI or the output: the whole canlin.* surface is an
  * allowlist here (a new entry must be reviewed against §2.1), and the ui object carries
  * no metric accessors and cannot be written. */
@@ -1812,6 +1863,7 @@ int main(void)
     test_two_outputs();
     test_font_cache();
     test_font_cache_module();
+    test_font_cache_wake();
     test_lua_no_scale();
     if (failures) {
         fprintf(stderr, "ui: %d of %d checks failed\n", failures, checks);

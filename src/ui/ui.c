@@ -38,6 +38,7 @@ struct canlin_ui {
     font_entry fonts[CANLIN_UI_FONT_SIZES_MAX];
     uint64_t tick;
     unsigned bakes;
+    canlin_ui_view *views;    /* every view bound to this ui, linked through unext */
 };
 
 struct canlin_ui_output {
@@ -58,6 +59,8 @@ struct canlin_ui_view {
     canlin_ui *ui;
     canlin_ui_output *out;
     canlin_ui_view *onext;    /* next view on out */
+    canlin_ui_view *unext;    /* next view on ui */
+    int efont_wait;           /* last frame_begin failed with EFONT: woken on a release */
     font_entry *fe;           /* pinned entry in ui->fonts */
     float factor;             /* DPI x scale of the current binding */
     float em;
@@ -183,10 +186,46 @@ static font_entry *font_acquire(canlin_ui *ui, float em, int *err)
     return hit;
 }
 
-static void font_release(font_entry *e)
+/* A slot became evictable: every view of ui whose last frame was skipped with EFONT is
+ * marked dirty and its owner told, so it retries without an external invalidate (canlin#30).
+ * Only dirty callbacks run here (they schedule a draw, never a frame), so no frame is
+ * started under the caller. */
+static void font_wake(canlin_ui *ui)
 {
-    if (e && e->refs)
+    canlin_ui_view *v;
+    for (v = ui->views; v; v = v->unext)
+        if (v->efont_wait) {
+            v->efont_wait = 0;
+            v->dirty = 1;
+            if (v->dirty_fn)
+                v->dirty_fn(v->dirty_ud);
+        }
+}
+
+static void font_release(canlin_ui *ui, font_entry *e)
+{
+    if (e && e->refs) {
         e->refs--; /* stays baked until LRU eviction or canlin_ui_free */
+        if (e->refs == 0 && ui)
+            font_wake(ui);
+    }
+}
+
+static void ui_unlink(canlin_ui_view *v)
+{
+    canlin_ui_view **pp;
+    for (pp = &v->ui->views; *pp; pp = &(*pp)->unext)
+        if (*pp == v) {
+            *pp = v->unext;
+            break;
+        }
+    v->unext = NULL;
+}
+
+static void ui_link(canlin_ui_view *v)
+{
+    v->unext = v->ui->views;
+    v->ui->views = v;
 }
 
 /* ---- outputs ---- */
@@ -440,7 +479,7 @@ canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err)
         return NULL;
     }
     if (!nk_init_default(&v->nk, &v->fe->font.font->handle)) {
-        font_release(v->fe);
+        font_release(NULL, v->fe);
         free(v);
         *err = CANLIN_UI_ENOMEM;
         return NULL;
@@ -450,6 +489,7 @@ canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err)
     v->w = v->h = 1;
     v->dirty = 1;
     output_link(v, o);
+    ui_link(v);
     *err = CANLIN_UI_OK;
     return v;
 }
@@ -459,9 +499,10 @@ void canlin_ui_view_free(canlin_ui_view *v)
     if (v == NULL)
         return;
     output_unlink(v);
+    ui_unlink(v); /* before the release: v itself is not woken */
     if (v->nk_ok)
         nk_free(&v->nk);
-    font_release(v->fe);
+    font_release(v->ui, v->fe);
     free(v);
 }
 
@@ -481,9 +522,12 @@ int canlin_ui_view_bind(canlin_ui_view *v, canlin_ui *ui, canlin_ui_output *o)
     fe = font_acquire(ui, em, &err); /* before releasing: failure leaves v unchanged */
     if (fe == NULL)
         return err;
-    font_release(v->fe);
+    ui_unlink(v);
+    font_release(v->ui, v->fe);
     v->fe = fe;
     v->ui = ui;
+    ui_link(v);
+    v->efont_wait = 0; /* this binding has its font */
     v->factor = factor;
     v->em = em;
     if (o != v->out) {
@@ -754,8 +798,11 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
         if (em != v->fe->em || factor != v->factor) {
             int err = CANLIN_UI_OK;
             font_entry *fe = em == v->fe->em ? v->fe : font_acquire(v->ui, em, &err);
-            if (fe == NULL)
-                return err; /* previous frame, record and font stay intact */
+            if (fe == NULL) {
+                /* previous frame, record and font stay intact; a later release wakes v */
+                v->efont_wait = err == CANLIN_UI_EFONT;
+                return err;
+            }
             if (fe != v->fe)
                 old = v->fe;
             v->fe = fe;
@@ -766,7 +813,8 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     }
     ctx = &v->nk;
     nk_clear(ctx);
-    font_release(old); /* after nk_clear: no command points into its atlas any more */
+    v->efont_wait = 0;
+    font_release(v->ui, old); /* after nk_clear: no command points into its atlas any more */
     v->no_cmds = 0;
     apply_input(v);
     maxs = (float)(v->content_h - v->h);

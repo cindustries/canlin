@@ -21,7 +21,10 @@
  * command list points into that atlas). Unpinned entries stay baked and are released
  * least recently used first when a new size needs the slot. If every slot is pinned, the
  * frame that needs a new size fails with CANLIN_UI_EFONT; the view keeps its previous
- * frame and size, nothing is released under another view.
+ * frame and size, nothing is released under another view. When any entry of the same ui
+ * becomes unpinned later (a view freed, re-bound or moved to another em), every view
+ * whose last frame_begin failed with EFONT is marked dirty and its dirty callback runs,
+ * so its owner retries the draw without an external invalidate (canlin#30).
  *
  * Frame protocol (canlin_module does this around M.draw):
  *   canlin_ui_view_frame_begin(v)   apply queued input, start the Nuklear frame
@@ -170,8 +173,10 @@ void canlin_ui_view_free(canlin_ui_view *v);
 int canlin_ui_view_bind(canlin_ui_view *v, canlin_ui *ui, canlin_ui_output *o);
 /* Screen rectangle of the view in px (w, h > 0), in its output's coordinates. */
 void canlin_ui_view_set_rect(canlin_ui_view *v, int x, int y, int w, int h);
-/* Called (owner thread, outside any frame) when the view's output metrics change, so the
- * owner can schedule a draw. fn may be NULL. */
+/* Called (owner thread, outside the view's own frame) when the view's output metrics
+ * change or, after an EFONT skip, a font slot was unpinned, so the owner can schedule a
+ * draw. It may run while another view's frame starts; it must only schedule. fn may be
+ * NULL. */
 void canlin_ui_view_set_dirty_fn(canlin_ui_view *v, void (*fn)(void *ud), void *ud);
 /* 1 if the view needs a re-layout (new output metrics or binding) since its last frame. */
 int canlin_ui_view_dirty(const canlin_ui_view *v);
