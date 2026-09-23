@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T05:33:26Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T03:36:47Z
+id: 20
+priority: high
+started: 2026-09-23T05:06:43Z
+status: review
+tags:
+- ui
+- llm
+title: 'UI step 4: set_view GUI tool validator and assistant view'
+updated: 2026-09-23T05:33:26Z
+---
+
+UI spec §7, §11.4; with the LLM slice.
+
+Merged 4d2371b (c79cdeb). 1434 checks, host + ASan/UBSan green. i686 skipped. Decisions by orchestrator: \n/\t allowed in text/bubble/area values; bubble role system rejected in set_view (follow-up #47).
