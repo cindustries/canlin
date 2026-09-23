@@ -1,0 +1,34 @@
+Inter 4.1 (Inter-Regular.ttf name table: "Version 4.001;git-9221beed3")
+source: https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+zip sha256: 9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e (33707794 bytes)
+verified: 2026-09-23. Upstream publishes no checksum for this release (the GitHub
+release asset carries no digest; its size matches the one above); the sha256 values
+here were computed at download time and pin what was vendored.
+
+sha256 of each vendored file:
+40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82  Inter-Regular.ttf
+262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a  LICENSE
+
+Contents:
+- Inter-Regular.ttf: extras/ttf/Inter-Regular.ttf from the zip, unmodified. The static
+  Regular instance, not the variable font (InterVariable.ttf): stb_truetype does not
+  interpret fvar/gvar and would bake the default outlines only.
+- LICENSE: LICENSE.txt from the zip, unmodified. SIL Open Font License 1.1,
+  "Copyright (c) 2016 The Inter Project Authors". The copyright statement names no
+  Reserved Font Name, so OFL condition 3 does not require renaming a Modified Version
+  (a subset is one); the subset keeps the name "Inter". Conditions that apply: the
+  licence and copyright notice must accompany every distributed copy (here: this
+  LICENSE, canlin#43), the font must not be sold by itself, and derivatives stay under
+  the OFL. Embedding in and redistributing with software is permitted. The name table
+  also carries a trademark notice ("Inter UI and Inter is a trademark of rsms."); the
+  OFL grants no trademark rights, and the subset keeps that notice unchanged. OS/2
+  fsType is 0 (installable embedding).
+
+Use: CanLin never ships or bakes this file directly. tools/mkfont.py derives the
+built-in Latin subset from it into src/render/font_builtin.c (codepoint list and
+pinned fontTools version are in that script). This is a trusted, shipped font;
+baking it with stb_truetype does not relax the untrusted theme-font rule (UI spec
+§6.3).
+
+Read-only. Any change to the subset happens in tools/mkfont.py, never here.
+Check: `sha256sum -c` over the list above from this dir.

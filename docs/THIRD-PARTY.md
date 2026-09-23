@@ -11,7 +11,7 @@ licence text next to it, and every build or package ships these texts (canlin#43
 |---|---|---|
 | Lua 5.4.9 | `third_party/lua` | MIT |
 | Nuklear (incl. embedded stb_truetype, stb_rect_pack) | `third_party/nuklear` | MIT or public domain (Unlicense), our choice: MIT |
-| DejaVu Sans 2.37 (Latin subset) | `third_party/fonts/dejavu-sans` | Bitstream Vera / Arev font licence (permissive, embedding and subsetting allowed); DejaVu changes public domain |
+| Inter 4.1 Regular (Latin subset) | `third_party/fonts/inter` | SIL Open Font License 1.1 (embedding and subsetting allowed; no Reserved Font Name, so the subset keeps the name "Inter"; licence text must accompany every copy) |
 | Adapted code from Nuklear's rawfb demo | `src/render/render.c` | MIT (© Patrick Rudolph), attribution kept in the file |
 
 ## Planned (system design §4)
