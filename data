@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T17:41:09Z
+claimed_by: canlin
+class: standard
+created: 2026-09-23T05:49:07Z
+id: 51
+priority: medium
+started: 2026-09-23T17:32:41Z
+status: review
+tags:
+- llm
+- assistant
+title: 'LLM: act on openai-chat tool calls only after done ok (assistant) + test'
+updated: 2026-09-23T17:41:09Z
+---
+
+Spec decision 2026-09-23 in providers §2.3. Also: stream_options.include_usage as preset flag; MiniMax/Moonshot openai-chat presets. From canlin#38.
+
+Landed 1673398, 092e748 (host make test green; i686 build + qemu-i386 user-mode pentium2 for test_response/test_llm/test_view; canlin-os full-system gate not available). Open: product Lua binding for the gate (with #40); UI wording for dropped calls unspecified; reasoning_content echo for Kimi/DeepSeek tool loops unverified; tool-call id 256 vs set_view 128 mismatch.
