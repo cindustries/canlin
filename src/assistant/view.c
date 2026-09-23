@@ -423,12 +423,15 @@ static int only_keys(vctx *c, const jv *o, const char *const *allowed)
     return 0;
 }
 
-/* No C0, DEL or C1 control character (UI spec §7). s is valid UTF-8 (tokenizer). */
-static int has_control(const char *s, size_t n)
+/* No C0, DEL or C1 control character (UI spec §7); multi-line content (text/bubble text,
+ * area value) may hold '\n' and '\t'. s is valid UTF-8 (tokenizer). */
+static int has_control(const char *s, size_t n, int multiline)
 {
     size_t i;
     for (i = 0; i < n; i++) {
         unsigned char b = (unsigned char)s[i];
+        if (multiline && (b == '\n' || b == '\t'))
+            continue;
         if (b < 0x20 || b == 0x7f)
             return 1;
         if (b == 0xc2 && i + 1 < n && (unsigned char)s[i + 1] >= 0x80 &&
@@ -440,8 +443,9 @@ static int has_control(const char *s, size_t n)
 
 static const char EMPTY[1] = "";
 
-/* String member k of o. Missing: error if required, else empty. */
-static int str_of(vctx *c, const jv *o, const char *k, int required, size_t max,
+/* String member k of o. Missing: error if required, else empty. multiline admits '\n' and
+ * '\t' (UI spec §7). */
+static int str_ml(vctx *c, const jv *o, const char *k, int required, size_t max, int multiline,
                   canlin_av_str *out)
 {
     const jv *v = get(o, k);
@@ -463,12 +467,19 @@ static int str_of(vctx *c, const jv *o, const char *k, int required, size_t max,
         snprintf(msg, sizeof msg, "exceeds %u bytes", (unsigned)max);
         return fail(c, msg);
     }
-    if (has_control(v->s, v->len))
+    if (has_control(v->s, v->len, multiline))
         return fail(c, "contains a control character");
     pop(c, n);
     out->s = v->s;
     out->len = v->len;
     return 0;
+}
+
+/* Single-line string: no control character at all. */
+static int str_of(vctx *c, const jv *o, const char *k, int required, size_t max,
+                  canlin_av_str *out)
+{
+    return str_ml(c, o, k, required, max, 0, out);
 }
 
 static int id_ok(const char *s, size_t n)
@@ -899,7 +910,8 @@ static int widget_of(vctx *c, const jv *w, unsigned depth, canlin_av_widget *out
                                               K_TOGGLE, K_CHOICE, K_METER, K_SEP, K_SECTION,
                                               K_COLUMNS, K_GRAPH, K_BUTTON, K_ICON};
     static const char *const STYLES[] = {"normal", "muted", "danger", "success", NULL};
-    static const char *const ROLES[] = {"user", "assistant", "system", NULL};
+    /* "system" is reserved for trusted content (UI spec §7) */
+    static const char *const ROLES[] = {"user", "assistant", NULL};
     static const char *const ACTIONS[] = {"submit", NULL};
     int type = 0, needs_id;
     unsigned i;
@@ -950,13 +962,13 @@ static int widget_of(vctx *c, const jv *w, unsigned depth, canlin_av_widget *out
         out->level = (int)d;
         return 0;
     case CANLIN_AV_TEXT:
-        if (str_of(c, w, "text", 1, CANLIN_UI_MAX_TEXT, &out->text) < 0)
+        if (str_ml(c, w, "text", 1, CANLIN_UI_MAX_TEXT, 1, &out->text) < 0)
             return -1;
         return enum_of(c, w, "style", 0, STYLES, &out->style);
     case CANLIN_AV_BUBBLE:
         if (enum_of(c, w, "role", 1, ROLES, &out->role) < 0)
             return -1;
-        return str_of(c, w, "text", 1, CANLIN_UI_MAX_TEXT, &out->text);
+        return str_ml(c, w, "text", 1, CANLIN_UI_MAX_TEXT, 1, &out->text);
     case CANLIN_AV_FIELD:
         if (str_of(c, w, "label", 1, CANLIN_UI_MAX_LABEL, &out->label) < 0 ||
             str_of(c, w, "placeholder", 0, CANLIN_UI_MAX_LABEL, &out->placeholder) < 0)
@@ -968,7 +980,7 @@ static int widget_of(vctx *c, const jv *w, unsigned depth, canlin_av_widget *out
         return str_of(c, w, "value", 0, out->max, &out->value);
     case CANLIN_AV_AREA:
         if (str_of(c, w, "label", 1, CANLIN_UI_MAX_LABEL, &out->label) < 0 ||
-            str_of(c, w, "value", 0, CANLIN_UI_MAX_TEXT, &out->value) < 0)
+            str_ml(c, w, "value", 0, CANLIN_UI_MAX_TEXT, 1, &out->value) < 0)
             return -1;
         d = 4;
         if (num_of(c, w, "rows", 0, 1, 2, 20, &d) < 0)
@@ -1000,7 +1012,7 @@ static int widget_of(vctx *c, const jv *w, unsigned depth, canlin_av_widget *out
                 return fail(c, "must be a string");
             if (e->len > CANLIN_UI_MAX_LABEL)
                 return fail(c, "exceeds 256 bytes");
-            if (has_control(e->s, e->len))
+            if (has_control(e->s, e->len, 0))
                 return fail(c, "contains a control character");
             opts[i].s = e->s;
             opts[i].len = e->len;
@@ -1771,7 +1783,7 @@ unsigned canlin_assistant_view_submit_refused(const canlin_assistant_view *av)
 /* ---- rendering through the ui object ---- */
 
 static const char *const STYLE_NAMES[] = {"normal", "muted", "danger", "success"};
-static const char *const ROLE_NAMES[] = {"user", "assistant", "system"};
+static const char *const ROLE_NAMES[] = {"user", "assistant"};
 
 static void draw_list(canlin_assistant_view *av, lua_State *L, int ui,
                       const canlin_av_widget *ws, unsigned n);

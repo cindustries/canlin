@@ -207,6 +207,41 @@ static void test_valid(void)
     canlin_assistant_view_free(av);
 }
 
+/* Multi-line content (UI spec §7): '\n' and '\t' pass in text/bubble text and area value
+ * and arrive unchanged in the model. */
+static const char *MULTI =
+    "{\"title\":\"M\",\"widgets\":["
+    "{\"type\":\"text\",\"text\":\"eins\\nzwei\\tdrei\"},"
+    "{\"type\":\"bubble\",\"role\":\"user\",\"text\":\"a\\nb\"},"
+    "{\"type\":\"bubble\",\"role\":\"assistant\",\"text\":\"\\tx\\n\\ny\"},"
+    "{\"type\":\"area\",\"id\":\"note\",\"label\":\"Notiz\",\"value\":\"l1\\nl2\\t\"},"
+    "{\"type\":\"button\",\"id\":\"ok\",\"label\":\"OK\",\"action\":\"submit\"}]}";
+
+static void test_multiline(void)
+{
+    canlin_assistant_view *av = canlin_assistant_view_new();
+    canlin_av_result r;
+    const canlin_av_widget *w;
+    const canlin_av_model *m;
+    canlin_assistant_view_set_scope(av, 1, 1);
+    CHECK(setv(av, "m1", MULTI, &r) == CANLIN_AV_OK && r.status == CANLIN_AV_OK);
+    if (r.status != CANLIN_AV_OK)
+        fprintf(stderr, "multiline: %s %s\n", r.err.path, r.err.message);
+    m = canlin_assistant_view_model(av);
+    CHECK(m != NULL && m->nwidgets == 5);
+    if (m == NULL || m->nwidgets != 5) {
+        canlin_assistant_view_free(av);
+        return;
+    }
+    w = m->widgets;
+    CHECK(w[0].text.len == 14 && memcmp(w[0].text.s, "eins\nzwei\tdrei", 14) == 0);
+    CHECK(w[1].role == 0 && w[1].text.len == 3 && memcmp(w[1].text.s, "a\nb", 3) == 0);
+    CHECK(w[2].role == 1 && w[2].text.len == 5 && memcmp(w[2].text.s, "\tx\n\ny", 5) == 0);
+    CHECK(w[3].value.len == 6 && memcmp(w[3].value.s, "l1\nl2\t", 6) == 0);
+    check_splits(MULTI, strlen(MULTI));
+    canlin_assistant_view_free(av);
+}
+
 /* ---- every invalid case of §7 leaves the old view and names the path ---- */
 
 typedef struct bad_case {
@@ -267,9 +302,55 @@ static const bad_case BAD[] = {
      "\"label\":\"a\"}],\"right\":[{\"type\":\"toggle\",\"id\":\"x\",\"label\":\"b\"}]}]}",
      "$.widgets[0].right[0].id"},
     {"{\"widgets\":[{\"type\":\"icon\",\"name\":\"logo\"}]}", "$.widgets[0].name"},
-    /* control characters in any string: C0, DEL, C1, also in labels and titles */
+    /* control characters: C0, DEL, C1 in any string; '\n' and '\t' only in multi-line
+     * content (text/bubble text, area value), never in ids, labels, titles, options, enums */
     {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\u0007b\"}]}", "$.widgets[0].text"},
-    {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\nb\"}]}", "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\rb\"}]}", "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\u000bb\"}]}", "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\n\\u001bb\"}]}", "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"bubble\",\"role\":\"user\",\"text\":\"a\\u0085b\"}]}",
+     "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"bubble\",\"role\":\"user\",\"text\":\"a\\u007fb\"}]}",
+     "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"area\",\"id\":\"a\",\"label\":\"a\",\"value\":\"a\\rb\"}]}",
+     "$.widgets[0].value"},
+    {"{\"widgets\":[{\"type\":\"area\",\"id\":\"a\",\"label\":\"a\",\"value\":\"a\\u0000\"}]}",
+     "$.widgets[0].value"},
+    {"{\"widgets\":[{\"type\":\"area\",\"id\":\"a\",\"label\":\"a\\nb\"}]}",
+     "$.widgets[0].label"},
+    {"{\"widgets\":[{\"type\":\"heading\",\"text\":\"a\\nb\"}]}", "$.widgets[0].text"},
+    {"{\"widgets\":[{\"type\":\"field\",\"id\":\"a\\nb\",\"label\":\"a\"}]}",
+     "$.widgets[0].id"},
+    {"{\"widgets\":[{\"type\":\"field\",\"id\":\"f\",\"label\":\"a\\tb\"}]}",
+     "$.widgets[0].label"},
+    {"{\"widgets\":[{\"type\":\"field\",\"id\":\"f\",\"label\":\"a\",\"value\":\"a\\nb\"}]}",
+     "$.widgets[0].value"},
+    {"{\"widgets\":[{\"type\":\"field\",\"id\":\"f\",\"label\":\"a\",\"placeholder\":\"\\t\"}]}",
+     "$.widgets[0].placeholder"},
+    {"{\"widgets\":[{\"type\":\"button\",\"id\":\"ok\",\"label\":\"a\\nb\",\"action\":\"submit\"}]}",
+     "$.widgets[0].label"},
+    {"{\"widgets\":[{\"type\":\"section\",\"title\":\"a\\nb\",\"widgets\":[]}]}",
+     "$.widgets[0].title"},
+    {"{\"widgets\":[{\"type\":\"choice\",\"id\":\"c\",\"label\":\"a\",\"options\":[\"x\",\"x\\ny\"]}]}",
+     "$.widgets[0].options[1]"},
+    {"{\"widgets\":[{\"type\":\"choice\",\"id\":\"c\",\"label\":\"a\",\"options\":[\"x\\ty\"]}]}",
+     "$.widgets[0].options[0]"},
+    {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\",\"style\":\"muted\\n\"}]}",
+     "$.widgets[0].style"},
+    {"{\"widgets\":[{\"type\":\"bubble\",\"role\":\"user\\n\",\"text\":\"a\"}]}",
+     "$.widgets[0].role"},
+    {"{\"widgets\":[{\"type\":\"graph\",\"id\":\"g\",\"nodes\":[{\"id\":\"a\",\"title\":\"a\\nb\","
+     "\"x\":0,\"y\":0}],\"edges\":[]}]}",
+     "$.widgets[0].nodes[0].title"},
+    {"{\"widgets\":[{\"type\":\"graph\",\"id\":\"g\",\"nodes\":[{\"id\":\"a\",\"x\":0,\"y\":0,"
+     "\"body\":[{\"kind\":\"text\",\"text\":\"a\\nb\"}]}],\"edges\":[]}]}",
+     "$.widgets[0].nodes[0].body[0].text"},
+    /* the system role is reserved for trusted content (UI spec §7) */
+    {"{\"widgets\":[{\"type\":\"bubble\",\"role\":\"system\",\"text\":\"a\"}]}",
+     "$.widgets[0].role"},
+    {"{\"widgets\":[{\"type\":\"separator\"},{\"type\":\"section\",\"title\":\"s\",\"widgets\":["
+     "{\"type\":\"bubble\",\"role\":\"system\",\"text\":\"a\"}]}]}",
+     "$.widgets[1].widgets[0].role"},
     {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\u007fb\"}]}", "$.widgets[0].text"},
     {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\u0085b\"}]}", "$.widgets[0].text"},
     {"{\"widgets\":[{\"type\":\"text\",\"text\":\"a\\u0000b\"}]}", "$.widgets[0].text"},
@@ -833,6 +914,45 @@ static void drag(vh *h, int x0, int y0, int x1, int y1)
     h->t += 1000;
 }
 
+/* '\n' in text and bubble renders as a line break through ui:text / ui:bubble; an area's
+ * initial value with '\n'/'\t' is submitted escaped as JSON. */
+static void test_multiline_render(void)
+{
+    vh h;
+    const canlin_ui_rect *a, *b, *c, *btn;
+    canlin_av_submission s;
+    int x, y;
+    vh_init(&h, 600, 900);
+    vh_set(&h, MULTI);
+    pump(&h);
+    /* text: "eins" | "zwei\tdrei" */
+    a = find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 0);
+    b = find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 1);
+    CHECK(a && b && !find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 2));
+    CHECK(a && b && a->off == 0 && a->len == 4 && b->off == 5 && b->len == 9 && b->y > a->y);
+    /* user bubble "a" | "b"; assistant bubble "\tx" | "" | "y" */
+    a = find(&h, CANLIN_UI_W_BUBBLE, CANLIN_UI_P_LINE, 0);
+    b = find(&h, CANLIN_UI_W_BUBBLE, CANLIN_UI_P_LINE, 1);
+    CHECK(a && b && a->off == 0 && a->len == 1 && b->off == 2 && b->len == 1 && b->y > a->y);
+    a = find(&h, CANLIN_UI_W_BUBBLE, CANLIN_UI_P_LINE, 2);
+    b = find(&h, CANLIN_UI_W_BUBBLE, CANLIN_UI_P_LINE, 3);
+    c = find(&h, CANLIN_UI_W_BUBBLE, CANLIN_UI_P_LINE, 4);
+    CHECK(a && b && c && !find(&h, CANLIN_UI_W_BUBBLE, CANLIN_UI_P_LINE, 5));
+    CHECK(a && b && c && a->off == 0 && a->len == 2 && b->off == 3 && b->len == 0 &&
+          c->off == 4 && c->len == 1 && b->y > a->y && c->y > b->y);
+    btn = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(btn != NULL && find(&h, CANLIN_UI_W_AREA, CANLIN_UI_P_BOX, 0) != NULL);
+    if (btn) {
+        cx(btn, &x, &y);
+        click(&h, x, y);
+        CHECK(canlin_assistant_view_take(h.av, &s) == 1);
+        CHECK_STR(s.json, "{\"revision\":1,\"action\":\"ok\",\"values\":{\"note\":"
+                          "\"l1\\u000al2\\u0009\"}}");
+        canlin_av_submission_free(&s);
+    }
+    vh_done(&h);
+}
+
 static void test_graph_round_trip(void)
 {
     vh h;
@@ -1031,11 +1151,13 @@ static void test_shell_frame(void)
 int main(void)
 {
     test_valid();
+    test_multiline();
     test_invalid();
     test_limits();
     test_calls();
     test_stale_click();
     test_submit();
+    test_multiline_render();
     test_graph_round_trip();
     test_shell_frame();
     if (failures) {
