@@ -64,6 +64,9 @@ typedef struct canlin_llm_preset {
     const char *default_model;  /* "" = the user must choose */
     int tools, streaming;       /* configured capability facts */
     int local;                  /* loopback preset: plain http allowed, no key needed */
+    /* openai-chat only: send "stream_options":{"include_usage":true}. Set only for
+     * endpoints documented to accept it, never inferred; custom profiles never send it. */
+    int stream_usage;
 } canlin_llm_preset;
 
 size_t canlin_llm_preset_count(void);

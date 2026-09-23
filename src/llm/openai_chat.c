@@ -7,6 +7,9 @@
  * so nothing from a malformed chunk reaches the module. Tool calls are assembled from
  * index-based deltas and delivered only at finish_reason "tool_calls", complete and with
  * arguments that parse as one JSON object. Success needs finish_reason then [DONE].
+ * With stream_options.include_usage (preset flag) the provider sends one more chunk
+ * between finish_reason and [DONE]: "choices": [] and the usage object; it carries no
+ * content, so it is accepted after finish_reason and only emits usage.
  */
 #include "llm_int.h"
 #include "canlin/json.h"
@@ -33,6 +36,8 @@ static void oa_build(llm_jw *w, const llm_build *b)
     llm_jw_lit(w, "{\"model\":");
     llm_jw_str(w, b->model, strlen(b->model));
     llm_jw_lit(w, ",\"stream\":true");
+    if (b->stream_usage)
+        llm_jw_lit(w, ",\"stream_options\":{\"include_usage\":true}");
     if (b->max_tokens) {
         llm_jw_lit(w, ",\"max_tokens\":");
         llm_jw_uint(w, b->max_tokens);

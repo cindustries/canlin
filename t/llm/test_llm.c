@@ -599,7 +599,9 @@ static void test_golden_request(void)
         "  {role = 'assistant', text = 'Done.'},\n"
         "}, tools = {'set_view'}, max_tokens = 100})";
     static const char golden_head[] =
-        "{\"model\":\"m-1\",\"stream\":true,\"max_tokens\":100,\"messages\":["
+        /* the openai preset sets stream_usage (canlin#51) */
+        "{\"model\":\"m-1\",\"stream\":true,\"stream_options\":{\"include_usage\":true},"
+        "\"max_tokens\":100,\"messages\":["
         "{\"role\":\"system\",\"content\":\"Be brief.\"},"
         "{\"role\":\"user\",\"content\":\"Hallo \\\"Welt\\\"\\n\\t\\u0001 \xc3\xa4\"},"
         "{\"role\":\"assistant\",\"content\":\"Sure.\",\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\","
@@ -903,6 +905,158 @@ static void test_idle_timeout(void)
     h_done(&h);
 }
 
+/* stream_options.include_usage is a preset flag (canlin#51): sent for a preset that sets
+ * it (openai: golden in test_golden_request), absent for one that does not and for a
+ * custom profile. */
+static void test_stream_usage_flag(void)
+{
+    static const char plain_head[] =
+        "{\"model\":\"llama\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    static const char *const ids[] = {"g", "c"};
+    harness h;
+    canlin_llm_profile_config pc;
+    size_t k;
+
+    CHECK(canlin_llm_preset_find("openai")->stream_usage == 1);
+    CHECK(canlin_llm_preset_find("groq")->stream_usage == 0);
+    for (k = 0; k < 2; k++) {
+        char setup[128];
+        const canlin_llm_fixture_record *rec;
+        h_init(&h, 0);
+        memset(&pc, 0, sizeof pc);
+        pc.id = ids[k];
+        pc.model = "llama";
+        if (k == 0) {
+            pc.preset = "groq";
+        } else {
+            pc.preset = "custom";
+            pc.dialect = CANLIN_LLM_DIALECT_OPENAI_CHAT;
+            pc.auth = CANLIN_LLM_AUTH_BEARER;
+            pc.base_url = "https://gw.example/v1";
+        }
+        CHECK(canlin_llm_profile_create(h.llm, &pc) == CANLIN_LLM_OK);
+        CHECK(canlin_llm_profile_set_key(h.llm, ids[k], KEY, strlen(KEY)) == CANLIN_LLM_OK);
+        push_sse(&h, 200, text_stream, 0, 0);
+        snprintf(setup, sizeof setup, "go({messages = {{role = 'user', text = 'hi'}}}, '%s')",
+                 ids[k]);
+        h_load(&h, 0, setup, 1);
+        h_run(&h);
+        CHECK(has(&h.log, "done ok\tend"));
+        rec = canlin_llm_fixture_record_at(h.fx, 0);
+        if (rec && strcmp(rec->body, plain_head) != 0)
+            fprintf(stderr, "body: %s\n", rec->body);
+        CHECK(rec && strcmp(rec->body, plain_head) == 0);
+        CHECK(rec && !strstr(rec->body, "stream_options"));
+        h_done(&h);
+    }
+}
+
+/* With include_usage the provider sends "usage": null in every chunk and one chunk with
+ * "choices": [] and the usage object after finish_reason, before [DONE]. */
+static const char usage_stream[] =
+    "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,"
+    "\"delta\":{\"role\":\"assistant\",\"content\":\"Hal\"},\"finish_reason\":null}],\"usage\":null}\n\n"
+    "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},"
+    "\"finish_reason\":null}],\"usage\":null}\n\n"
+    "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+    "\"usage\":null}\n\n"
+    "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{"
+    "\"prompt_tokens\":12,\"completion_tokens\":2,\"total_tokens\":14,"
+    "\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},"
+    "\"completion_tokens_details\":{\"reasoning_tokens\":0}}}\n\n";
+
+static void test_usage_chunk(void)
+{
+    static char body[2048];
+    unsigned seed;
+    harness h;
+    snprintf(body, sizeof body, "%sdata: [DONE]\n\n", usage_stream);
+    run_one(&h, body, 1, 0, req_simple); /* one byte at a time */
+    CHECK(has(&h.log, "T=Hallo"));
+    CHECK(has(&h.log, "usage\t12\t2"));
+    CHECK(count(&h.log, "usage\t") == 1);
+    CHECK(has(&h.log, "done ok\tend"));
+    CHECK(count(&h.log, "done ") == 1);
+    CHECK(!has(&h.log, "BAD"));
+    h_done(&h);
+    for (seed = 1; seed <= 16; seed++) {
+        run_one(&h, body, 23, seed * 104729u, req_simple);
+        CHECK(has(&h.log, "T=Hallo") && has(&h.log, "usage\t12\t2") &&
+              has(&h.log, "done ok\tend"));
+        h_done(&h);
+    }
+    /* the usage chunk is not the terminal marker: EOF after it still fails */
+    expect_fail(usage_stream, req_simple,
+                "done fail\tunavailable\topenai-chat protocol error: stream ended before [DONE]");
+    /* content after finish_reason is still refused, usage chunk or not */
+    expect_fail("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x\"}}],"
+                "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n"
+                "data: [DONE]\n\n",
+                req_simple, "done fail\tunavailable\topenai-chat protocol error: content after finish_reason");
+    /* tool calls, then the usage chunk, then [DONE] */
+    snprintf(body, sizeof body,
+             "%s"
+             "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,"
+             "\"function\":{\"arguments\":\"{}\"}}]}}],\"usage\":null}\n\n"
+             "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
+             "\"usage\":null}\n\n"
+             "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":9}}\n\n"
+             "data: [DONE]\n\n",
+             tool_stream_head);
+    run_one(&h, body, 11, 7, req_tools);
+    CHECK(has(&h.log, "tool\tcall_A\tset_view\t{}"));
+    CHECK(has(&h.log, "usage\t5\t9"));
+    CHECK(has(&h.log, "done ok\ttool"));
+    CHECK(strstr(h.log.buf, "tool\tcall_A") < strstr(h.log.buf, "usage\t5\t9"));
+    h_done(&h);
+}
+
+/* MiniMax and Moonshot OpenAI-compatible presets (canlin#51, Langertha MiniMax.pm and
+ * Moonshot.pm): usable now, request to {base}/chat/completions with a bearer key. */
+static void test_openai_compatible_presets(void)
+{
+    static const struct {
+        const char *id, *url, *model;
+    } cases[] = {{"minimax-openai", "https://api.minimax.io/v1/chat/completions", "MiniMax-M3"},
+                 {"moonshot-openai", "https://api.moonshot.ai/v1/chat/completions", "kimi-k3"}};
+    size_t i;
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        const canlin_llm_preset *pre = canlin_llm_preset_find(cases[i].id);
+        canlin_llm_profile_config pc;
+        const canlin_llm_fixture_record *rec;
+        char model[64];
+        harness h;
+        CHECK(pre != NULL);
+        if (pre == NULL)
+            continue;
+        CHECK(pre->dialect == CANLIN_LLM_DIALECT_OPENAI_CHAT);
+        CHECK(canlin_llm_dialect_available(pre->dialect));
+        CHECK(pre->auth == CANLIN_LLM_AUTH_BEARER && pre->key == CANLIN_LLM_KEY_REQUIRED);
+        CHECK(pre->tools && pre->streaming && !pre->local && !pre->stream_usage);
+        h_init(&h, 0);
+        memset(&pc, 0, sizeof pc);
+        pc.id = "p";
+        pc.preset = cases[i].id;
+        CHECK(canlin_llm_profile_create(h.llm, &pc) == CANLIN_LLM_OK);
+        CHECK(canlin_llm_profile_set_key(h.llm, "p", KEY, strlen(KEY)) == CANLIN_LLM_OK);
+        push_sse(&h, 200, text_stream, 0, 0);
+        h_load(&h, 0, req_tools, 1);
+        h_run(&h);
+        CHECK(has(&h.log, "done ok\tend"));
+        rec = canlin_llm_fixture_record_at(h.fx, 0);
+        CHECK(rec && strcmp(rec->url, cases[i].url) == 0);
+        CHECK(rec && strstr(rec->headers, "Authorization: Bearer " KEY "\n"));
+        snprintf(model, sizeof model, "{\"model\":\"%s\",\"stream\":true,\"messages\"",
+                 cases[i].model);
+        CHECK(rec && strncmp(rec->body, model, strlen(model)) == 0);
+        h_done(&h);
+    }
+    /* the Anthropic-compatible entries stay listed and unavailable (canlin#39) */
+    CHECK(!canlin_llm_dialect_available(canlin_llm_preset_find("minimax")->dialect));
+    CHECK(!canlin_llm_dialect_available(canlin_llm_preset_find("moonshot")->dialect));
+}
+
 static void test_origin(void)
 {
     char o[128];
@@ -936,6 +1090,9 @@ int main(void)
     test_https_rule();
     test_not_assistant_and_inflight();
     test_idle_timeout();
+    test_stream_usage_flag();
+    test_usage_chunk();
+    test_openai_compatible_presets();
     printf("llm: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

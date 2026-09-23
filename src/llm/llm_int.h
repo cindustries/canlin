@@ -65,6 +65,7 @@ typedef struct llm_build {
     const llm_tool *const *tools;
     size_t ntools;
     unsigned long max_tokens;   /* 0 = not sent */
+    int stream_usage;           /* openai-chat: ask for the usage chunk (preset flag) */
 } llm_build;
 
 /* ---- request core services used by dialects (llm.c) ---- */

@@ -26,39 +26,49 @@
  * ("" here), except ollama which takes Ollama.pm's default. anthropic, minimax and
  * moonshot use their Anthropic-compatible engines (Anthropic.pm, MiniMaxAnthropic.pm,
  * MoonshotAnthropic.pm) and stay unavailable until anthropic-messages exists
- * (canlin#39, spec §2.2). */
+ * (canlin#39, spec §2.2). minimax-openai and moonshot-openai are the same providers'
+ * OpenAI-compatible endpoints (MiniMax.pm, Moonshot.pm; canlin#51).
+ * stream_usage (stream_options.include_usage) is set only where the provider documents
+ * it: OpenAI. Langertha sends it for no engine, so every other preset leaves it off
+ * until a connection test on that endpoint shows it is accepted. */
 static const canlin_llm_preset presets[] = {
     {"openai", "OpenAI", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.openai.com/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-5.6-terra", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-5.6-terra", 1, 1, 0, 1},
     {"anthropic", "Anthropic", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
      "https://api.anthropic.com", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_REQUIRED,
-     "claude-sonnet-5", 1, 1, 0},
+     "claude-sonnet-5", 1, 1, 0, 0},
     {"groq", "Groq", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.groq.com/openai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0, 0},
     {"mistral", "Mistral", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.mistral.ai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "mistral-small-latest", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "mistral-small-latest", 1, 1, 0, 0},
     {"deepseek", "DeepSeek", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.deepseek.com",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "deepseek-flash", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "deepseek-flash", 1, 1, 0, 0},
     {"openrouter", "OpenRouter", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://openrouter.ai/api/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0, 0},
     {"xai", "xAI", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.x.ai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "grok-4.6", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "grok-4.6", 1, 1, 0, 0},
     {"cerebras", "Cerebras", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.cerebras.ai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-oss-120b", 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-oss-120b", 1, 1, 0, 0},
     {"minimax", "MiniMax", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
      "https://api.minimax.io/anthropic", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_REQUIRED,
-     "MiniMax-M3", 1, 1, 0},
+     "MiniMax-M3", 1, 1, 0, 0},
     {"moonshot", "Moonshot", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
      "https://api.moonshot.ai/anthropic", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_REQUIRED,
-     "kimi-k3", 1, 1, 0},
+     "kimi-k3", 1, 1, 0, 0},
+    {"minimax-openai", "MiniMax (OpenAI API)", CANLIN_LLM_DIALECT_OPENAI_CHAT,
+     "https://api.minimax.io/v1", CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED,
+     "MiniMax-M3", 1, 1, 0, 0},
+    {"moonshot-openai", "Moonshot (OpenAI API)", CANLIN_LLM_DIALECT_OPENAI_CHAT,
+     "https://api.moonshot.ai/v1", CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED,
+     "kimi-k3", 1, 1, 0, 0},
     {"ollama", "Ollama", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:11434/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "llama3.3", 1, 1, 1},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "llama3.3", 1, 1, 1, 0},
     {"lmstudio", "LM Studio", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:1234/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0},
     {"vllm", "vLLM", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:8000/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0},
     {"llamacpp", "llama.cpp", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:8080/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0},
 };
 
 #define NPRESETS (sizeof presets / sizeof presets[0])
@@ -228,6 +238,7 @@ typedef struct profile {
     canlin_llm_auth_scheme auth;
     canlin_llm_key_need keyneed;
     int local, tools;
+    int stream_usage; /* preset flag (openai-chat include_usage) */
     /* session credential (spec §5): bound to origin + auth at set time */
     char *key;
     size_t keylen;
@@ -375,6 +386,7 @@ static int prof_fill(canlin_llm *llm, profile *p, const canlin_llm_profile_confi
                                                      : CANLIN_LLM_KEY_OPTIONAL;
         p->local = cfg->local != 0;
         p->tools = cfg->tools != 0;
+        p->stream_usage = 0; /* preset flag only: never guessed for an endpoint */
         base = cfg->base_url;
         model = cfg->model;
         title = cfg->title ? cfg->title : cfg->id;
@@ -387,6 +399,7 @@ static int prof_fill(canlin_llm *llm, profile *p, const canlin_llm_profile_confi
         p->keyneed = pre->key;
         p->local = pre->local;
         p->tools = pre->tools;
+        p->stream_usage = pre->stream_usage;
         base = cfg->base_url ? cfg->base_url : pre->base_url;
         model = cfg->model ? cfg->model : pre->default_model;
         title = cfg->title ? cfg->title : pre->title;
@@ -1256,6 +1269,7 @@ static int l_request(lua_State *L)
     b.tools = tl;
     b.ntools = ntools;
     b.max_tokens = (unsigned long)maxtok;
+    b.stream_usage = p->stream_usage;
     llm_jw_init(&r->body, CANLIN_LLM_REQUEST_MAX);
     d->build(&r->body, &b);
     if (r->body.err) {
