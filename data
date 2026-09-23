@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T05:19:00Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T03:51:04Z
+id: 22
+priority: medium
+started: 2026-09-23T05:06:43Z
+status: review
+tags:
+- ui
+- font
+title: Built-in Latin subset font with known licence + replacement glyph
+updated: 2026-09-23T05:19:00Z
+---
+
+Replace ProggyClean placeholder (13px, blurry at 16). From canlin#17.
+
+Merged 1e49a2b. DejaVu Sans 2.37 subset (38.8 KB), U+25A1 fallback, ProggyClean dropped (nk.h flag change accepted). Host + ASan/UBSan green. i686 skipped. Atlas memory ~2x: up to 4 MiB at 200% -> P2 check (#13).
