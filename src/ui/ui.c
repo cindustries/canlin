@@ -1769,3 +1769,17 @@ int canlin_ui_push(lua_State *L, canlin_ui_view *v)
     lua_setmetatable(L, proxy);
     return 1;
 }
+
+/* ==== shell support (canlin#35) ==========================================================
+ * Read-only accessors the shell (src/shell) needs to draw chrome with the same theme and
+ * to redraw a view region only when its module finished a new frame. */
+
+const canlin_theme *canlin_ui_theme(const canlin_ui *ui)
+{
+    return ui ? &ui->theme : NULL;
+}
+
+uint32_t canlin_ui_view_frames(const canlin_ui_view *v)
+{
+    return v ? v->frame : 0;
+}

@@ -244,6 +244,12 @@ struct nk_context *canlin_ui_view_nk(canlin_ui_view *v);
 /* Returns 1 if s[0..len) is valid UTF-8 (no overlongs, surrogates or > U+10FFFF). */
 int canlin_ui_utf8_valid(const char *s, size_t len);
 
+/* ==== shell support (canlin#35) ====
+ * The resolved theme of ui (chrome is drawn with it; read-only, lives as long as ui). */
+const canlin_theme *canlin_ui_theme(const canlin_ui *ui);
+/* Frames started on v so far; changes whenever the view has a new command list. */
+uint32_t canlin_ui_view_frames(const canlin_ui_view *v);
+
 #ifdef __cplusplus
 }
 #endif
