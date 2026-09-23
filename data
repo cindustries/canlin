@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-23T18:19:30Z
+id: 62
+priority: low
+status: backlog
+tags:
+- net
+- llm
+title: 'Net: map transport error codes to connection-test categories; CANLIN_VERSION
+  in build'
+updated: 2026-09-23T18:19:30Z
+---
+
+Providers spec §6 categories vs HTTP spec §7 codes. User-Agent is CanLin/0.0-dev until CANLIN_VERSION is defined by the build.
