@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T05:19:01Z
+id: 43
+priority: medium
+status: backlog
+tags:
+- release
+- licence
+title: Ship third-party licence texts with every build/package
+updated: 2026-09-23T05:19:01Z
+---
+
+DejaVu licence must accompany every copy; also Nuklear, Lua, stb notices. From canlin#22.
