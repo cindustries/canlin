@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-09-23T05:40:24Z
+id: 50
+priority: high
+status: backlog
+tags:
+- spec
+- modules
+- security
+title: Module roles, capabilities, device modules (spec draft + impl)
+updated: 2026-09-23T17:34:11Z
+---
+
+docs/superpowers/specs/2026-09-23-canlin-module-roles-design.md; open questions §7.
+
+Accounts spec §6.1 adds bundle key meta#cloud (module-declared cloud-synced stores) + per-module user pause as trusted config; include in module manifest work.
