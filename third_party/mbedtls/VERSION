@@ -1,0 +1,22 @@
+Mbed TLS 3.6.7 (3.6 LTS branch)
+source: https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2
+sha256: a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6 (5473689 bytes)
+verified: 2026-09-23 against the checksum published with the release
+(mbedtls-3.6.7-sha256sum.txt, the release notes and the GitHub asset digest agree).
+
+Contents, unmodified from the tarball:
+- library/*.c, library/*.h (without library/Makefile and CMakeLists.txt; the release
+  tarball already contains the generated sources such as error.c and
+  psa_crypto_driver_wrappers.h)
+- include/mbedtls/, include/psa/ (without include/CMakeLists.txt)
+- LICENSE (Apache-2.0 OR GPL-2.0-or-later; CanLin uses it under Apache-2.0). The
+  tarball ships no NOTICE file.
+Not vendored: 3rdparty/ (Everest, p256-m: not enabled), programs/, tests/, framework/,
+scripts/, docs/, configs/.
+
+Configuration: never by editing include/mbedtls/mbedtls_config.h. mk/net.mk compiles
+with -DMBEDTLS_CONFIG_FILE="canlin_mbedtls_config.h" from src/net/ (HTTP transport
+spec §5): no AESNI, PadLock or other SIMD paths, identical on host and TARGET=i686.
+
+Read-only. Any fix is a patch file plus ticket.
+Check: `sha256sum -c SHA256SUMS` from this dir (one line per vendored file).

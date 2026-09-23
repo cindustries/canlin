@@ -12,6 +12,7 @@ licence text next to it, and every build or package ships these texts (canlin#43
 | Lua 5.4.9 | `third_party/lua` | MIT |
 | Nuklear (incl. embedded stb_truetype, stb_rect_pack) | `third_party/nuklear` | MIT or public domain (Unlicense), our choice: MIT |
 | Inter 4.1 Regular (Latin subset) | `third_party/fonts/inter` | SIL Open Font License 1.1 (embedding and subsetting allowed; no Reserved Font Name, so the subset keeps the name "Inter"; licence text must accompany every copy) |
+| Mbed TLS 3.6.7 (library only) | `third_party/mbedtls` | Apache-2.0 OR GPL-2.0-or-later, our choice: **Apache-2.0** (no NOTICE file upstream) |
 | Adapted code from Nuklear's rawfb demo | `src/render/render.c` | MIT (© Patrick Rudolph), attribution kept in the file |
 
 ## Planned (system design §4)
@@ -20,7 +21,6 @@ licence text next to it, and every build or package ships these texts (canlin#43
 |---|---|---|
 | SQLite | public domain | |
 | sqlite-vec | MIT or Apache-2.0 | |
-| mbedtls | Apache-2.0 or GPL-2.0-or-later | we use it under **Apache-2.0** |
 | monocypher | CC0 or BSD-2-Clause | |
 | cmp (MessagePack) | MIT | |
 | libbee | same terms as Perl (Artistic-1.0 or GPL-1.0-or-later) | own library; see below |
