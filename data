@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-23T03:51:05Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T03:36:46Z
+id: 17
+priority: high
+started: 2026-09-23T03:36:52Z
+status: review
+tags:
+- ui
+- render
+- theme
+title: 'UI step 1: vendor Nuklear + stb_truetype, offscreen rasterizer, theme resolution'
+updated: 2026-09-23T03:51:05Z
+---
+
+UI spec 2026-09-23 §6, §9, §11.1.
+
+Merged 2184ee4. 7 suites host + ASan/UBSan green. i686 skipped (x87 float determinism under -mno-sse worth checking). Spec clarified.
