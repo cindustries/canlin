@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T02:17:21Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-22T19:40:34Z
+id: 9
+priority: high
+started: 2026-09-23T02:06:43Z
+status: review
+tags:
+- runtime
+- lua
+- events
+title: 'Module callback seam: call init/event/sync/draw under budget from src/ev'
+updated: 2026-09-23T02:17:21Z
+---
+
+Sandbox only runs chunks; needs budgeted call of returned table fields, bounded arg/result marshalling, wiring to cl_ev delivery. Blocked on core API spec signatures.
+
+Started against core API spec a35524a §4-§7.
+
+Merged a600dfd (dfff43a). 989 module checks, host + ASan/UBSan green. i686 skipped. Implementation choices recorded in core API spec §6.
