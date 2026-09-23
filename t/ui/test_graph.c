@@ -550,7 +550,9 @@ static void test_rejections(void)
         press(&h, cx(a), cy(a));
         input(&h, CANLIN_UI_IN_MOTION, bx, by, 0);
         h_drain(&h);
-        CHECK(nk_circles(&h, t.color[CANLIN_THEME_DANGER]) == 1); /* B.j only */
+        /* Was "== 1, B.j only": canlin#36 also marks A.o (own node) and B.i (A.o -> B.i
+         * exists); per-port colours are asserted in test_drag_marking. */
+        CHECK(nk_circles(&h, t.color[CANLIN_THEME_DANGER]) == 3);
         release(&h, bx, by);
         CHECK(nk_circles(&h, t.color[CANLIN_THEME_DANGER]) == 0);
     }
@@ -904,6 +906,132 @@ static void test_render(void)
     h_done(&h);
 }
 
+/* canlin#36: the title separator of a node stays inside the node rect (spec §6.2), at
+ * 100/150/200 %. Beside the node's right border no pixel carries the separator's solid
+ * muted colour (the grid is muted at alpha 96, so never exactly muted). */
+static void test_node_separator_inside(void)
+{
+    static const int scales[] = {100, 150, 200};
+    enum { W = 1600, H = 1200 };
+    static unsigned char px[W * H * 3];
+    size_t k;
+    canlin_theme t;
+    canlin_theme_builtin(&t);
+    for (k = 0; k < 3; k++) {
+        int s = scales[k], w = 8 * s, vh = 6 * s;
+        harness h;
+        canlin_render r;
+        const canlin_ui_rect *a;
+        float em;
+        h_init(&h, 1.0f, module_src("nil", 0, "{ id = 'flow' }"), w, vh);
+        CHECK(canlin_ui_output_set_scale(h.out, s) == CANLIN_UI_OK);
+        h_drain(&h);
+        em = canlin_ui_view_em(canlin_module_view(h.m));
+        CHECK(em == 16.0f * (float)s / 100.0f);
+        CHECK(canlin_render_init(&r, px, w, vh, (size_t)w * 3, NULL, NULL) == 0);
+        canlin_render_begin(&r);
+        canlin_render_clear(&r, nk_rgb(255, 0, 255));
+        canlin_ui_view_render(canlin_module_view(h.m), &r);
+        canlin_render_end(&r);
+        a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0); /* node A: no port on the title row */
+        CHECK(a != NULL);
+        if (a) {
+            int sy = a->y + (int)(2.0f * em), th = em / 8.0f < 1.0f ? 1 : (int)(em / 8.0f);
+            int x, y, out = 0;
+            CHECK(px_is(px, w, a->x + a->w / 2, sy, t.color[CANLIN_THEME_MUTED]));
+            for (y = sy - 2 * th; y <= sy + 2 * th; y++)
+                for (x = a->x + a->w; x < a->x + a->w + 6; x++)
+                    out += px_is(px, w, x, y, t.color[CANLIN_THEME_MUTED]);
+            CHECK(out == 0);
+        }
+        h_done(&h);
+    }
+}
+
+/* Filled circle of colour c whose centre lies in port target r. */
+static int dot_is(harness *h, const canlin_ui_rect *r, canlin_theme_rgb c)
+{
+    const struct nk_command *cmd;
+    struct nk_context *ctx = canlin_ui_view_nk(canlin_module_view(h->m));
+    if (r == NULL)
+        return 0;
+    nk_foreach(cmd, ctx)
+    {
+        if (cmd->type == NK_COMMAND_CIRCLE_FILLED) {
+            const struct nk_command_circle_filled *f = (const void *)cmd;
+            int x = f->x + f->w / 2, y = f->y + f->h / 2;
+            if (x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h)
+                return f->color.r == c.r && f->color.g == c.g && f->color.b == c.b;
+        }
+    }
+    return 0;
+}
+
+/* canlin#36: during a port drag the preview marks every locally rejected drop visible
+ * beforehand (spec §5.2) in danger: the dragging node's own ports, an input that already
+ * carries the identical edge, and a type clash. A lifted edge does not mark its own
+ * input (dropping it back is a no-op). Visual only: the drops still produce no edit. */
+static void test_drag_marking(void)
+{
+    harness h;
+    canlin_theme t;
+    canlin_theme_rgb dg, ok;
+    const canlin_ui_rect *ao, *bi, *bj, *bp, *ck;
+    canlin_theme_builtin(&t);
+    dg = t.color[CANLIN_THEME_DANGER];
+    ok = t.color[CANLIN_THEME_ACCENT];
+
+    base(&h, "nil");
+    ao = grec(&h, 0, CANLIN_UI_P_PORT, 0, 0);
+    bi = grec(&h, 0, CANLIN_UI_P_PORT, 1, 0);
+    bj = grec(&h, 0, CANLIN_UI_P_PORT, 1, 1);
+    bp = grec(&h, 0, CANLIN_UI_P_PORT, 1, 2);
+    ck = grec(&h, 0, CANLIN_UI_P_PORT, 2, 0);
+    CHECK(ao && bi && bj && bp && ck);
+    if (!(ao && bi && bj && bp && ck)) {
+        h_done(&h);
+        return;
+    }
+
+    /* from A.o (edge A.o -> B.i exists) */
+    press(&h, cx(ao), cy(ao));
+    input(&h, CANLIN_UI_IN_MOTION, 488, 328, 0);
+    h_drain(&h);
+    CHECK(dot_is(&h, ao, dg)); /* own node */
+    CHECK(dot_is(&h, bi, dg)); /* identical edge exists */
+    CHECK(dot_is(&h, bj, dg)); /* type t vs u */
+    CHECK(dot_is(&h, bp, ok)); /* output: not marked (unchanged scope) */
+    CHECK(dot_is(&h, ck, ok)); /* untyped input: accepted */
+    release(&h, cx(bi), cy(bi));
+    CHECK(edits(&h) == 0); /* the marked drop is still rejected without an edit */
+    CHECK(nk_circles(&h, dg) == 0);
+    gap(&h);
+
+    /* from B.i: lifts A.o -> B.i, the source is A.o; B.i itself is not marked */
+    press(&h, cx(bi), cy(bi));
+    input(&h, CANLIN_UI_IN_MOTION, 488, 328, 0);
+    h_drain(&h);
+    CHECK(dot_is(&h, ao, dg));
+    CHECK(dot_is(&h, bi, ok));
+    CHECK(dot_is(&h, bj, dg));
+    CHECK(dot_is(&h, ck, ok));
+    release(&h, cx(bi), cy(bi)); /* dropped back: nothing */
+    CHECK(edits(&h) == 0);
+    gap(&h);
+
+    /* from C.k (input, no edge): its own port is marked, A.o and B.p are not */
+    press(&h, cx(ck), cy(ck));
+    input(&h, CANLIN_UI_IN_MOTION, 488, 328, 0);
+    h_drain(&h);
+    CHECK(dot_is(&h, ck, dg));
+    CHECK(dot_is(&h, ao, ok));
+    CHECK(dot_is(&h, bp, ok));
+    release(&h, 488, 328);
+    CHECK(edits(&h) == 0);
+    CHECK(!has(&h, "MUTATED") && !has(&h, "draw:"));
+    h_done(&h);
+}
+
 /* ---- input through the scheduler (canlin#27) ---- */
 
 /* Fills the scheduler queue with text edges, then posts a release that is refused:
@@ -1016,6 +1144,8 @@ int main(void)
     test_limits();
     test_e2e();
     test_render();
+    test_node_separator_inside();
+    test_drag_marking();
     test_overflow_cancels_drag();
     test_post_time_stamps();
     printf("test_graph: %d checks, %d failures\n", checks, failures);

@@ -392,6 +392,8 @@ static void apply_style(canlin_ui_view *v)
     s->window.spacing = nk_vec2(0, 0);
     s->window.group_padding = nk_vec2(0, 0);
     s->window.border = 0;
+    /* The view background covers its whole rect; rounding is for widgets, not views. */
+    s->window.rounding = 0;
 }
 
 static void output_unlink(canlin_ui_view *v)
@@ -1438,13 +1440,44 @@ static int l_toggle(lua_State *L)
     luaL_checktype(L, 3, LUA_TBOOLEAN);
     on = lua_toboolean(L, 3);
     identity(L, v, 4, label, llen);
-    /* The check box takes about one em plus padding on the left. */
-    el = ellipsize(v, font_of(v, F_BODY), label, llen, v->cw - 2.0f * em_of(v), &out,
-                   &outlen, &shown);
-    r = place(v, CANLIN_UI_W_TOGGLE, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, touch_of(v), 1, 0,
-              shown, el);
-    push(v, r);
-    on = nk_check_text(&v->nk, out, (int)outlen, on ? nk_true : nk_false);
+    {
+        /* Box and gap derive from em and the spacing unit, so they scale together with
+         * the label; the whole row (box + gap + label) is the hit target. */
+        struct nk_command_buffer *cv = nk_window_get_canvas(&v->nk);
+        struct nk_style_toggle saved = v->nk.style.checkbox, *cs = &v->nk.style.checkbox;
+        struct nk_style_item none = nk_style_item_color(nk_rgba(0, 0, 0, 0));
+        const struct nk_user_font *f = font_of(v, F_BODY);
+        float em = em_of(v), bs = roundf(1.25f * em), gap = gap_of(v);
+        float th = floorf(em / 8.0f) < 1.0f ? 1.0f : floorf(em / 8.0f);
+        float rad = v->ui->theme.radius * em, inset = th + floorf(unit_of(v) / 2.0f);
+        struct nk_rect box, cur;
+        el = ellipsize(v, f, label, llen, v->cw - bs - gap, &out, &outlen, &shown);
+        r = place(v, CANLIN_UI_W_TOGGLE, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, touch_of(v), 1,
+                  0, shown, el);
+        push(v, r);
+        /* Nuklear's check box behaviour on r, drawn with transparent colours (Nuklear emits
+         * no command for alpha 0); its selector is fixed to the font height, so the
+         * visible box is drawn here. No Lua runs between the swap and the restore. */
+        cs->normal = cs->hover = cs->active = none;
+        cs->cursor_normal = cs->cursor_hover = none;
+        cs->border_color = cs->text_normal = cs->text_hover = cs->text_active = none.data.color;
+        on = nk_check_text(&v->nk, "", 0, on ? nk_true : nk_false);
+        *cs = saved;
+        box = nk_rect(r.x, r.y + floorf((r.h - bs) / 2.0f), bs, bs);
+        if (rad > bs / 4.0f)
+            rad = floorf(bs / 4.0f);
+        nk_fill_rect(cv, box, rad,
+                     nk_input_is_mouse_hovering_rect(&v->nk.input, r) ? saved.hover.data.color
+                                                                       : saved.normal.data.color);
+        nk_stroke_rect(cv, box, rad, th, col(v, CANLIN_THEME_MUTED));
+        if (on) {
+            cur = nk_rect(box.x + inset, box.y + inset, bs - 2.0f * inset, bs - 2.0f * inset);
+            nk_fill_rect(cv, cur, rad > inset ? rad - inset : 0, col(v, CANLIN_THEME_ACCENT));
+        }
+        nk_draw_text(cv, nk_rect(box.x + bs + gap, r.y + floorf((r.h - f->height) / 2.0f),
+                                 r.w - bs - gap, f->height),
+                     out, (int)outlen, f, nk_rgba(0, 0, 0, 0), col(v, CANLIN_THEME_TEXT));
+    }
     advance(v, touch_of(v));
     lua_pushboolean(L, on != 0);
     return 1;
@@ -1704,15 +1737,41 @@ static int l_section(lua_State *L)
         st->init = 1;
         lua_pop(L, 1);
     }
-    el = ellipsize(v, font_of(v, F_BODY), title, tlen, label_avail_button(v, v->cw) - em_of(v),
-                   &out, &outlen, &shown);
-    r = place(v, CANLIN_UI_W_SECTION, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, touch_of(v), 1, 0,
-              shown, el);
-    push(v, r);
-    if (nk_button_symbol_text(&v->nk,
-                              st->open ? NK_SYMBOL_TRIANGLE_DOWN : NK_SYMBOL_TRIANGLE_RIGHT,
-                              out, (int)outlen, NK_TEXT_LEFT))
-        st->open = !st->open;
+    {
+        /* A heading-style row, unlike choice's input box: disclosure arrow in the first
+         * em (where the indented content starts, the title), no box background, a
+         * separator along the bottom. The whole row is the hit target. */
+        struct nk_command_buffer *cv = nk_window_get_canvas(&v->nk);
+        struct nk_style_button bs = v->nk.style.button;
+        struct nk_style_item none = nk_style_item_color(nk_rgba(0, 0, 0, 0));
+        const struct nk_user_font *f = font_of(v, F_BODY);
+        float em = em_of(v), a = roundf(0.5f * em), ax, cy;
+        float th = floorf(v->factor + 0.5f) < 1.0f ? 1.0f : floorf(v->factor + 0.5f);
+        struct nk_color ac;
+        el = ellipsize(v, f, title, tlen, v->cw - em, &out, &outlen, &shown);
+        r = place(v, CANLIN_UI_W_SECTION, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, touch_of(v), 1,
+                  0, shown, el);
+        push(v, r);
+        bs.normal = bs.hover = bs.active = none;
+        bs.border = 0;
+        bs.border_color = bs.text_normal = bs.text_hover = bs.text_active = none.data.color;
+        if (nk_button_text_styled(&v->nk, &bs, "", 0))
+            st->open = !st->open;
+        ac = col(v, nk_input_is_mouse_hovering_rect(&v->nk.input, r) ? CANLIN_THEME_ACCENT
+                                                                      : CANLIN_THEME_TEXT);
+        ax = r.x + floorf((em - a) / 2.0f);
+        cy = r.y + floorf(r.h / 2.0f);
+        if (st->open) /* pointing down */
+            nk_fill_triangle(cv, ax, cy - floorf(a * 0.4f), ax + a, cy - floorf(a * 0.4f),
+                             ax + a / 2.0f, cy + floorf(a * 0.4f), ac);
+        else /* pointing right */
+            nk_fill_triangle(cv, ax + floorf(a * 0.1f), cy - a / 2.0f, ax + floorf(a * 0.1f),
+                             cy + a / 2.0f, ax + floorf(a * 0.9f), cy, ac);
+        nk_draw_text(cv, nk_rect(r.x + em, r.y + floorf((r.h - f->height) / 2.0f), r.w - em,
+                                 f->height),
+                     out, (int)outlen, f, nk_rgba(0, 0, 0, 0), col(v, CANLIN_THEME_TEXT));
+        nk_fill_rect(cv, nk_rect(r.x, r.y + r.h - th, r.w, th), 0, col(v, CANLIN_THEME_MUTED));
+    }
     advance(v, touch_of(v));
     if (st->open) {
         cx = v->cx;
