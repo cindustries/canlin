@@ -157,7 +157,9 @@ Tool results, including validation errors, are encoded back into the provider's 
 continuation protocol by the adapter. Automatic follow-up turns have explicit finite
 limits and remain cancellable by the user. Generic filesystem, process execution,
 arbitrary network and device-control tools are not granted by the GUI tool; any future
-tool needs its own authorisation and validation contract.
+tool needs its own authorisation and validation contract. Those tools — screenshots,
+model-written modules, versions — are specified in the
+[LLM agency design](2026-09-23-canlin-llm-agency-design.md) (amended 2026-09-23).
 
 ## 6. Platform behaviour
 

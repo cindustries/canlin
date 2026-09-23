@@ -192,6 +192,10 @@ argument validation; streamed partial tool arguments are never executed. Trusted
 credentials and shell chrome are outside the generated view. Widget actions are local UI
 events that the assistant may send back to the conversation under its disclosure rules.
 See the LLM/UI design for the tool boundary and provider-independent stream semantics.
+**Amended 2026-09-23:** a user may grant an LLM agent the right to write modules; such
+model-written Lua runs only as a sandboxed module within the agent's grants, after the
+approval mode the user chose, and versioned with rollback — see the
+[LLM agency design](2026-09-23-canlin-llm-agency-design.md). Views stay declarative.
 
 ### Executable layers and trust
 
