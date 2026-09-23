@@ -48,6 +48,11 @@ struct canlin_module {
     uint32_t in_epoch;      /* bumped when an edge is refused: older queued input is stale */
     uint32_t scroll_posted; /* cumulative scroll px posted (wraps), a latest-state value */
     uint32_t scroll_seen;   /* cumulative scroll px handed to the view */
+
+    /* Core-owned one-shot timer for a time-driven redraw of the view (canlin#33); its
+     * expiry requests a draw and is never delivered to Lua. 0 = none armed. */
+    canlin_ev_handle ui_timer;
+    uint64_t ui_timer_at;
 };
 
 /* ---- values ---- */
@@ -200,6 +205,7 @@ static void end_gen(canlin_module *m, canlin_module_state state)
     if (m->gen)
         canlin_ev_module_stop(m->ev, m->gen);
     m->gen = 0;
+    m->ui_timer = 0; /* retired with the generation */
     canlin_sandbox_free(m->sb);
     m->sb = NULL;
     m->state = state;
@@ -256,6 +262,8 @@ static int l_cancel(lua_State *L)
 {
     canlin_module *m = mod_of(L);
     lua_Integer h = luaL_checkinteger(L, 1);
+    if (m->ui_timer != 0 && (canlin_ev_handle)h == m->ui_timer)
+        return fail(L, "stale", "handle unknown, foreign or dead"); /* core-owned */
     switch (canlin_ev_cancel(m->ev, m->gen, (canlin_ev_handle)h)) {
     case CANLIN_EV_OK:
         lua_pushliteral(L, "cancelled");
@@ -482,6 +490,7 @@ static int start_gen(canlin_module *m, const canlin_module_source *src)
     m->scroll_seen = m->scroll_posted; /* old-generation scroll was retired with it */
     m->sb = sb;
     m->gen = g;
+    m->ui_timer = 0;
     m->errors = 0;
     m->stop_pending = 0;
     copy_meta(m, src);
@@ -660,6 +669,25 @@ static void deliver_input(canlin_module *m, const canlin_ev_delivery *d)
     canlin_ev_invalidate(m->ev, m->gen);
 }
 
+/* After a frame: keep exactly one core timer armed for the view's wake time, or none.
+ * If the scheduler refuses it (timer quota), the feedback waits for the next input. */
+static void ui_timer_sync(canlin_module *m)
+{
+    uint64_t at, now;
+    int want = canlin_ui_view_wake(m->view, &at);
+    if (m->ui_timer != 0 && (!want || at != m->ui_timer_at)) {
+        canlin_ev_cancel(m->ev, m->gen, m->ui_timer);
+        m->ui_timer = 0;
+    }
+    if (!want || m->ui_timer != 0)
+        return;
+    now = canlin_ev_now(m->ev);
+    if (canlin_ev_timer_start(m->ev, m->gen, at > now ? at - now : 0, &m->ui_timer) !=
+        CANLIN_EV_OK)
+        m->ui_timer = 0;
+    m->ui_timer_at = at;
+}
+
 canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_delivery *d)
 {
     call_args a;
@@ -678,6 +706,11 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         consume_control(m, d->control);
         return CANLIN_SANDBOX_OK;
     case CANLIN_EV_D_TIMER:
+        if (m->ui_timer != 0 && d->handle == m->ui_timer) {
+            m->ui_timer = 0; /* the view's redraw time: a draw, never M.event */
+            canlin_ev_invalidate(m->ev, m->gen);
+            return CANLIN_SANDBOX_OK;
+        }
         a.kind = ARG_TIMER;
         a.name = "timer";
         a.h = d->handle;
@@ -713,7 +746,9 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         cb = "draw";
         budget = CANLIN_SB_BUDGET_DRAW;
         if (m->view) {
-            int rc = canlin_ui_view_frame_begin(m->view);
+            int rc;
+            canlin_ui_view_set_now(m->view, canlin_ev_now(m->ev));
+            rc = canlin_ui_view_frame_begin(m->view);
             if (rc != CANLIN_UI_OK) {
                 /* Not the module's fault (font cache pinned or out of memory): skip this
                  * draw without calling Lua or counting an error; the previous frame
@@ -758,6 +793,8 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         end_gen(m, CANLIN_MODULE_STOPPED);
     if (a.view && m->state == CANLIN_MODULE_RUNNING && canlin_ui_view_pending(a.view))
         canlin_ev_invalidate(m->ev, m->gen); /* input left for the next frame */
+    if (a.view && m->state == CANLIN_MODULE_RUNNING)
+        ui_timer_sync(m);
     return st;
 }
 

@@ -187,10 +187,14 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
   scheduler refused the item.
 - **Stop from inside the module's own callback** is deferred until that callback
   returns; reload from inside it fails with `CANLIN_MODULE_EBUSY`.
-- **Reload failure:** if the new sandbox or generation cannot be created, the old
-  generation keeps running. Once the old one is retired, a failing `lua#main` or `init`
-  leaves the module faulted without a generation — there is no rollback in v1. A staged
-  reload (start new, then retire old) is an open decision (canlin#16).
+- **Reload is staged with rollback (canlin#16, decided 2026-09-23):** the new generation
+  is started beside the old one — new sandbox, `lua#main`, `init` — while the old one
+  stays live but receives no new deliveries. Only when `init` succeeds is the old
+  generation retired (§7 order of the event runtime) and the view rebound to the new one.
+  If any step fails, the new generation is retired, the old one resumes delivery with its
+  state intact, and the failure is reported to the shell. Both generations count against
+  the slot's limits during the overlap; a reload that cannot be admitted fails with `full`
+  and leaves the old generation running.
 
 ## 7. Numeric budgets
 

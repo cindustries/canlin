@@ -26,10 +26,18 @@
  *   tap (moved < slop)   node/port -> select, second tap on it within DOUBLE_TAP_MS or a
  *                        press held >= LONG_PRESS_MS -> open; edge -> select edge; empty
  *                        -> select none, or add at that point when held >= LONG_PRESS_MS
- *   keys (graph focused by a press inside it): Del -> delete / disconnect the selection,
- *                        Tab / Shift-Tab -> select next / previous node
- * Long-press is recognised at release: the view redraws on input only, so a held press
- * with no further input produces no frame to act in.
+ *   secondary press      on empty canvas -> add at that point (spec §5.2 context action),
+ *                        at the press edge; nothing on nodes, ports or edges; ignored
+ *                        while a primary gesture is held. Middle does nothing.
+ *   keys (graph focused by a press inside it or by the view's Tab order): Del -> delete /
+ *                        disconnect the selection, Tab / Shift-Tab -> select next /
+ *                        previous node; Esc hands Tab back to the view's focus order
+ * Long-press is recognised at release (spec §5.2), exactly one open/add edit. While a
+ * press on a node, port or empty canvas is held within the slop, the frame asks the
+ * view owner for a redraw at press + LONG_PRESS_MS (canlin_ui_graph_wake; the module
+ * arms a core timer that never reaches Lua); from that time on the node gets an accent
+ * ring, empty canvas an accent circle at the press point (record part P_HOLD), showing
+ * that releasing now opens/adds. Movement past the slop or the release removes it.
  */
 #include "graph.h"
 
@@ -860,7 +868,10 @@ static float text_w(const struct nk_user_font *f, const char *s, size_t len)
     return len ? f->width(f->userdata, f->height, s, (int)len) : 0.0f;
 }
 
-/* Single-line label ending in "..." when too wide (spec §2); returns the width drawn. */
+/* U+2026 in UTF-8: 3 bytes, like the "..." it replaced (the built-in font has it, canlin#22). */
+#define ELLIPSIS "\xE2\x80\xA6"
+
+/* Single-line label ending in U+2026 when too wide (spec §2); returns the width drawn. */
 static float draw_label(struct nk_command_buffer *out, const struct nk_user_font *f,
                         const char *s, size_t len, float x, float cy, float avail, int right,
                         struct nk_color col)
@@ -871,7 +882,7 @@ static float draw_label(struct nk_command_buffer *out, const struct nk_user_font
         return 0;
     w = text_w(f, s, len);
     if (w > avail) {
-        float dots = text_w(f, "...", 3), acc = 0;
+        float dots = text_w(f, ELLIPSIS, 3), acc = 0;
         size_t i = 0;
         while (i < len) {
             size_t n = cp_len(s + i, len - i);
@@ -882,7 +893,7 @@ static float draw_label(struct nk_command_buffer *out, const struct nk_user_font
             i += n;
         }
         memcpy(buf, s, i);
-        memcpy(buf + i, "...", 3);
+        memcpy(buf + i, ELLIPSIS, 3);
         s = buf;
         len = i + 3;
         w = acc + dots;
@@ -1259,8 +1270,22 @@ void canlin_ui_graph_run(lua_State *L, canlin_ui_graph *g, int fit, canlin_ui_gr
         c.preview = 0;
     }
 
+    /* Secondary press (canlin#32): the context action on empty canvas is `add`. */
+    {
+        const struct nk_mouse_button *rb = &in->mouse.buttons[NK_BUTTON_RIGHT];
+        float px = rb->clicked_pos.x, py = rb->clicked_pos.y;
+        if (rb->clicked && rb->down && !st->drag && in_rect(c.clip, px, py)) {
+            *e->focus = e->id;
+            if (hit(&c, px, py, &ni, &pi) == H_NONE) {
+                gedit *x = add_edit(ed, &ned, E_ADD);
+                x->x = q4((px - c.ox) / em);
+                x->y = q4((py - c.oy) / em);
+            }
+        }
+    }
+
     /* Keyboard (spec §5.3), only while this graph has the view's focus. */
-    if (!press && *e->focus == e->id) {
+    if (!press && *e->focus == e->id && e->keys) {
         if (nk_input_is_key_pressed(in, NK_KEY_DEL)) {
             if (g->sel_node >= 0) {
                 gedit *x = add_edit(ed, &ned, E_DELETE);
@@ -1318,6 +1343,25 @@ void canlin_ui_graph_run(lua_State *L, canlin_ui_graph *g, int fit, canlin_ui_gr
             else
                 edge_ctrl(em, c.mx, c.my, sx, sy, q);
             draw_curve(out, c.clip, q, th, role(e, CANLIN_THEME_ACCENT));
+        }
+        /* Long-press feedback (canlin#33): shown, or its time asked for, while held. */
+        if (b->down && !st->moved &&
+            (st->drag == G_NODE || st->drag == G_PORT || st->drag == G_PAN)) {
+            uint64_t due = st->press_t + CANLIN_UI_LONG_PRESS_MS;
+            if (e->now < due) {
+                canlin_ui_graph_wake(e->view, due);
+            } else if (st->drag == G_PAN) {
+                float r = em;
+                struct nk_rect m = nk_rect(st->px0 - r, st->py0 - r, 2.0f * r, 2.0f * r);
+                nk_stroke_circle(out, m, 2.0f * th, role(e, CANLIN_THEME_ACCENT));
+                canlin_ui_graph_record(e->view, CANLIN_UI_P_HOLD, m, CANLIN_UI_HOLD_CANVAS, 0);
+            } else if ((ni = node_by_hash(g, st->dnode)) >= 0) {
+                struct nk_rect r = node_rect(&c, ni);
+                float grow = 2.0f * th, rad = e->theme->radius * em + grow;
+                r = nk_rect(r.x - grow, r.y - grow, r.w + 2.0f * grow, r.h + 2.0f * grow);
+                nk_stroke_rect(out, r, rad, 2.0f * th, role(e, CANLIN_THEME_ACCENT));
+                canlin_ui_graph_record(e->view, CANLIN_UI_P_HOLD, r, (uint32_t)ni, 0);
+            }
         }
         nk_push_scissor(out, old);
     }

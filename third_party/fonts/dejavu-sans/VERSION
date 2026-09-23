@@ -1,0 +1,29 @@
+DejaVu Sans 2.37
+source: https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2
+tarball sha256: fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7
+verified: 2026-09-23. Upstream publishes no checksum for this release (the GitHub
+release assets carry no digest); the sha256 values here were computed at download
+time and pin what was vendored.
+
+sha256 of each vendored file (DejaVuSans.ttf is ttf/DejaVuSans.ttf in the tarball):
+7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954  DejaVuSans.ttf
+7a083b136e64d064794c3419751e5c7dd10d2f64c108fe5ba161eae5e5958a93  LICENSE
+
+Contents:
+- DejaVuSans.ttf: unmodified from the tarball.
+- LICENSE: the tarball's LICENSE, unmodified. Bitstream Vera licence (DejaVu
+  changes are public domain) plus the Arev fonts licence for glyphs from Tavmjong
+  Bah. Both permit embedding, subsetting and redistribution, including as part of a
+  larger software package (not sale of the font by itself); the notice must
+  accompany every copy, and a modified font must not carry a name containing
+  "Bitstream", "Vera", "Tavmjong Bah" or "Arev". "DejaVu" is not a reserved name,
+  so the subset keeps the name "DejaVu Sans".
+
+Use: CanLin never ships or bakes this file directly. tools/mkfont.py derives the
+built-in Latin subset from it into src/render/font_builtin.c (codepoint list and
+pinned fontTools version are in that script). This is a trusted, shipped font;
+baking it with stb_truetype does not relax the untrusted theme-font rule (UI spec
+§6.3).
+
+Read-only. Any change to the subset happens in tools/mkfont.py, never here.
+Check: `sha256sum -c` over the list above from this dir.
