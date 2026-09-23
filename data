@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-23T03:51:04Z
+id: 21
+priority: high
+status: backlog
+tags:
+- ui
+- security
+- theme
+title: Untrusted-font policy for theme TTF blobs (stb_truetype)
+updated: 2026-09-23T03:51:04Z
+---
+
+stb_truetype: NO SECURITY GUARANTEE on untrusted fonts; theme.bee may come from a server. Decide isolation/fuzzing/hardened rasterizer before baking theme fonts. From canlin#17.
