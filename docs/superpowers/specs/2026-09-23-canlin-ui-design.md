@@ -157,6 +157,19 @@ whether to apply them — the same way `field` returns a new value.
 | `add` | `x, y` | context action on empty canvas: the module shows its own node picker |
 | `open` | `node` | double-click / long-press: the module shows its own node detail view |
 
+Edits are tables `{kind = "<edit>", …}`; `connect.from`/`to` use the edge shape
+`{node, port}`; `edge` is a 1-based index into `g.edges`. `g.selected` is a node id, an
+edge index or nil. A `move` is produced once on release (the core draws the drag preview
+without touching `g`); a move that rounds back to the start produces nothing. `select`
+is produced only when the selection changes. Long press (≥ `CANLIN_UI_LONG_PRESS_MS`,
+movement ≤ 0.5 em) and double tap (within `CANLIN_UI_DOUBLE_TAP_MS`) are measured on the
+scheduler's monotonic clock stamped into each input event, and recognised at release.
+`opts.fit` is edge-triggered: it re-centres when it becomes true, so a later pan
+survives. A press inside the graph gives it keyboard focus, so Del in a field never
+deletes a node. Dragging from an input that has an edge lifts that edge: drop on another
+input → disconnect + connect, on the same input → nothing, elsewhere → disconnect.
+Hit priority: ports, nodes (topmost first), edges (within 0.5 em), empty canvas.
+
 The core rejects locally, without producing an edit: connecting output→output or
 input→input, a port to its own node, and an edge that already exists. If both ports
 carry a `type` and the strings differ, the port shows as incompatible during the drag
