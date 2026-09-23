@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T04:49:40Z
+id: 37
+priority: low
+status: backlog
+tags:
+- input
+- platform
+title: Backend hardware input timestamps (evdev/SDL) in a shared clock domain
+updated: 2026-09-23T04:49:40Z
+---
+
+in->t is ignored; post-time stamp used. From canlin#27.
