@@ -28,10 +28,13 @@ typedef struct harness {
     canlin_ev_fake_clock clock;
     canlin_ev *ev;
     canlin_ui *ui;
+    canlin_ui_output *out;
     canlin_module *m;
+    canlin_ui_output *out2; /* optional second output/module (h_add_second) */
+    canlin_module *m2;
     char log[LOGMAX];
     size_t loglen;
-    unsigned draws;
+    unsigned draws, draws2;
 } harness;
 
 static void log_fn(void *ud, const char *msg, size_t len)
@@ -53,6 +56,10 @@ static void on_deliver(void *ud, canlin_ev *ev, const canlin_ev_delivery *d)
         if (d->kind == CANLIN_EV_D_DRAW)
             h->draws++;
         canlin_module_deliver(h->m, d);
+    } else if (h->m2 && canlin_module_gen(h->m2) == d->gen) {
+        if (d->kind == CANLIN_EV_D_DRAW)
+            h->draws2++;
+        canlin_module_deliver(h->m2, d);
     }
 }
 
@@ -92,8 +99,17 @@ static void h_init(harness *h, const canlin_theme *theme, float dpi, const char 
         t = *theme;
     else
         canlin_theme_builtin(&t);
-    h->ui = canlin_ui_new(&t, dpi);
-    if (!h->ev || !h->ui) {
+    h->ui = canlin_ui_new(&t);
+    {
+        canlin_ui_output_desc d;
+        d.id = "test-output";
+        d.w = w;
+        d.h = vh;
+        d.dpi = dpi;
+        d.scale = 100;
+        h->out = canlin_ui_output_new(&d, NULL);
+    }
+    if (!h->ev || !h->ui || !h->out) {
         fprintf(stderr, "harness init failed\n");
         exit(1);
     }
@@ -110,13 +126,57 @@ static void h_init(harness *h, const canlin_theme *theme, float dpi, const char 
         fprintf(stderr, "module load failed (%d): %s\n", err, h->log);
         exit(1);
     }
-    CHECK(canlin_module_set_ui(h->m, h->ui, 0, 0, w, vh) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_set_ui(h->m, h->ui, h->out, 0, 0, w, vh) == CANLIN_MODULE_OK);
+}
+
+static canlin_module *load(harness *h, const char *name, const char *src)
+{
+    canlin_module_source s;
+    canlin_sandbox_config cfg;
+    int err = 1;
+    canlin_module *m;
+    memset(&s, 0, sizeof s);
+    memset(&cfg, 0, sizeof cfg);
+    s.name = name;
+    s.version = "1";
+    s.main = src;
+    s.main_len = strlen(src);
+    cfg.log = log_fn;
+    cfg.ud = h;
+    m = canlin_module_load(h->ev, &s, &cfg, &err);
+    if (!m) {
+        fprintf(stderr, "module load failed (%d): %s\n", err, h->log);
+        exit(1);
+    }
+    return m;
+}
+
+/* A second module running src on its own output (same ui, same scheduler). */
+static void h_add_second(harness *h, const char *id, float dpi, int scale, const char *src,
+                         int w, int vh)
+{
+    canlin_ui_output_desc d;
+    d.id = id;
+    d.w = w;
+    d.h = vh;
+    d.dpi = dpi;
+    d.scale = scale;
+    h->out2 = canlin_ui_output_new(&d, NULL);
+    if (!h->out2) {
+        fprintf(stderr, "second output failed\n");
+        exit(1);
+    }
+    h->m2 = load(h, "uitest2", src);
+    CHECK(canlin_module_set_ui(h->m2, h->ui, h->out2, 0, 0, w, vh) == CANLIN_MODULE_OK);
 }
 
 static void h_done(harness *h)
 {
+    canlin_module_free(h->m2);
     canlin_module_free(h->m);
     CHECK(canlin_ev_free(h->ev) == CANLIN_EV_OK);
+    CHECK(canlin_ui_output_free(h->out) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_free(h->out2) == CANLIN_UI_OK);
     canlin_ui_free(h->ui);
 }
 
@@ -312,7 +372,7 @@ static void test_min_height_rounding(void)
         h_init(&h, &t, dpis[k], all_src, 400, 2000);
         h_drain(&h);
         CHECK(!has(&h, "draw:"));
-        em = canlin_ui_em(h.ui);
+        em = canlin_ui_view_em(canlin_module_view(h.m));
         CHECK(em == 13.0f * dpis[k]);
         min = (int)(2.5f * em + 0.999f);
         r = rec(&h, &n);
@@ -365,7 +425,7 @@ static void test_wrap_ellipsis(void)
     h_init(&h, NULL, 1.0f, wrap_src, 176, 1000);
     h_drain(&h);
     CHECK(!has(&h, "draw:"));
-    f = &canlin_ui_font(h.ui)->font->handle;
+    f = &canlin_ui_view_font(canlin_module_view(h.m))->font->handle;
     r = rec(&h, &n);
     for (i = 0; i < n; i++) {
         const char *s;
@@ -793,8 +853,8 @@ static void test_render_e2e(void)
     b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
     CHECK(b != NULL);
     CHECK(canlin_render_init(&r, px, W, H, W * 3, NULL, NULL) == 0);
-    f = canlin_ui_font(h.ui);
-    canlin_render_set_atlas(&r, f->alpha, f->w, f->h);
+    f = canlin_ui_view_font(canlin_module_view(h.m));
+    CHECK(f != NULL && f->alpha != NULL);
     canlin_render_begin(&r);
     canlin_render_clear(&r, nk_rgb(255, 0, 255));
     canlin_ui_view_render(canlin_module_view(h.m), &r);
@@ -826,6 +886,441 @@ static void test_render_e2e(void)
     h_done(&h);
 }
 
+/* ---- outputs and UI scale (spec §2.1) ---- */
+
+static const char scale_src[] =
+    "local M = {}\n"
+    "local name, on = 'x', false\n"
+    "function M.draw(ui)\n"
+    "  ui:heading('T')\n"
+    "  ui:button('A')\n"
+    "  on = ui:toggle('T', on)\n"
+    "  name = ui:field('Name', name)\n"
+    "  ui:separator()\n"
+    "  ui:columns(function() ui:button('L') end, function() ui:button('R') end)\n"
+    "  ui:section('S', function() ui:button('In') end)\n"
+    "  ui:meter('M', 0.5)\n"
+    "end\n"
+    "return M\n";
+
+/* Same draw at 100 % and 200 % (view twice as wide): every rectangle doubles, within
+ * rounding (each edge is rounded once, so at most 2 px per coordinate). */
+static void test_scale_doubles(void)
+{
+    harness a, b;
+    size_t na, nb, i;
+    const canlin_ui_rect *ra, *rb;
+    h_init(&a, NULL, 1.0f, scale_src, 700, 2000);
+    h_drain(&a);
+    h_init(&b, NULL, 1.0f, scale_src, 1400, 4000);
+    CHECK(canlin_ui_output_set_scale(b.out, 200) == CANLIN_UI_OK);
+    h_drain(&b);
+    CHECK(!has(&a, "draw:") && !has(&b, "draw:"));
+    CHECK(canlin_ui_view_em(canlin_module_view(a.m)) == 16.0f);
+    CHECK(canlin_ui_view_em(canlin_module_view(b.m)) == 32.0f);
+    CHECK(canlin_ui_output_em(b.ui, b.out) == 32.0f);
+    ra = rec(&a, &na);
+    rb = rec(&b, &nb);
+    CHECK(na == nb && na > 10);
+    for (i = 0; i < na && i < nb; i++) {
+        CHECK(ra[i].kind == rb[i].kind && ra[i].part == rb[i].part);
+        CHECK(iabs(rb[i].x - 2 * ra[i].x) <= 2 && iabs(rb[i].y - 2 * ra[i].y) <= 2);
+        CHECK(iabs(rb[i].w - 2 * ra[i].w) <= 2 && iabs(rb[i].h - 2 * ra[i].h) <= 2);
+    }
+    CHECK(iabs(canlin_ui_view_content_height(canlin_module_view(b.m)) -
+               2 * canlin_ui_view_content_height(canlin_module_view(a.m))) <= 2);
+    h_done(&a);
+    h_done(&b);
+}
+
+/* 40 em at 100 % is 20 em at 200 %: columns stack after the scale change, the view is
+ * marked dirty and redrawn without any module action. */
+static void test_scale_columns_dirty(void)
+{
+    harness h;
+    const canlin_ui_rect *l, *r;
+    canlin_ui_view *v;
+    unsigned draws;
+    h_init(&h, NULL, 1.0f, columns_src, 640 + 16, 600);
+    h_drain(&h);
+    v = canlin_module_view(h.m);
+    CHECK(!canlin_ui_view_dirty(v));
+    l = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    r = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 1);
+    CHECK(l && r && l->y == r->y);
+    draws = h.draws;
+    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_dirty(v));
+    h_drain(&h);
+    CHECK(h.draws == draws + 1);
+    CHECK(!canlin_ui_view_dirty(v));
+    l = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    r = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 1);
+    CHECK(l && r);
+    if (l && r) {
+        CHECK(r->y > l->y + l->h);        /* stacked */
+        CHECK(l->x == 16 && l->w == 624); /* padding 2 units = 16 px at em 32 */
+        CHECK(l->h >= 80);                /* 2.5 em at em 32 */
+    }
+    /* The same value again changes nothing and requests no draw. */
+    draws = h.draws;
+    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    CHECK(!canlin_ui_view_dirty(v));
+    h_drain(&h);
+    CHECK(h.draws == draws);
+    /* A DPI change invalidates too. */
+    CHECK(canlin_ui_output_set_dpi(h.out, 0.5f) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_dirty(v));
+    h_drain(&h);
+    CHECK(h.draws == draws + 1);
+    CHECK(canlin_ui_view_em(v) == 16.0f); /* 16 x 0.5 x 2 */
+    h_done(&h);
+}
+
+/* 2.5 em minimum at 75 %, including a fractional em (13 px x 1.5 x 0.75 = 14.625). */
+static void test_scale_min_touch(void)
+{
+    static const float dpis[] = {1.0f, 1.5f};
+    size_t k, i, n;
+    for (k = 0; k < 2; k++) {
+        harness h;
+        canlin_theme t;
+        const canlin_ui_rect *r;
+        float em;
+        int min, nint = 0;
+        canlin_theme_builtin(&t);
+        if (k == 1)
+            t.font_size = 13;
+        h_init(&h, &t, dpis[k], all_src, 400, 2000);
+        CHECK(canlin_ui_output_set_scale(h.out, 75) == CANLIN_UI_OK);
+        h_drain(&h);
+        CHECK(!has(&h, "draw:"));
+        em = canlin_ui_view_em(canlin_module_view(h.m));
+        CHECK(em == (float)t.font_size * dpis[k] * 0.75f);
+        min = (int)(2.5f * em + 0.999f);
+        r = rec(&h, &n);
+        for (i = 0; i < n; i++)
+            if (interactive(&r[i])) {
+                nint++;
+                CHECK(r[i].h >= min);
+            }
+        CHECK(nint == 7);
+        h_done(&h);
+    }
+}
+
+static void test_scale_invalid(void)
+{
+    static const int bad[] = {0, 50, 74, 76, 99, 101, 110, 175, 199, 201, 250, -100, 7500};
+    harness h;
+    canlin_ui_output_desc d;
+    canlin_ui_view *v;
+    size_t i;
+    int err = 0;
+    volatile float zero = 0.0f;
+    h_init(&h, NULL, 1.0f, columns_src, 400, 400);
+    h_drain(&h);
+    v = canlin_module_view(h.m);
+    for (i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        CHECK(!canlin_ui_scale_valid(bad[i]));
+        CHECK(canlin_ui_output_set_scale(h.out, bad[i]) == CANLIN_UI_EINVAL);
+    }
+    CHECK(canlin_ui_output_set_dpi(h.out, 0.0f) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_set_dpi(h.out, -1.0f) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_set_dpi(h.out, 0.25f) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_set_dpi(h.out, 8.0f) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_set_dpi(h.out, zero / zero) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_set_size(h.out, 0, 10) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_set_scale(NULL, 100) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_scale(h.out) == 100 && canlin_ui_output_dpi(h.out) == 1.0f);
+    CHECK(!canlin_ui_view_dirty(v)); /* rejected values invalidate nothing */
+    CHECK(canlin_ui_scale_valid(75) && canlin_ui_scale_valid(100) && canlin_ui_scale_valid(125) &&
+          canlin_ui_scale_valid(150) && canlin_ui_scale_valid(200));
+
+    d.id = "o";
+    d.w = d.h = 100;
+    d.dpi = 1.0f;
+    d.scale = 110;
+    CHECK(canlin_ui_output_new(&d, &err) == NULL && err == CANLIN_UI_EINVAL);
+    d.scale = 100;
+    d.id = "";
+    CHECK(canlin_ui_output_new(&d, &err) == NULL && err == CANLIN_UI_EINVAL);
+    d.id = NULL;
+    CHECK(canlin_ui_output_new(&d, &err) == NULL && err == CANLIN_UI_EINVAL);
+    d.id = "o";
+    d.dpi = zero / zero;
+    CHECK(canlin_ui_output_new(&d, &err) == NULL && err == CANLIN_UI_EINVAL);
+    /* An output with a bound view cannot be freed. */
+    CHECK(canlin_ui_output_free(h.out) == CANLIN_UI_EBUSY);
+    CHECK(strcmp(canlin_ui_output_id(h.out), "test-output") == 0);
+    h_done(&h);
+}
+
+static const char keep_src[] =
+    "local M = {}\n"
+    "local b = ''\n"
+    "function M.draw(ui)\n"
+    "  ui:section('S', function() ui:button('In') end)\n"
+    "  b = ui:field('B', b)\n"
+    "  print('b=' .. b)\n"
+    "end\n"
+    "return M\n";
+
+/* Widget state survives a scale change: a closed section stays closed, the focused field
+ * keeps focus and its text, typing continues where it was. */
+static void test_scale_keeps_state(void)
+{
+    harness h;
+    const canlin_ui_rect *r;
+    h_init(&h, NULL, 1.0f, keep_src, 400, 800);
+    h_drain(&h);
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) != NULL); /* In: open */
+    r = find(&h, CANLIN_UI_W_SECTION, CANLIN_UI_P_BOX, 0);
+    CHECK(r != NULL);
+    if (r)
+        click(&h, r);
+    h_drain(&h);
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) == NULL); /* closed */
+    r = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0);
+    CHECK(r != NULL);
+    if (r)
+        click(&h, r);
+    h_drain(&h);
+    type_text(&h, "ab");
+    h_drain(&h);
+    CHECK(has(&h, "b=ab"));
+
+    CHECK(canlin_ui_output_set_scale(h.out, 150) == CANLIN_UI_OK);
+    h_drain(&h);
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 24.0f);
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) == NULL); /* still closed */
+    r = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0);
+    CHECK(r && r->h >= 60);
+    type_text(&h, "c");
+    h_drain(&h);
+    CHECK(has(&h, "b=abc")); /* focus and text kept */
+    h_done(&h);
+}
+
+/* nth button box in the record of view v. */
+static const canlin_ui_rect *find_button(canlin_ui_view *v, int nth)
+{
+    size_t n, i;
+    const canlin_ui_rect *r = canlin_ui_view_record(v, &n, NULL);
+    for (i = 0; i < n; i++)
+        if (r[i].kind == CANLIN_UI_W_BUTTON && r[i].part == CANLIN_UI_P_BOX && nth-- == 0)
+            return &r[i];
+    return NULL;
+}
+
+/* Two outputs with different DPI lay out the same draw independently; a change on one
+ * invalidates only the views on it. */
+static void test_two_outputs(void)
+{
+    harness h;
+    const canlin_ui_rect *l1, *r1, *l2, *r2;
+    canlin_ui_view *v1, *v2;
+    unsigned d1, d2;
+    h_init(&h, NULL, 1.0f, columns_src, 640 + 16, 600);
+    h_add_second(&h, "second", 2.0f, 100, columns_src, 640 + 16, 600);
+    h_drain(&h);
+    CHECK(h.draws == 1 && h.draws2 == 1);
+    v1 = canlin_module_view(h.m);
+    v2 = canlin_module_view(h.m2);
+    CHECK(canlin_ui_view_em(v1) == 16.0f && canlin_ui_view_em(v2) == 32.0f);
+    l1 = find_button(v1, 0);
+    r1 = find_button(v1, 1);
+    l2 = find_button(v2, 0);
+    r2 = find_button(v2, 1);
+    CHECK(l1 && r1 && l2 && r2);
+    if (l1 && r1 && l2 && r2) {
+        CHECK(l1->y == r1->y && l1->h == 40);        /* side by side at DPI 1 */
+        CHECK(r2->y > l2->y + l2->h && l2->h == 80); /* stacked at DPI 2 */
+    }
+    /* Each view renders with its own atlas. */
+    CHECK(canlin_ui_view_font(v1) != canlin_ui_view_font(v2));
+    d1 = h.draws;
+    d2 = h.draws2;
+    CHECK(canlin_ui_output_set_scale(h.out2, 75) == CANLIN_UI_OK);
+    CHECK(!canlin_ui_view_dirty(v1) && canlin_ui_view_dirty(v2));
+    h_drain(&h);
+    CHECK(h.draws == d1 && h.draws2 == d2 + 1);
+    CHECK(canlin_ui_view_em(v1) == 16.0f && canlin_ui_view_em(v2) == 24.0f);
+    h_done(&h);
+}
+
+/* Font cache: one entry per em, at most CANLIN_UI_FONT_SIZES_MAX, never releasing an
+ * entry a live view uses, LRU among the unused ones. Bare views, no Lua. */
+static void test_font_cache(void)
+{
+    static const int scales[5] = {75, 100, 125, 150, 200};
+    canlin_theme t;
+    canlin_ui *ui;
+    canlin_ui_output *o[5];
+    canlin_ui_view *v[5];
+    const canlin_render_font *f0;
+    canlin_ui_output_desc d;
+    unsigned held, bakes;
+    int i, err;
+
+    CHECK(CANLIN_UI_FONT_SIZES_MAX == 4);
+    canlin_theme_builtin(&t);
+    ui = canlin_ui_new(&t);
+    CHECK(ui != NULL);
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 0 && bakes == 0); /* nothing baked before a view needs it */
+    for (i = 0; i < 5; i++) {
+        char id[8];
+        snprintf(id, sizeof id, "o%d", i);
+        d.id = id;
+        d.w = d.h = 400;
+        d.dpi = 1.0f;
+        d.scale = scales[i];
+        o[i] = canlin_ui_output_new(&d, &err);
+        CHECK(o[i] != NULL && err == CANLIN_UI_OK);
+    }
+    for (i = 0; i < 4; i++) {
+        v[i] = canlin_ui_view_new(ui, o[i], &err);
+        CHECK(v[i] != NULL);
+        canlin_ui_view_set_rect(v[i], 0, 0, 400, 400);
+        CHECK(canlin_ui_view_frame_begin(v[i]) == CANLIN_UI_OK);
+        canlin_ui_view_frame_end(v[i]);
+    }
+    /* A second view on an em already cached shares the entry. */
+    v[4] = canlin_ui_view_new(ui, o[1], &err);
+    CHECK(v[4] != NULL);
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 4 && bakes == 4);
+    CHECK(canlin_ui_view_font(v[4]) == canlin_ui_view_font(v[1]));
+    canlin_ui_view_free(v[4]);
+    /* All four pinned: a fifth em fails explicitly, nothing is released. */
+    CHECK(canlin_ui_view_new(ui, o[4], &err) == NULL && err == CANLIN_UI_EFONT);
+    f0 = canlin_ui_view_font(v[0]);
+    CHECK(canlin_ui_output_set_scale(o[0], 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_frame_begin(v[0]) == CANLIN_UI_EFONT);
+    CHECK(canlin_ui_view_frame_begin(v[0]) == CANLIN_UI_EFONT); /* no frame left open */
+    CHECK(canlin_ui_view_font(v[0]) == f0 && canlin_ui_view_em(v[0]) == 12.0f);
+    CHECK(canlin_ui_view_dirty(v[0]));
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 4 && bakes == 4);
+
+    /* Unpin 100 %: the next frame of v[0] evicts it for 200 % and unpins 75 %. */
+    canlin_ui_view_free(v[1]);
+    CHECK(canlin_ui_view_frame_begin(v[0]) == CANLIN_UI_OK);
+    canlin_ui_view_frame_end(v[0]);
+    CHECK(canlin_ui_view_em(v[0]) == 32.0f && !canlin_ui_view_dirty(v[0]));
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 4 && bakes == 5);
+
+    /* Unpinned now: 75 % (used longest ago) and, after freeing, 125 % and 150 %. 125 %
+     * is touched again, so 75 % is the LRU victim, then 150 %. */
+    canlin_ui_view_free(v[2]);
+    canlin_ui_view_free(v[3]);
+    v[2] = canlin_ui_view_new(ui, o[2], &err); /* hit: 125 % */
+    CHECK(v[2] != NULL);
+    canlin_ui_view_free(v[2]);
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 4 && bakes == 5);
+    v[1] = canlin_ui_view_new(ui, o[1], &err); /* 100 %: bakes, evicts 75 % */
+    CHECK(v[1] != NULL);
+    v[3] = canlin_ui_view_new(ui, o[0], &err); /* 200 %: hit (pinned by v[0]) */
+    CHECK(v[3] != NULL);
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 4 && bakes == 6);
+    v[2] = canlin_ui_view_new(ui, o[3], &err); /* 150 %: still cached */
+    CHECK(v[2] != NULL);
+    v[4] = canlin_ui_view_new(ui, o[2], &err); /* 125 %: still cached */
+    CHECK(v[4] != NULL);
+    canlin_ui_font_stats(ui, &held, &bakes);
+    CHECK(held == 4 && bakes == 6);
+    /* 75 % was the one evicted: it needs a bake, and every slot is pinned now. */
+    CHECK(canlin_ui_output_set_scale(o[4], 75) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_new(ui, o[4], &err) == NULL && err == CANLIN_UI_EFONT);
+
+    for (i = 0; i < 5; i++)
+        canlin_ui_view_free(v[i]);
+    for (i = 0; i < 5; i++)
+        CHECK(canlin_ui_output_free(o[i]) == CANLIN_UI_OK);
+    canlin_ui_free(ui);
+}
+
+/* A module whose output needs a fifth pinned size: its draw is skipped with a log line,
+ * not run headless and not counted as a module error; it draws once a slot frees. */
+static void test_font_cache_module(void)
+{
+    static const int scales[3] = {75, 125, 150};
+    harness h;
+    canlin_ui_output *o[3];
+    canlin_ui_view *v[3];
+    canlin_ui_output_desc d;
+    unsigned draws;
+    int i, err;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    for (i = 0; i < 3; i++) {
+        d.id = "pin";
+        d.w = d.h = 300;
+        d.dpi = 1.0f;
+        d.scale = scales[i];
+        o[i] = canlin_ui_output_new(&d, &err);
+        v[i] = canlin_ui_view_new(h.ui, o[i], &err);
+        CHECK(v[i] != NULL);
+    }
+    draws = h.draws;
+    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    h_drain(&h);
+    CHECK(has(&h, "draw: skipped: every font size slot is pinned"));
+    CHECK(h.draws == draws + 1); /* delivered, but Lua was not called */
+    CHECK(canlin_module_get_state(h.m) == CANLIN_MODULE_RUNNING);
+    CHECK(canlin_module_errors(h.m) == 0);
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 16.0f); /* previous frame kept */
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) != NULL);
+    canlin_ui_view_free(v[0]);
+    CHECK(canlin_module_set_ui(h.m, h.ui, h.out, 0, 0, 300, 300) == CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 32.0f);
+    for (i = 1; i < 3; i++)
+        canlin_ui_view_free(v[i]);
+    for (i = 0; i < 3; i++)
+        CHECK(canlin_ui_output_free(o[i]) == CANLIN_UI_OK);
+    h_done(&h);
+}
+
+/* Lua has no path to scale, DPI or the output: the whole canlin.* surface is an
+ * allowlist here (a new entry must be reviewed against §2.1), and the ui object carries
+ * no metric accessors and cannot be written. */
+static void test_lua_no_scale(void)
+{
+    harness h;
+    h_init(&h, NULL, 1.0f,
+           "local M = {}\n"
+           "local function walk(t, p)\n"
+           "  for k, v in pairs(t) do\n"
+           "    if type(v) == 'table' then walk(v, p .. k .. '.')\n"
+           "    else print('api ' .. p .. k) end\n"
+           "  end\n"
+           "end\n"
+           "function M.draw(ui)\n"
+           "  walk(canlin, 'canlin.')\n"
+           "  for _, k in ipairs({'scale', 'set_scale', 'dpi', 'set_dpi', 'output',\n"
+           "                      'set_output', 'em', 'metrics', 'set_metrics'}) do\n"
+           "    print('ui.' .. k .. '=' .. tostring(ui[k]))\n"
+           "  end\n"
+           "  print(pcall(function() ui.scale = 2 end))\n"
+           "end\n"
+           "return M\n",
+           400, 400);
+    h_drain(&h);
+    CHECK(count(&h, "api canlin.") == 4);
+    CHECK(has(&h, "api canlin.timer.after\n") && has(&h, "api canlin.cancel\n") &&
+          has(&h, "api canlin.invalidate\n") && has(&h, "api canlin.sys.now\n"));
+    CHECK(count(&h, "=nil\n") == 9);
+    CHECK(has(&h, "ui is read-only"));
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 16.0f);
+    CHECK(canlin_ui_output_scale(h.out) == 100);
+    h_done(&h);
+}
+
 int main(void)
 {
     test_columns();
@@ -842,6 +1337,15 @@ int main(void)
     test_scroll();
     test_draw_charge();
     test_render_e2e();
+    test_scale_doubles();
+    test_scale_columns_dirty();
+    test_scale_min_touch();
+    test_scale_invalid();
+    test_scale_keeps_state();
+    test_two_outputs();
+    test_font_cache();
+    test_font_cache_module();
+    test_lua_no_scale();
     if (failures) {
         fprintf(stderr, "ui: %d of %d checks failed\n", failures, checks);
         return 1;

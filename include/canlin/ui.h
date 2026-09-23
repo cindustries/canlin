@@ -3,13 +3,25 @@
  * Contract: docs/superpowers/specs/2026-09-23-canlin-ui-design.md §1–§4, §8.
  * Owner-thread only. Nuklear types stay inside src/ui and src/render (spec §1).
  *
- * Two objects:
- *   canlin_ui       shared per theme load: resolved theme, DPI, em and the baked fonts
- *                   (body plus heading sizes in one atlas). Outlives every view using it.
- *   canlin_ui_view  one per module: its own nk_context (Nuklear window/edit state never
- *                   crosses modules; draws are per-module scheduler deliveries, not one
- *                   global frame), queued input, widget state keyed by identity, the
- *                   last frame's command list and layout record.
+ * Three objects:
+ *   canlin_ui         shared per theme load: the resolved theme and the font cache. It
+ *                     holds no display metrics. Outlives every view using it.
+ *   canlin_ui_output  one display surface (spec §2.1): stable platform id, px size, DPI
+ *                     factor and UI scale step. Changed only through the C setters below
+ *                     (trusted shell/settings); nothing reachable from Lua touches it.
+ *   canlin_ui_view    one per module, bound to one output: its own nk_context (Nuklear
+ *                     window/edit state never crosses modules; draws are per-module
+ *                     scheduler deliveries, not one global frame), queued input, widget
+ *                     state keyed by identity, the last frame's command list and layout
+ *                     record.
+ *
+ * Font cache: one entry per distinct em px size (body plus heading sizes baked into one
+ * atlas), baked on demand, at most CANLIN_UI_FONT_SIZES_MAX held. A view pins the entry
+ * of its current em from binding until it moves to another em, ui or is freed (its last
+ * command list points into that atlas). Unpinned entries stay baked and are released
+ * least recently used first when a new size needs the slot. If every slot is pinned, the
+ * frame that needs a new size fails with CANLIN_UI_EFONT; the view keeps its previous
+ * frame and size, nothing is released under another view.
  *
  * Frame protocol (canlin_module does this around M.draw):
  *   canlin_ui_view_frame_begin(v)   apply queued input, start the Nuklear frame
@@ -18,7 +30,8 @@
  *   canlin_ui_view_frame_end(v)     finish the frame; the ui object is dead from now on
  *   canlin_ui_view_render(v, r)     rasterize the last finished frame
  *
- * Layout (spec §2): em = theme font size x DPI. The view is one vertical flow with a
+ * Layout (spec §2): em = theme font size x output DPI factor x output UI scale, read
+ * from the view's output at every frame_begin. The view is one vertical flow with a
  * core-owned scroll offset. Every widget rectangle is computed in float px, rounded
  * once to whole pixels (edges rounded, so neighbours abut), and interactive elements
  * are never below ceil(2.5 em) after rounding. ui:columns splits at >= 40 em of the
@@ -41,13 +54,46 @@ extern "C" {
 typedef struct canlin_ui canlin_ui;
 typedef struct canlin_ui_view canlin_ui_view;
 
-/* Bakes the fonts for theme t at DPI dpi (the built-in font until canlin#21). The theme
- * is copied; its blobs must outlive the canlin_ui (theme.h). NULL on failure. */
-canlin_ui *canlin_ui_new(const canlin_theme *t, float dpi);
+/* Copies theme t; its blobs must outlive the canlin_ui (theme.h). Fonts are baked on
+ * demand per view em (the built-in font until canlin#21). NULL on failure. */
+canlin_ui *canlin_ui_new(const canlin_theme *t);
+/* Every view using ui must be freed or switched first. */
 void canlin_ui_free(canlin_ui *ui);
-float canlin_ui_em(const canlin_ui *ui);
-/* The baked atlas, for canlin_render_set_atlas(). */
-const canlin_render_font *canlin_ui_font(const canlin_ui *ui);
+/* Font cache state (tests): entries held, and bakes performed since canlin_ui_new. */
+void canlin_ui_font_stats(const canlin_ui *ui, unsigned *held, unsigned *bakes);
+
+/* ---- outputs (spec §2.1) ---- */
+
+typedef struct canlin_ui_output canlin_ui_output;
+
+typedef struct canlin_ui_output_desc {
+    const char *id;  /* stable platform identity, 1..CANLIN_UI_OUTPUT_ID_MAX-1 bytes, copied */
+    int w, h;        /* px, > 0 */
+    float dpi;       /* platform DPI factor, CANLIN_UI_DPI_MIN..CANLIN_UI_DPI_MAX */
+    int scale;       /* UI scale step in percent: 75, 100, 125, 150 or 200 */
+} canlin_ui_output_desc;
+
+/* Returns 1 for a valid UI scale step (percent), else 0. No continuous scale. */
+int canlin_ui_scale_valid(int percent);
+/* NULL and *err = CANLIN_UI_EINVAL for an invalid description, CANLIN_UI_ENOMEM. */
+canlin_ui_output *canlin_ui_output_new(const canlin_ui_output_desc *d, int *err);
+/* CANLIN_UI_EBUSY (nothing freed) while views are still bound to o. */
+int canlin_ui_output_free(canlin_ui_output *o);
+const char *canlin_ui_output_id(const canlin_ui_output *o);
+int canlin_ui_output_scale(const canlin_ui_output *o);
+float canlin_ui_output_dpi(const canlin_ui_output *o);
+void canlin_ui_output_size(const canlin_ui_output *o, int *w, int *h);
+/* em in px for theme ui on output o. */
+float canlin_ui_output_em(const canlin_ui *ui, const canlin_ui_output *o);
+
+/* Trusted setters (shell / settings only). EINVAL for a value outside the contract (the
+ * output is unchanged), EBUSY while a view on o has a frame open. A changed value marks
+ * every view on o dirty (canlin_ui_view_dirty) and calls its dirty callback; the next
+ * frame re-lays out with the new metrics. Widget state is untouched. Setting the current
+ * value is a no-op. */
+int canlin_ui_output_set_scale(canlin_ui_output *o, int percent);
+int canlin_ui_output_set_dpi(canlin_ui_output *o, float dpi);
+int canlin_ui_output_set_size(canlin_ui_output *o, int w, int h);
 
 /* ---- normalised input (fed by the core; never delivered to Lua as events) ---- */
 
@@ -85,8 +131,11 @@ typedef struct canlin_ui_input {
 
 enum {
     CANLIN_UI_OK = 0,
-    CANLIN_UI_EINVAL = -1,  /* malformed input event: dropped */
-    CANLIN_UI_EFULL = -2    /* queue full: the queue was reset, see below */
+    CANLIN_UI_EINVAL = -1,  /* malformed input event (dropped) or argument */
+    CANLIN_UI_EFULL = -2,   /* queue full: the queue was reset, see below */
+    CANLIN_UI_EFONT = -3,   /* every font cache entry is pinned by a live view */
+    CANLIN_UI_ENOMEM = -4,
+    CANLIN_UI_EBUSY = -5    /* a frame is open */
 };
 
 /* Queues one input event in order. At most one edge per button and per key is applied
@@ -100,18 +149,34 @@ size_t canlin_ui_view_pending(const canlin_ui_view *v);
 
 /* ---- view lifecycle ---- */
 
-canlin_ui_view *canlin_ui_view_new(canlin_ui *ui);
+/* A view of theme ui on output o, pinning the font of o's current em. NULL on failure
+ * (*err, if not NULL: EINVAL, ENOMEM or EFONT). */
+canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err);
 void canlin_ui_view_free(canlin_ui_view *v);
-/* Switch to another canlin_ui (theme reload). Widget state is kept. */
-void canlin_ui_view_set_ui(canlin_ui_view *v, canlin_ui *ui);
-/* Screen rectangle of the view in px (w, h > 0). */
+/* Switch to another canlin_ui (theme reload) and/or output (the shell moves the view).
+ * Widget state is kept, the view is marked dirty and its old command list dropped (it
+ * pointed into the old atlas). EINVAL, EBUSY inside a frame, EFONT/ENOMEM (unchanged). */
+int canlin_ui_view_bind(canlin_ui_view *v, canlin_ui *ui, canlin_ui_output *o);
+/* Screen rectangle of the view in px (w, h > 0), in its output's coordinates. */
 void canlin_ui_view_set_rect(canlin_ui_view *v, int x, int y, int w, int h);
+/* Called (owner thread, outside any frame) when the view's output metrics change, so the
+ * owner can schedule a draw. fn may be NULL. */
+void canlin_ui_view_set_dirty_fn(canlin_ui_view *v, void (*fn)(void *ud), void *ud);
+/* 1 if the view needs a re-layout (new output metrics or binding) since its last frame. */
+int canlin_ui_view_dirty(const canlin_ui_view *v);
+/* em in px the view lays out with: of the last frame, or of the binding before one. */
+float canlin_ui_view_em(const canlin_ui_view *v);
+/* The atlas of the view's current font (canlin_ui_view_render sets it itself). */
+const canlin_render_font *canlin_ui_view_font(const canlin_ui_view *v);
 /* Forget all widget state, queued input and scroll (new module generation). */
 void canlin_ui_view_reset(canlin_ui_view *v);
 
 /* ---- frames ---- */
 
-/* Starts a frame. Returns 0, or -1 if a frame is already open or v has no ui. */
+/* Starts a frame with the output's current metrics (re-binding the font if em changed).
+ * Returns 0, EBUSY if a frame is already open, EINVAL for NULL, EFONT if the new em
+ * needs a font slot and all are pinned, ENOMEM if baking failed. On error no frame is
+ * open and the previous frame (command list, record, font) is intact. */
 int canlin_ui_view_frame_begin(canlin_ui_view *v);
 /* Ends the open frame (no-op without one). Widget state not used in this frame is
  * dropped. Does not touch any Lua state. */
@@ -124,7 +189,7 @@ struct lua_State;
  * frame_begin and frame_end; the object raises when used outside that frame. */
 int canlin_ui_push(struct lua_State *L, canlin_ui_view *v);
 
-/* Rasterizes the last finished frame into r (the atlas of canlin_ui_font must be set). */
+/* Rasterizes the last finished frame into r; sets r's atlas to the view's font. */
 void canlin_ui_view_render(canlin_ui_view *v, canlin_render *r);
 
 /* ---- layout record (tests, later hit testing/accessibility) ---- */

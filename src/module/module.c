@@ -649,8 +649,21 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         a.kind = ARG_UI;
         cb = "draw";
         budget = CANLIN_SB_BUDGET_DRAW;
-        if (m->view && canlin_ui_view_frame_begin(m->view) == 0)
+        if (m->view) {
+            int rc = canlin_ui_view_frame_begin(m->view);
+            if (rc != CANLIN_UI_OK) {
+                /* Not the module's fault (font cache pinned or out of memory): skip this
+                 * draw without calling Lua or counting an error; the previous frame
+                 * stays on screen and the next invalidation retries. */
+                const char *why = rc == CANLIN_UI_EFONT
+                                      ? "skipped: every font size slot is pinned"
+                                      : "skipped: view frame could not start";
+                mlog(m, "draw", why);
+                set_err(m, "draw", why);
+                return CANLIN_SANDBOX_OK;
+            }
             a.view = m->view;
+        }
         break;
     default:
         return CANLIN_SANDBOX_OK;
@@ -687,22 +700,35 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
 
 /* ---- UI view (UI spec §2–§3) ---- */
 
-int canlin_module_set_ui(canlin_module *m, canlin_ui *ui, int x, int y, int w, int h)
+static void view_dirty(void *ud)
 {
-    if (m == NULL || ui == NULL || w <= 0 || h <= 0)
+    canlin_module *m = ud;
+    if (m->state == CANLIN_MODULE_RUNNING)
+        canlin_ev_invalidate(m->ev, m->gen);
+}
+
+int canlin_module_set_ui(canlin_module *m, canlin_ui *ui, canlin_ui_output *out, int x, int y,
+                         int w, int h)
+{
+    int rc;
+    if (m == NULL || ui == NULL || out == NULL || w <= 0 || h <= 0)
         return CANLIN_MODULE_EINVAL;
     if (m->in_call)
         return CANLIN_MODULE_EBUSY;
     if (m->view == NULL) {
-        m->view = canlin_ui_view_new(ui);
+        m->view = canlin_ui_view_new(ui, out, &rc);
         if (m->view == NULL)
-            return CANLIN_MODULE_ENOMEM;
+            return rc == CANLIN_UI_EINVAL ? CANLIN_MODULE_EINVAL : CANLIN_MODULE_ENOMEM;
+        canlin_ui_view_set_dirty_fn(m->view, view_dirty, m);
     } else {
-        canlin_ui_view_set_ui(m->view, ui);
+        rc = canlin_ui_view_bind(m->view, ui, out);
+        if (rc != CANLIN_UI_OK)
+            return rc == CANLIN_UI_EINVAL  ? CANLIN_MODULE_EINVAL
+                   : rc == CANLIN_UI_EBUSY ? CANLIN_MODULE_EBUSY
+                                           : CANLIN_MODULE_ENOMEM;
     }
     canlin_ui_view_set_rect(m->view, x, y, w, h);
-    if (m->state == CANLIN_MODULE_RUNNING)
-        canlin_ev_invalidate(m->ev, m->gen);
+    view_dirty(m);
     return CANLIN_MODULE_OK;
 }
 

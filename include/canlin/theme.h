@@ -100,8 +100,8 @@ int canlin_theme_resolve(canlin_theme *t, const canlin_theme_source *srcs, size_
 /* WCAG 2 contrast ratio of two colours, 1.0-21.0. */
 float canlin_theme_contrast(canlin_theme_rgb a, canlin_theme_rgb b);
 
-/* em in px: base font size x platform DPI factor (UI spec §2). A DPI factor that is not
- * a positive finite number counts as 1.0. */
+/* em in px: base font size x factor, where src/ui passes the output's DPI factor x UI
+ * scale (UI spec §2, §2.1). A factor that is not a positive finite number counts as 1.0. */
 float canlin_theme_em(const canlin_theme *t, float dpi);
 
 /* Key name, e.g. "theme#color#accent"; NULL for an out-of-range index. */

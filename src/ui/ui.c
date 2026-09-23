@@ -23,10 +23,27 @@
 
 enum { F_BODY = 0, F_H1 = 1, F_H2 = 2, F_COUNT = 3 };
 
+typedef struct font_entry {
+    int used;
+    float em;                 /* key: em px size of size[F_BODY] */
+    unsigned refs;            /* views pinning this entry */
+    uint64_t last;            /* LRU tick */
+    canlin_render_font font;  /* size[F_BODY], size[F_H1], size[F_H2] */
+} font_entry;
+
 struct canlin_ui {
     canlin_theme theme;
-    float dpi, em;
-    canlin_render_font font; /* size[F_BODY], size[F_H1], size[F_H2] */
+    font_entry fonts[CANLIN_UI_FONT_SIZES_MAX];
+    uint64_t tick;
+    unsigned bakes;
+};
+
+struct canlin_ui_output {
+    char id[CANLIN_UI_OUTPUT_ID_MAX];
+    int w, h;
+    float dpi;
+    int scale;
+    canlin_ui_view *views;    /* bound views, linked through onext */
 };
 
 typedef struct slot {
@@ -37,6 +54,15 @@ typedef struct slot {
 
 struct canlin_ui_view {
     canlin_ui *ui;
+    canlin_ui_output *out;
+    canlin_ui_view *onext;    /* next view on out */
+    font_entry *fe;           /* pinned entry in ui->fonts */
+    float factor;             /* DPI x scale of the current binding */
+    float em;
+    int dirty;
+    int no_cmds;              /* the command list is stale (old atlas): render nothing */
+    void (*dirty_fn)(void *);
+    void *dirty_ud;
     struct nk_context nk;
     int nk_ok;
     int x, y, w, h;
@@ -70,46 +96,235 @@ struct canlin_ui_view {
     char lbl[CANLIN_UI_MAX_LABEL + 8];     /* ellipsized label */
 };
 
-/* ---- shared ui ---- */
+/* ---- shared ui and font cache ---- */
 
-canlin_ui *canlin_ui_new(const canlin_theme *t, float dpi)
+canlin_ui *canlin_ui_new(const canlin_theme *t)
 {
     canlin_ui *ui;
-    float px[F_COUNT];
     if (t == NULL)
         return NULL;
     ui = calloc(1, sizeof *ui);
     if (ui == NULL)
         return NULL;
     ui->theme = *t;
-    ui->dpi = (dpi > 0.0f && isfinite(dpi)) ? dpi : 1.0f;
-    ui->em = canlin_theme_em(t, ui->dpi);
-    px[F_BODY] = ui->em;
-    px[F_H1] = ui->em * CANLIN_UI_HEADING1_SCALE;
-    px[F_H2] = ui->em * CANLIN_UI_HEADING2_SCALE;
-    if (canlin_render_font_default_sizes(&ui->font, px, F_COUNT) != 0) {
-        free(ui);
-        return NULL;
-    }
     return ui;
 }
 
 void canlin_ui_free(canlin_ui *ui)
 {
+    unsigned i;
     if (ui == NULL)
         return;
-    canlin_render_font_free(&ui->font);
+    for (i = 0; i < CANLIN_UI_FONT_SIZES_MAX; i++)
+        if (ui->fonts[i].used)
+            canlin_render_font_free(&ui->fonts[i].font);
     free(ui);
 }
 
-float canlin_ui_em(const canlin_ui *ui)
+void canlin_ui_font_stats(const canlin_ui *ui, unsigned *held, unsigned *bakes)
 {
-    return ui->em;
+    unsigned i, n = 0;
+    for (i = 0; ui && i < CANLIN_UI_FONT_SIZES_MAX; i++)
+        n += ui->fonts[i].used != 0;
+    if (held)
+        *held = n;
+    if (bakes)
+        *bakes = ui ? ui->bakes : 0;
 }
 
-const canlin_render_font *canlin_ui_font(const canlin_ui *ui)
+/* Pins the entry for em px, baking it if needed. Evicts the least recently used unpinned
+ * entry when the cache is full; never one with refs > 0. */
+static font_entry *font_acquire(canlin_ui *ui, float em, int *err)
 {
-    return &ui->font;
+    font_entry *hit = NULL, *victim = NULL;
+    float px[F_COUNT];
+    unsigned i;
+    for (i = 0; i < CANLIN_UI_FONT_SIZES_MAX; i++) {
+        font_entry *e = &ui->fonts[i];
+        if (e->used && e->em == em) {
+            hit = e;
+            break;
+        }
+        if (!e->used) {
+            if (victim == NULL || victim->used)
+                victim = e;
+        } else if (e->refs == 0 && (victim == NULL || (victim->used && e->last < victim->last))) {
+            victim = e;
+        }
+    }
+    if (hit == NULL) {
+        if (victim == NULL) {
+            *err = CANLIN_UI_EFONT;
+            return NULL;
+        }
+        if (victim->used)
+            canlin_render_font_free(&victim->font);
+        memset(victim, 0, sizeof *victim);
+        px[F_BODY] = em;
+        px[F_H1] = em * CANLIN_UI_HEADING1_SCALE;
+        px[F_H2] = em * CANLIN_UI_HEADING2_SCALE;
+        if (canlin_render_font_default_sizes(&victim->font, px, F_COUNT) != 0) {
+            memset(victim, 0, sizeof *victim);
+            *err = CANLIN_UI_ENOMEM;
+            return NULL;
+        }
+        victim->used = 1;
+        victim->em = em;
+        ui->bakes++;
+        hit = victim;
+    }
+    hit->refs++;
+    hit->last = ++ui->tick;
+    return hit;
+}
+
+static void font_release(font_entry *e)
+{
+    if (e && e->refs)
+        e->refs--; /* stays baked until LRU eviction or canlin_ui_free */
+}
+
+/* ---- outputs ---- */
+
+int canlin_ui_scale_valid(int p)
+{
+    return p == 75 || p == 100 || p == 125 || p == 150 || p == 200;
+}
+
+static int dpi_valid(float dpi)
+{
+    return isfinite(dpi) && dpi >= CANLIN_UI_DPI_MIN && dpi <= CANLIN_UI_DPI_MAX;
+}
+
+canlin_ui_output *canlin_ui_output_new(const canlin_ui_output_desc *d, int *err)
+{
+    canlin_ui_output *o;
+    size_t idlen;
+    int dummy;
+    if (err == NULL)
+        err = &dummy;
+    *err = CANLIN_UI_EINVAL;
+    if (d == NULL || d->id == NULL || d->w <= 0 || d->h <= 0 || !dpi_valid(d->dpi) ||
+        !canlin_ui_scale_valid(d->scale))
+        return NULL;
+    idlen = strlen(d->id);
+    if (idlen == 0 || idlen >= CANLIN_UI_OUTPUT_ID_MAX)
+        return NULL;
+    o = calloc(1, sizeof *o);
+    if (o == NULL) {
+        *err = CANLIN_UI_ENOMEM;
+        return NULL;
+    }
+    memcpy(o->id, d->id, idlen + 1);
+    o->w = d->w;
+    o->h = d->h;
+    o->dpi = d->dpi;
+    o->scale = d->scale;
+    *err = CANLIN_UI_OK;
+    return o;
+}
+
+int canlin_ui_output_free(canlin_ui_output *o)
+{
+    if (o == NULL)
+        return CANLIN_UI_OK;
+    if (o->views)
+        return CANLIN_UI_EBUSY;
+    free(o);
+    return CANLIN_UI_OK;
+}
+
+const char *canlin_ui_output_id(const canlin_ui_output *o)
+{
+    return o->id;
+}
+
+int canlin_ui_output_scale(const canlin_ui_output *o)
+{
+    return o->scale;
+}
+
+float canlin_ui_output_dpi(const canlin_ui_output *o)
+{
+    return o->dpi;
+}
+
+void canlin_ui_output_size(const canlin_ui_output *o, int *w, int *h)
+{
+    if (w)
+        *w = o->w;
+    if (h)
+        *h = o->h;
+}
+
+static float factor_of(const canlin_ui_output *o)
+{
+    return o->dpi * (float)o->scale / 100.0f;
+}
+
+float canlin_ui_output_em(const canlin_ui *ui, const canlin_ui_output *o)
+{
+    return canlin_theme_em(&ui->theme, factor_of(o));
+}
+
+static int output_busy(const canlin_ui_output *o)
+{
+    const canlin_ui_view *v;
+    for (v = o->views; v; v = v->onext)
+        if (v->in_frame)
+            return 1;
+    return 0;
+}
+
+/* Every view on o needs a re-layout; tell each owner. */
+static void output_changed(canlin_ui_output *o)
+{
+    canlin_ui_view *v;
+    for (v = o->views; v; v = v->onext) {
+        v->dirty = 1;
+        if (v->dirty_fn)
+            v->dirty_fn(v->dirty_ud);
+    }
+}
+
+int canlin_ui_output_set_scale(canlin_ui_output *o, int percent)
+{
+    if (o == NULL || !canlin_ui_scale_valid(percent))
+        return CANLIN_UI_EINVAL;
+    if (output_busy(o))
+        return CANLIN_UI_EBUSY;
+    if (o->scale != percent) {
+        o->scale = percent;
+        output_changed(o);
+    }
+    return CANLIN_UI_OK;
+}
+
+int canlin_ui_output_set_dpi(canlin_ui_output *o, float dpi)
+{
+    if (o == NULL || !dpi_valid(dpi))
+        return CANLIN_UI_EINVAL;
+    if (output_busy(o))
+        return CANLIN_UI_EBUSY;
+    if (o->dpi != dpi) {
+        o->dpi = dpi;
+        output_changed(o);
+    }
+    return CANLIN_UI_OK;
+}
+
+int canlin_ui_output_set_size(canlin_ui_output *o, int w, int h)
+{
+    if (o == NULL || w <= 0 || h <= 0)
+        return CANLIN_UI_EINVAL;
+    if (output_busy(o))
+        return CANLIN_UI_EBUSY;
+    if (o->w != w || o->h != h) {
+        o->w = w;
+        o->h = h;
+        output_changed(o);
+    }
+    return CANLIN_UI_OK;
 }
 
 /* ---- UTF-8 ---- */
@@ -166,7 +381,7 @@ static size_t cp_len(const char *s, size_t left)
 static void apply_style(canlin_ui_view *v)
 {
     struct nk_style *s = &v->nk.style;
-    canlin_theme_apply_nk(&v->ui->theme, v->ui->dpi, &v->nk, &v->ui->font.font->handle);
+    canlin_theme_apply_nk(&v->ui->theme, v->factor, &v->nk, &v->fe->font.font->handle);
     /* Geometry is ours: the window adds no padding or spacing of its own. */
     s->window.padding = nk_vec2(0, 0);
     s->window.spacing = nk_vec2(0, 0);
@@ -174,22 +389,61 @@ static void apply_style(canlin_ui_view *v)
     s->window.border = 0;
 }
 
-canlin_ui_view *canlin_ui_view_new(canlin_ui *ui)
+static void output_unlink(canlin_ui_view *v)
+{
+    canlin_ui_view **pp;
+    if (v->out == NULL)
+        return;
+    for (pp = &v->out->views; *pp; pp = &(*pp)->onext)
+        if (*pp == v) {
+            *pp = v->onext;
+            break;
+        }
+    v->onext = NULL;
+    v->out = NULL;
+}
+
+static void output_link(canlin_ui_view *v, canlin_ui_output *o)
+{
+    v->out = o;
+    v->onext = o->views;
+    o->views = v;
+}
+
+canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err)
 {
     canlin_ui_view *v;
-    if (ui == NULL)
+    int dummy;
+    if (err == NULL)
+        err = &dummy;
+    *err = CANLIN_UI_EINVAL;
+    if (ui == NULL || o == NULL)
         return NULL;
     v = calloc(1, sizeof *v);
-    if (v == NULL)
+    if (v == NULL) {
+        *err = CANLIN_UI_ENOMEM;
         return NULL;
+    }
     v->ui = ui;
-    if (!nk_init_default(&v->nk, &ui->font.font->handle)) {
+    v->factor = factor_of(o);
+    v->em = canlin_theme_em(&ui->theme, v->factor);
+    v->fe = font_acquire(ui, v->em, err);
+    if (v->fe == NULL) {
         free(v);
+        return NULL;
+    }
+    if (!nk_init_default(&v->nk, &v->fe->font.font->handle)) {
+        font_release(v->fe);
+        free(v);
+        *err = CANLIN_UI_ENOMEM;
         return NULL;
     }
     v->nk_ok = 1;
     apply_style(v);
     v->w = v->h = 1;
+    v->dirty = 1;
+    output_link(v, o);
+    *err = CANLIN_UI_OK;
     return v;
 }
 
@@ -197,17 +451,66 @@ void canlin_ui_view_free(canlin_ui_view *v)
 {
     if (v == NULL)
         return;
+    output_unlink(v);
     if (v->nk_ok)
         nk_free(&v->nk);
+    font_release(v->fe);
     free(v);
 }
 
-void canlin_ui_view_set_ui(canlin_ui_view *v, canlin_ui *ui)
+int canlin_ui_view_bind(canlin_ui_view *v, canlin_ui *ui, canlin_ui_output *o)
 {
-    if (v == NULL || ui == NULL || v->in_frame)
-        return;
+    font_entry *fe;
+    float factor, em;
+    int err = CANLIN_UI_OK;
+    if (v == NULL || ui == NULL || o == NULL)
+        return CANLIN_UI_EINVAL;
+    if (v->in_frame)
+        return CANLIN_UI_EBUSY;
+    if (ui == v->ui && o == v->out)
+        return CANLIN_UI_OK;
+    factor = factor_of(o);
+    em = canlin_theme_em(&ui->theme, factor);
+    fe = font_acquire(ui, em, &err); /* before releasing: failure leaves v unchanged */
+    if (fe == NULL)
+        return err;
+    font_release(v->fe);
+    v->fe = fe;
     v->ui = ui;
+    v->factor = factor;
+    v->em = em;
+    if (o != v->out) {
+        output_unlink(v);
+        output_link(v, o);
+    }
+    /* The last command list points into the old atlas, which the caller may free now. */
+    v->no_cmds = 1;
     apply_style(v);
+    v->dirty = 1;
+    return CANLIN_UI_OK;
+}
+
+void canlin_ui_view_set_dirty_fn(canlin_ui_view *v, void (*fn)(void *ud), void *ud)
+{
+    if (v == NULL)
+        return;
+    v->dirty_fn = fn;
+    v->dirty_ud = ud;
+}
+
+int canlin_ui_view_dirty(const canlin_ui_view *v)
+{
+    return v ? v->dirty : 0;
+}
+
+float canlin_ui_view_em(const canlin_ui_view *v)
+{
+    return v->em;
+}
+
+const canlin_render_font *canlin_ui_view_font(const canlin_ui_view *v)
+{
+    return &v->fe->font;
 }
 
 void canlin_ui_view_set_rect(canlin_ui_view *v, int x, int y, int w, int h)
@@ -419,11 +722,33 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     struct nk_context *ctx;
     struct nk_rect sb;
     float maxs;
+    font_entry *old;
 
-    if (v == NULL || v->ui == NULL || v->in_frame)
-        return -1;
+    if (v == NULL || v->ui == NULL || v->out == NULL)
+        return CANLIN_UI_EINVAL;
+    if (v->in_frame)
+        return CANLIN_UI_EBUSY;
+    old = NULL;
+    {
+        /* Metrics are read from the output every frame (spec §2.1). */
+        float factor = factor_of(v->out), em = canlin_theme_em(&v->ui->theme, factor);
+        if (em != v->fe->em || factor != v->factor) {
+            int err = CANLIN_UI_OK;
+            font_entry *fe = em == v->fe->em ? v->fe : font_acquire(v->ui, em, &err);
+            if (fe == NULL)
+                return err; /* previous frame, record and font stay intact */
+            if (fe != v->fe)
+                old = v->fe;
+            v->fe = fe;
+            v->factor = factor;
+            v->em = em;
+            apply_style(v);
+        }
+    }
     ctx = &v->nk;
     nk_clear(ctx);
+    font_release(old); /* after nk_clear: no command points into its atlas any more */
+    v->no_cmds = 0;
     apply_input(v);
     maxs = (float)(v->content_h - v->h);
     if (maxs < 0)
@@ -442,7 +767,7 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     v->rec_over = 0;
     memset(v->labels, 0, sizeof v->labels);
     {
-        float em = v->ui->em, unit = v->ui->theme.spacing * 0.25f * em;
+        float em = v->em, unit = v->ui->theme.spacing * 0.25f * em;
         float pad = 2.0f * unit;
         v->cx = pad;
         v->cw = (float)v->w - 2.0f * pad;
@@ -466,7 +791,7 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
     if (v == NULL || !v->in_frame)
         return;
     ctx = &v->nk;
-    em = v->ui->em;
+    em = v->em;
     unit = v->ui->theme.spacing * 0.25f * em;
     /* cy ends with one inter-widget gap; the view ends with its padding instead. */
     v->content_h = v->widgets ? (int)ceilf(v->cy) : 0;
@@ -497,13 +822,15 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
         if (!found)
             v->focus = 0;
     }
+    v->dirty = 0;
     v->in_frame = 0;
 }
 
 void canlin_ui_view_render(canlin_ui_view *v, canlin_render *r)
 {
-    if (v == NULL || r == NULL || v->in_frame)
+    if (v == NULL || r == NULL || v->in_frame || v->no_cmds)
         return;
+    canlin_render_set_atlas(r, v->fe->font.alpha, v->fe->font.w, v->fe->font.h);
     canlin_render_commands(r, &v->nk);
 }
 
@@ -530,12 +857,12 @@ int canlin_ui_view_scroll(const canlin_ui_view *v)
 
 static float em_of(const canlin_ui_view *v)
 {
-    return v->ui->em;
+    return v->em;
 }
 
 static float unit_of(const canlin_ui_view *v)
 {
-    return v->ui->theme.spacing * 0.25f * v->ui->em;
+    return v->ui->theme.spacing * 0.25f * v->em;
 }
 
 static float gap_of(const canlin_ui_view *v)
@@ -545,12 +872,12 @@ static float gap_of(const canlin_ui_view *v)
 
 static float touch_of(const canlin_ui_view *v)
 {
-    return CANLIN_UI_MIN_TOUCH_EM * v->ui->em;
+    return CANLIN_UI_MIN_TOUCH_EM * v->em;
 }
 
 static const struct nk_user_font *font_of(const canlin_ui_view *v, int which)
 {
-    return &v->ui->font.size[which]->handle;
+    return &v->fe->font.size[which]->handle;
 }
 
 static float line_of(const struct nk_user_font *f)
@@ -1202,7 +1529,7 @@ static int l_separator(lua_State *L)
     float th;
     struct nk_rect r;
     count_widget(L, v);
-    th = floorf(v->ui->dpi + 0.5f);
+    th = floorf(v->factor + 0.5f);
     if (th < 1)
         th = 1;
     r = place(v, CANLIN_UI_W_SEPARATOR, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, th, 0, 0, 0, 0);

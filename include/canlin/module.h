@@ -145,12 +145,17 @@ const char *canlin_module_errmsg(const canlin_module *m);
  * canlin_module_set_ui and freed with the module, after its Lua state; its widget state
  * is reset for each new generation. */
 struct canlin_ui;
+struct canlin_ui_output;
 struct canlin_ui_view;
 struct canlin_ui_input;
 
-/* Attach (or switch, e.g. on theme reload) the shared ui and set the view's screen rect
- * in px. Requests a draw. EBUSY from inside the module's own callback. */
-int canlin_module_set_ui(canlin_module *m, struct canlin_ui *ui, int x, int y, int w, int h);
+/* Attach (or switch: theme reload, the shell moving the view) the shared ui and the
+ * output the view is shown on, and set the view's screen rect in px on that output.
+ * Requests a draw; later metric changes of the output request one too (ui.h). EBUSY from
+ * inside the module's own callback; ENOMEM also when no font slot is free (ui.h EFONT).
+ * The module itself never sees or chooses its output (UI spec §2.1). */
+int canlin_module_set_ui(canlin_module *m, struct canlin_ui *ui, struct canlin_ui_output *out,
+                         int x, int y, int w, int h);
 /* The module's view (NULL if headless): render it after a draw, inspect its record. */
 struct canlin_ui_view *canlin_module_view(canlin_module *m);
 /* Route one normalised input event to the module's view (never to M.event, core API
