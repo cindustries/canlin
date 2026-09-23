@@ -33,3 +33,13 @@ $(GRAPH_TEST): $(BUILD)/t/ui/test_graph.o $(UI_OBJ) $(MODULE_OBJ) $(EV_OBJ) $(SA
 		$(RENDER_OBJ) $(NK_OBJ) $(LUA_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm
+
+# On-screen keyboard (canlin#45): part of ui.c; its own test.
+KBD_TEST := $(BUILD)/t/ui/test_kbd
+TESTS += $(KBD_TEST)
+$(BUILD)/t/ui/test_kbd.o: override CPPFLAGS += $(NK_CPPFLAGS) $(LUA_CPPFLAGS)
+$(BUILD)/t/ui/test_kbd.o: $(UI_HDR) include/canlin/module.h include/canlin/sandbox.h
+$(KBD_TEST): $(BUILD)/t/ui/test_kbd.o $(UI_OBJ) $(MODULE_OBJ) $(EV_OBJ) $(SANDBOX_OBJ) \
+		$(RENDER_OBJ) $(NK_OBJ) $(LUA_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm

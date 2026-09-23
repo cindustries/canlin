@@ -1286,6 +1286,67 @@ static void test_long_press_feedback(void)
     h_done(&h);
 }
 
+static void post_try(harness *h, const char *name)
+{
+    static canlin_module_event e;
+    e.name = name;
+    e.value = NULL;
+    CHECK(canlin_ev_post(h->ev, canlin_module_gen(h->m), CANLIN_MODULE_SOURCE_EVENT, 0, 0, 0,
+                         &e, 0, NULL) == CANLIN_EV_OK);
+    h_drain(h);
+}
+
+/* canlin#46: the core-owned long-press timer is not the module's. Its handle is the next
+ * serial after the module's own timer T (the only other timer of the generation), and
+ * canlin.cancel refuses it as "stale" without touching it: the feedback still appears.
+ * The module's own handle stays cancellable. */
+static void test_cancel_refuses_core_timer(void)
+{
+    static char src[sizeof srcbuf + 512];
+    harness h;
+    const canlin_ui_rect *a;
+    const char *t;
+    unsigned long long th = 0;
+    char *end;
+
+    snprintf(src, sizeof src, "%s", module_src("nil", 0, "{ id = 'flow' }"));
+    end = strstr(src, "return M\n");
+    CHECK(end != NULL);
+    if (end)
+        snprintf(end, sizeof src - (size_t)(end - src),
+                 "local T\n"
+                 "function M.init() T = canlin.timer.after(1000000); print('T ' .. T) end\n"
+                 "function M.event(n)\n"
+                 "  local h = n == 'mine' and T or T + 1\n"
+                 "  local r, c = canlin.cancel(h)\n"
+                 "  print('C ' .. n .. ' ' .. tostring(r) .. ' ' .. tostring(c))\n"
+                 "end\n"
+                 "return M\n");
+    h_init(&h, 1.0f, src, 800, 600);
+    t = strstr(h.log, "T ");
+    CHECK(t != NULL && sscanf(t, "T %llu", &th) == 1 && th != 0);
+    CHECK(timers(&h) == 1);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a != NULL);
+    if (a)
+        press(&h, cx(a), a->y + 16);
+    CHECK(timers(&h) == 2); /* T and the core's long-press timer, serial T + 1 */
+    post_try(&h, "core");
+    CHECK(has(&h, "C core nil stale\n"));
+    CHECK(timers(&h) == 2);
+    canlin_ev_fake_clock_advance(&h.clock, CANLIN_UI_LONG_PRESS_MS);
+    h_drain(&h);
+    CHECK(hold_mark(&h) != NULL && timers(&h) == 1); /* fired as a draw, not refused */
+    CHECK(canlin_ev_cancel(h.ev, canlin_module_gen(h.m), (canlin_ev_handle)th + 1) ==
+          CANLIN_EV_ALREADY); /* it was issued: T + 1 was the core timer */
+    if (a)
+        release(&h, cx(a), a->y + 16);
+    CHECK(has(&h, "E open A\n"));
+    post_try(&h, "mine");
+    CHECK(has(&h, "C mine cancelled nil\n") && timers(&h) == 0);
+    h_done(&h);
+}
+
 int main(void)
 {
     test_edit_kinds();
@@ -1304,6 +1365,7 @@ int main(void)
     test_post_time_stamps();
     test_secondary();
     test_long_press_feedback();
+    test_cancel_refuses_core_timer();
     printf("test_graph: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

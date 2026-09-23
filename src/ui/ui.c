@@ -46,12 +46,15 @@ struct canlin_ui_output {
     int w, h;
     float dpi;
     int scale;
+    unsigned input;           /* CANLIN_UI_INPUT_* (canlin#45) */
     canlin_ui_view *views;    /* bound views, linked through onext */
 };
 
 typedef struct focus_ent {
     uint64_t id;
     unsigned char kind;       /* canlin_ui_kind */
+    float y, h;               /* content px of its box (with a label row above), for
+                               * scrolling it into view; h 0 = not known */
 } focus_ent;
 
 typedef struct slot {
@@ -121,6 +124,19 @@ struct canlin_ui_view {
     uint64_t now;                          /* owner's monotonic time for this frame */
     uint64_t wake_at, wake_next;           /* time-driven redraw of the last / open frame */
     int has_wake, has_wake_next;
+
+    /* On-screen keyboard (canlin#45). kb_shown is the panel of the open / last frame;
+     * presses are routed against it. kq holds input the panel posted, applied before the
+     * queue in the following frames. */
+    int kb_shown, kb_hidden, kb_relayout, kb_typed;
+    int kb_shift;                          /* 0 off, 1 one-shot, 2 caps lock */
+    int kb_layer;                          /* 0 letters, 1 symbols */
+    int kb_press;                          /* key index + 1 held, -1 panel background */
+    unsigned kb_other;                     /* non-primary buttons pressed on the panel */
+    uint64_t kb_shift_t;                   /* time of the last shift tap */
+    uint64_t kb_focus;                     /* focus the hidden flag belongs to */
+    canlin_ui_input kq[4];
+    size_t kqn;
 };
 
 /* ---- shared ui and font cache ---- */
@@ -376,6 +392,25 @@ int canlin_ui_output_set_dpi(canlin_ui_output *o, float dpi)
     return CANLIN_UI_OK;
 }
 
+int canlin_ui_output_set_input(canlin_ui_output *o, unsigned flags)
+{
+    if (o == NULL || (flags & ~(unsigned)(CANLIN_UI_INPUT_POINTER | CANLIN_UI_INPUT_TOUCH |
+                                          CANLIN_UI_INPUT_KEYBOARD)))
+        return CANLIN_UI_EINVAL;
+    if (output_busy(o))
+        return CANLIN_UI_EBUSY;
+    if (o->input != flags) {
+        o->input = flags;
+        output_changed(o);
+    }
+    return CANLIN_UI_OK;
+}
+
+unsigned canlin_ui_output_input(const canlin_ui_output *o)
+{
+    return o ? o->input : 0;
+}
+
 int canlin_ui_output_set_size(canlin_ui_output *o, int w, int h)
 {
     if (o == NULL || w <= 0 || h <= 0)
@@ -609,6 +644,11 @@ void canlin_ui_view_reset(canlin_ui_view *v)
     v->nrec = 0;
     v->rec_over = 0;
     memset(v->gstate, 0, sizeof v->gstate);
+    v->kb_shown = v->kb_hidden = v->kb_relayout = v->kb_typed = 0;
+    v->kb_shift = v->kb_layer = v->kb_press = 0;
+    v->kb_other = 0;
+    v->kb_focus = 0;
+    v->kqn = 0;
 }
 
 struct nk_context *canlin_ui_view_nk(canlin_ui_view *v)
@@ -642,6 +682,9 @@ void canlin_ui_view_input_reset(canlin_ui_view *v)
     if (v == NULL || v->in_frame)
         return;
     v->qhead = v->qn = 0;
+    v->kqn = 0;
+    v->kb_press = 0;
+    v->kb_other = 0;
     v->overflow = 1; /* the next frame releases what is held */
     canlin_ui_graph_state_cancel(v->gstate);
 }
@@ -661,7 +704,7 @@ int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in)
 
 size_t canlin_ui_view_pending(const canlin_ui_view *v)
 {
-    return v ? v->qn : 0;
+    return v ? v->qn + v->kqn + (v->kb_relayout != 0) : 0;
 }
 
 static enum nk_keys nk_key_of(int k)
@@ -695,10 +738,209 @@ static int utf8_bytes(uint32_t cp)
     return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
 }
 
+/* ---- on-screen keyboard: layout, hit test and actions (canlin#45) ---- */
+
+typedef struct kb_key {
+    unsigned char fn;  /* canlin_ui_kbd_fn */
+    unsigned char w2;  /* width in half columns; every row sums to 2 x KB_COLS */
+    uint16_t cp;       /* CHAR: lower-case scalar value */
+} kb_key;
+
+enum { KB_COLS = 11, KB_ROWS = 4, KB_KEYS = 36 };
+static const unsigned char kb_row_n[KB_ROWS] = {11, 11, 10, 4};
+
+#define KC(c) {CANLIN_UI_KBD_CHAR, 2, c}
+#define KB_BOTTOM                                                                         \
+    {CANLIN_UI_KBD_LAYER, 3, 0}, {CANLIN_UI_KBD_SPACE, 11, 0x20}, {CANLIN_UI_KBD_ENTER, 5, 0}, \
+        {CANLIN_UI_KBD_HIDE, 3, 0}
+static const kb_key kb_layout[2][KB_KEYS] = {
+    {/* German QWERTZ */
+     KC('q'), KC('w'), KC('e'), KC('r'), KC('t'), KC('z'), KC('u'), KC('i'), KC('o'), KC('p'),
+     KC(0xfc),
+     KC('a'), KC('s'), KC('d'), KC('f'), KC('g'), KC('h'), KC('j'), KC('k'), KC('l'), KC(0xf6),
+     KC(0xe4),
+     {CANLIN_UI_KBD_SHIFT, 3, 0}, KC('y'), KC('x'), KC('c'), KC('v'), KC('b'), KC('n'),
+     KC('m'), KC(0xdf), {CANLIN_UI_KBD_BACKSPACE, 3, 0},
+     KB_BOTTOM},
+    {/* digits and punctuation */
+     KC('1'), KC('2'), KC('3'), KC('4'), KC('5'), KC('6'), KC('7'), KC('8'), KC('9'), KC('0'),
+     KC(0x20ac),
+     KC('@'), KC('#'), KC('%'), KC('&'), KC('*'), KC('-'), KC('+'), KC('='), KC('('), KC(')'),
+     KC('/'),
+     {CANLIN_UI_KBD_CHAR, 3, '_'}, KC('.'), KC(','), KC('?'), KC('!'), KC('\''), KC('"'),
+     KC(':'), KC(';'), {CANLIN_UI_KBD_BACKSPACE, 3, 0},
+     KB_BOTTOM}};
+#undef KC
+#undef KB_BOTTOM
+
+/* Upper case of the Latin-1 letters on the keyboard; ß and non-letters stay. */
+static uint32_t kb_upper(uint32_t cp)
+{
+    if ((cp >= 'a' && cp <= 'z') || (cp >= 0xe0 && cp <= 0xfe && cp != 0xf7))
+        return cp - 0x20;
+    return cp;
+}
+
+typedef struct kb_geo {
+    float x0, kw, kh, pad;
+    long top;  /* panel top edge, screen px; the panel runs to the view's bottom */
+} kb_geo;
+
+/* Panel geometry for the view's current rect and em; 0 if it does not fit (it would leave
+ * less than one touch row of content). */
+static int kb_geometry(const canlin_ui_view *v, kb_geo *g)
+{
+    float em = v->em, inner, ph;
+    g->pad = 2.0f * v->ui->theme.spacing * 0.25f * em;
+    inner = (float)v->w - 2.0f * g->pad;
+    g->kw = CANLIN_UI_KBD_KEY_EM * em;
+    if (inner / (float)KB_COLS < g->kw)
+        g->kw = inner / (float)KB_COLS;
+    g->kh = g->kw < CANLIN_UI_KBD_KEY_MIN_EM * em ? CANLIN_UI_KBD_KEY_MIN_EM * em : g->kw;
+    ph = (float)KB_ROWS * g->kh + 2.0f * g->pad;
+    if (g->kw < 1.0f || ph > (float)v->h - ceilf(CANLIN_UI_MIN_TOUCH_EM * em))
+        return 0;
+    g->x0 = (float)v->x + ((float)v->w - (float)KB_COLS * g->kw) / 2.0f;
+    g->top = lroundf((float)(v->y + v->h) - ph);
+    return 1;
+}
+
+/* Touch target of key k of the layout: edges rounded once, so keys of a row abut. */
+static struct nk_rect kb_key_rect(const kb_geo *g, int k)
+{
+    int row = 0, first = 0, i, u0 = 0;
+    long x0, x1, y0, y1;
+    const kb_key *keys = kb_layout[0]; /* both layers share the widths */
+    while (k >= first + kb_row_n[row]) {
+        first += kb_row_n[row];
+        row++;
+    }
+    for (i = first; i < k; i++)
+        u0 += keys[i].w2;
+    x0 = lroundf(g->x0 + (float)u0 * g->kw / 2.0f);
+    x1 = lroundf(g->x0 + (float)(u0 + keys[k].w2) * g->kw / 2.0f);
+    y0 = lroundf((float)g->top + g->pad + (float)row * g->kh);
+    y1 = lroundf((float)g->top + g->pad + (float)(row + 1) * g->kh);
+    return nk_rect((float)x0, (float)y0, (float)(x1 - x0), (float)(y1 - y0));
+}
+
+/* Key under (x, y) of the shown panel: index, -1 on the panel but no key, -2 off it. */
+static int kb_hit(const canlin_ui_view *v, int x, int y)
+{
+    kb_geo g;
+    int k;
+    if (!v->kb_shown || !kb_geometry(v, &g) || y < g.top || y >= v->y + v->h || x < v->x ||
+        x >= v->x + v->w)
+        return -2;
+    for (k = 0; k < KB_KEYS; k++) {
+        struct nk_rect r = kb_key_rect(&g, k);
+        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+            return k;
+    }
+    return -1;
+}
+
+/* Height in px the panel takes from the view's scrollable content (0 when hidden). */
+static int kb_height(const canlin_ui_view *v)
+{
+    kb_geo g;
+    return v->kb_shown && kb_geometry(v, &g) ? (int)(v->y + v->h - g.top) : 0;
+}
+
+static void kb_post(canlin_ui_view *v, canlin_ui_input_type type, int key, int down, uint32_t cp)
+{
+    canlin_ui_input *e;
+    if (v->kqn == sizeof v->kq / sizeof v->kq[0])
+        return; /* cannot happen: one action posts at most two, applied before the next */
+    e = &v->kq[v->kqn++];
+    memset(e, 0, sizeof *e);
+    e->type = type;
+    e->key = key;
+    e->down = down;
+    e->cp = cp;
+    e->t = v->btn_t;
+}
+
+static void kb_post_key(canlin_ui_view *v, int key)
+{
+    kb_post(v, CANLIN_UI_IN_KEY, key, 1, 0);
+    kb_post(v, CANLIN_UI_IN_KEY, key, 0, 0);
+}
+
+static int focus_kind(const canlin_ui_view *v);
+
+/* A key released where it was pressed. */
+static void kb_action(canlin_ui_view *v, int k, uint64_t t)
+{
+    const kb_key *key = &kb_layout[v->kb_layer][k];
+    switch (key->fn) {
+    case CANLIN_UI_KBD_CHAR:
+        kb_post(v, CANLIN_UI_IN_TEXT, 0, 0, v->kb_shift ? kb_upper(key->cp) : key->cp);
+        if (v->kb_shift == 1)
+            v->kb_shift = 0;
+        break;
+    case CANLIN_UI_KBD_SPACE:
+        kb_post(v, CANLIN_UI_IN_TEXT, 0, 0, 0x20);
+        break;
+    case CANLIN_UI_KBD_SHIFT:
+        if (v->kb_shift == 1 && t - v->kb_shift_t <= CANLIN_UI_DOUBLE_TAP_MS)
+            v->kb_shift = 2;
+        else
+            v->kb_shift = v->kb_shift ? 0 : 1;
+        v->kb_shift_t = t;
+        break;
+    case CANLIN_UI_KBD_BACKSPACE:
+        kb_post_key(v, CANLIN_UI_KEY_BACKSPACE);
+        break;
+    case CANLIN_UI_KBD_ENTER:
+        kb_post_key(v, focus_kind(v) == CANLIN_UI_W_AREA ? CANLIN_UI_KEY_ENTER : CANLIN_UI_KEY_TAB);
+        break;
+    case CANLIN_UI_KBD_LAYER:
+        v->kb_layer = !v->kb_layer;
+        break;
+    case CANLIN_UI_KBD_HIDE:
+        v->kb_hidden = 1;
+        break;
+    }
+}
+
+/* A button edge on the panel (or the release of a press that began there) is the panel's:
+ * returns 1 and Nuklear never sees it. */
+static int kb_route(canlin_ui_view *v, const canlin_ui_input *e)
+{
+    unsigned bit = 1u << e->button;
+    if (e->down) {
+        int k;
+        if (v->btn_down & bit)
+            return 0;
+        k = kb_hit(v, e->x, e->y);
+        if (k == -2)
+            return 0;
+        if (e->button == CANLIN_UI_BUTTON_PRIMARY)
+            v->kb_press = k >= 0 ? k + 1 : -1;
+        else
+            v->kb_other |= bit;
+        return 1;
+    }
+    if (e->button == CANLIN_UI_BUTTON_PRIMARY && v->kb_press) {
+        int k = v->kb_press - 1;
+        v->kb_press = 0;
+        if (k >= 0 && kb_hit(v, e->x, e->y) == k)
+            kb_action(v, k, e->t);
+        return 1;
+    }
+    if (v->kb_other & bit) {
+        v->kb_other &= ~bit;
+        return 1;
+    }
+    return 0;
+}
+
 /* Apply queued input for one frame: motions and scrolls, then at most one edge group
  * (one button edge, one key edge, or a run of text that fits Nuklear's per-frame text
  * buffer). Nuklear evaluates a frame's input by category, not in order, so mixing
- * groups or repeating an edge in one frame would reorder or lose edges. */
+ * groups or repeating an edge in one frame would reorder or lose edges. Input the
+ * keyboard panel posted (kq) comes before the queue: it stands for taps already made. */
 static void apply_input(canlin_ui_view *v)
 {
     struct nk_context *ctx = &v->nk;
@@ -707,6 +949,8 @@ static void apply_input(canlin_ui_view *v)
 
     v->kpress = 0;
     v->space_in = v->press_in = 0;
+    v->kb_typed = 0;
+    v->kb_relayout = 0;
     nk_input_begin(ctx);
     if (v->overflow) {
         /* Edges were lost: release what is held so no interaction stays stuck. */
@@ -721,8 +965,9 @@ static void apply_input(canlin_ui_view *v)
         v->overflow = 0;
         group = G_BUTTON; /* the release is this frame's edge */
     }
-    while (v->qn) {
-        const canlin_ui_input *e = &v->q[v->qhead];
+    while (v->kqn || v->qn) {
+        int own = v->kqn != 0;
+        const canlin_ui_input *e = own ? &v->kq[0] : &v->q[v->qhead];
         if (group != G_NONE && group != G_TEXT)
             break; /* one edge per frame; anything later waits (keeps order) */
         if (group == G_TEXT && e->type != CANLIN_UI_IN_TEXT)
@@ -737,6 +982,9 @@ static void apply_input(canlin_ui_view *v)
             v->scroll += (float)e->dy;
             break;
         case CANLIN_UI_IN_BUTTON:
+            group = G_BUTTON;
+            if (kb_route(v, e))
+                break;
             nk_input_motion(ctx, e->x, e->y);
             nk_input_button(ctx, nk_button_of(e->button), e->x, e->y, e->down ? 1 : 0);
             v->last_x = e->x;
@@ -748,7 +996,6 @@ static void apply_input(canlin_ui_view *v)
             else
                 v->btn_down &= ~(1u << e->button);
             v->btn_t = e->t;
-            group = G_BUTTON;
             break;
         case CANLIN_UI_IN_KEY:
             if (nk_key_of(e->key) != NK_KEY_NONE)
@@ -768,8 +1015,14 @@ static void apply_input(canlin_ui_view *v)
             group = G_TEXT;
             break;
         }
-        v->qhead = (v->qhead + 1) % CANLIN_UI_INPUT_MAX;
-        v->qn--;
+        if (own) {
+            v->kb_typed = 1;
+            v->kqn--;
+            memmove(v->kq, v->kq + 1, v->kqn * sizeof v->kq[0]);
+        } else {
+            v->qhead = (v->qhead + 1) % CANLIN_UI_INPUT_MAX;
+            v->qn--;
+        }
     }
 done:
     nk_input_end(ctx);
@@ -824,6 +1077,9 @@ static void focus_keys(canlin_ui_view *v)
     v->focus_kbd = 1;
     v->focus_pass = 0;
     v->tab_used = 1;
+    /* This Tab was navigation: an area it lands on (Nuklear's NK_EDIT_BOX allows Tab)
+     * must not also type it. */
+    v->nk.input.keyboard.keys[NK_KEY_TAB].clicked = 0;
 }
 
 /* A focusable widget drawn in this frame, in draw order. */
@@ -832,8 +1088,45 @@ static void focusable(canlin_ui_view *v, uint64_t id, int kind)
     if (v->norder < CANLIN_UI_MAX_WIDGETS) {
         v->order[v->norder].id = id;
         v->order[v->norder].kind = (unsigned char)kind;
+        v->order[v->norder].y = v->order[v->norder].h = 0;
         v->norder++;
     }
+}
+
+/* Whether the keyboard panel belongs on the view with its current focus (canlin#45). A
+ * new focus forgets an earlier Hide. */
+static int kb_want(canlin_ui_view *v)
+{
+    unsigned in = v->out->input;
+    int kind = focus_kind(v);
+    kb_geo g;
+    if (v->focus != v->kb_focus) {
+        v->kb_focus = v->focus;
+        v->kb_hidden = 0;
+    }
+    return (in & CANLIN_UI_INPUT_TOUCH) && !(in & CANLIN_UI_INPUT_KEYBOARD) &&
+           (kind == CANLIN_UI_W_FIELD || kind == CANLIN_UI_W_AREA) && !v->kb_hidden &&
+           kb_geometry(v, &g);
+}
+
+/* Scrolls so the focused widget's box (as laid out in the last finished frame) is inside
+ * the visible height vh, with the view padding around it; a box taller than vh shows its
+ * top. Nothing happens when it is already visible or its geometry is unknown. */
+static void scroll_to_focus(canlin_ui_view *v, float vh)
+{
+    unsigned i;
+    float pad = 2.0f * v->ui->theme.spacing * 0.25f * v->em, top, bot;
+    for (i = 0; i < v->norder_prev; i++)
+        if (v->order_prev[i].id == v->focus && v->focus && v->order_prev[i].h > 0)
+            break;
+    if (i == v->norder_prev)
+        return;
+    top = v->order_prev[i].y - pad;
+    bot = v->order_prev[i].y + v->order_prev[i].h + pad;
+    if (top < v->scroll || bot - top > vh)
+        v->scroll = top;
+    else if (bot > v->scroll + vh)
+        v->scroll = bot - vh;
 }
 
 /* Enter or Space activates the focused plain widget id in this frame. */
@@ -890,6 +1183,8 @@ static void slots_evict(canlin_ui_view *v)
 
 /* ---- frames ---- */
 
+static void kb_draw(canlin_ui_view *v);
+
 int canlin_ui_view_frame_begin(canlin_ui_view *v)
 {
     struct nk_context *ctx;
@@ -928,7 +1223,15 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     v->no_cmds = 0;
     apply_input(v);
     focus_keys(v);
-    maxs = (float)(v->content_h - v->h);
+    {
+        int was = v->kb_shown;
+        v->kb_shown = kb_want(v);
+        /* Tab (also the keyboard's next) moved the focus, the panel appeared, or the panel
+         * typed into the focused widget: keep that widget visible (canlin#45, canlin#46). */
+        if (v->tab_used || (v->kb_shown && (!was || v->kb_typed)))
+            scroll_to_focus(v, (float)(v->h - kb_height(v)));
+    }
+    maxs = (float)(v->content_h - (v->h - kb_height(v)));
     if (maxs < 0)
         maxs = 0;
     if (v->scroll > maxs)
@@ -968,6 +1271,7 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
 {
     struct nk_context *ctx;
     float em, unit;
+    int vh;
     if (v == NULL || !v->in_frame)
         return;
     ctx = &v->nk;
@@ -975,16 +1279,19 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
     unit = v->ui->theme.spacing * 0.25f * em;
     /* cy ends with one inter-widget gap; the view ends with its padding instead. */
     v->content_h = v->widgets ? (int)ceilf(v->cy) : 0;
-    if (v->content_h > v->h) {
+    vh = v->h - kb_height(v);
+    if (v->content_h > vh) {
         /* Scroll position indicator (the view scrolls by input; no scrollbar widget). */
         struct nk_command_buffer *out = nk_window_get_canvas(ctx);
-        float th = (float)v->h * (float)v->h / (float)v->content_h;
-        float ty = (float)v->y + v->scroll * (float)v->h / (float)v->content_h;
+        float th = (float)vh * (float)vh / (float)v->content_h;
+        float ty = (float)v->y + v->scroll * (float)vh / (float)v->content_h;
         canlin_theme_rgb m = v->ui->theme.color[CANLIN_THEME_MUTED];
         float bw = unit > 1.0f ? unit : 1.0f;
         nk_fill_rect(out, nk_rect((float)(v->x + v->w) - bw, ty, bw, th), 0,
                      nk_rgb(m.r, m.g, m.b));
     }
+    if (v->kb_shown)
+        kb_draw(v);
     nk_layout_space_end(ctx);
     nk_end(ctx);
     slots_evict(v);
@@ -1007,6 +1314,12 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
         if (!found)
             v->focus = 0;
     }
+    /* A tap on the focused field or area shows a hidden keyboard again; a change of the
+     * panel (focus gained or lost this frame) needs one more frame, which pending asks
+     * for. */
+    if (v->press_in && v->focus && v->focus == v->kb_focus)
+        v->kb_hidden = 0;
+    v->kb_relayout = kb_want(v) != v->kb_shown;
     v->dirty = 0;
     v->in_frame = 0;
 }
@@ -1494,6 +1807,18 @@ static void focus_mark(canlin_ui_view *v, int kind, struct nk_rect r, uint64_t i
 {
     float th, rad;
     canlin_theme_rgb c;
+    unsigned i = v->norder;
+    while (i-- > 0)
+        if (v->order[i].id == id) {
+            /* content px of the box, with the label row of the kinds that have one */
+            float lh = kind == CANLIN_UI_W_FIELD || kind == CANLIN_UI_W_AREA ||
+                               kind == CANLIN_UI_W_CHOICE
+                           ? line_of(font_of(v, F_BODY))
+                           : 0.0f;
+            v->order[i].y = r.y - (float)v->y + v->scroll - lh;
+            v->order[i].h = r.h + lh;
+            break;
+        }
     if (v->focus != id || !v->focus_kbd)
         return;
     th = floorf(v->em / 8.0f) < 1.0f ? 1.0f : floorf(v->em / 8.0f);
@@ -2038,6 +2363,130 @@ static int l_section(lua_State *L)
         v->depth = depth;
     }
     return 0;
+}
+
+/* ---- on-screen keyboard: drawing (canlin#45) ---- */
+
+static void kb_record(canlin_ui_view *v, int part, struct nk_rect r, uint32_t off, uint32_t len)
+{
+    canlin_ui_rect *d;
+    if (v->nrec >= CANLIN_UI_RECORD_MAX) {
+        v->rec_over = 1;
+        return;
+    }
+    d = &v->rec[v->nrec++];
+    memset(d, 0, sizeof *d);
+    d->kind = CANLIN_UI_W_KEYBOARD;
+    d->part = (unsigned char)part;
+    d->widget = (unsigned short)v->widgets; /* after every widget of the draw */
+    d->x = (int)r.x;
+    d->y = (int)r.y;
+    d->w = (int)r.w;
+    d->h = (int)r.h;
+    d->off = off;
+    d->len = len;
+}
+
+static size_t utf8_put(char *b, uint32_t cp)
+{
+    if (cp < 0x80) {
+        b[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        b[0] = (char)(0xc0 | (cp >> 6));
+        b[1] = (char)(0x80 | (cp & 0x3f));
+        return 2;
+    }
+    b[0] = (char)(0xe0 | (cp >> 12)); /* the layout has nothing above U+FFFF */
+    b[1] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    b[2] = (char)(0x80 | (cp & 0x3f));
+    return 3;
+}
+
+/* The panel over the bottom of the view, drawn after the content: surface background,
+ * keys in the background role with text labels, the pressed key in accent; an active
+ * shift has an accent label, caps lock also an accent border. */
+static void kb_draw(canlin_ui_view *v)
+{
+    struct nk_command_buffer *cv = nk_window_get_canvas(&v->nk);
+    const struct nk_user_font *f = font_of(v, F_BODY);
+    int area = focus_kind(v) == CANLIN_UI_W_AREA, k;
+    float em = v->em, inset = floorf(unit_of(v) / 2.0f), th, rad0;
+    kb_geo g;
+    struct nk_rect panel;
+    if (!kb_geometry(v, &g))
+        return;
+    if (inset < 1.0f)
+        inset = 1.0f;
+    th = floorf(em / 8.0f) < 1.0f ? 1.0f : floorf(em / 8.0f);
+    rad0 = v->ui->theme.radius * em;
+    panel = nk_rect((float)v->x, (float)g.top, (float)v->w, (float)(v->y + v->h - g.top));
+    nk_fill_rect(cv, panel, 0, col(v, CANLIN_THEME_SURFACE));
+    kb_record(v, CANLIN_UI_P_BOX, panel, 0, 0);
+    for (k = 0; k < KB_KEYS; k++) {
+        const kb_key *key = &kb_layout[v->kb_layer][k];
+        struct nk_rect r = kb_key_rect(&g, k), vis;
+        int pressed = v->kb_press == k + 1, fg = CANLIN_THEME_MUTED;
+        char buf[8];
+        const char *s = buf, *out;
+        size_t n = 0, outlen, shown;
+        uint32_t off = 0;
+        float rad = rad0, tw;
+        switch (key->fn) {
+        case CANLIN_UI_KBD_CHAR:
+            off = v->kb_shift ? kb_upper(key->cp) : key->cp;
+            n = utf8_put(buf, off);
+            fg = CANLIN_THEME_TEXT;
+            break;
+        case CANLIN_UI_KBD_SHIFT:
+            s = "\xE2\x86\x91"; /* U+2191 */
+            n = 3;
+            off = (uint32_t)v->kb_shift;
+            if (v->kb_shift)
+                fg = CANLIN_THEME_ACCENT;
+            break;
+        case CANLIN_UI_KBD_BACKSPACE:
+            s = "\xE2\x86\x90"; /* U+2190 */
+            n = 3;
+            break;
+        case CANLIN_UI_KBD_LAYER:
+            s = v->kb_layer ? "ABC" : "?123";
+            n = strlen(s);
+            off = (uint32_t)v->kb_layer;
+            break;
+        case CANLIN_UI_KBD_SPACE:
+            off = 0x20;
+            break;
+        case CANLIN_UI_KBD_ENTER:
+            s = area ? "Enter" : "Next";
+            n = strlen(s);
+            off = (uint32_t)area;
+            break;
+        case CANLIN_UI_KBD_HIDE:
+            s = "\xE2\x86\x93"; /* U+2193 */
+            n = 3;
+            break;
+        }
+        kb_record(v, CANLIN_UI_P_KEY, r, off, key->fn);
+        vis = nk_rect(r.x + inset, r.y + inset, r.w - 2.0f * inset, r.h - 2.0f * inset);
+        if (vis.w < 1.0f || vis.h < 1.0f)
+            vis = r;
+        if (rad > vis.w / 4.0f)
+            rad = floorf(vis.w / 4.0f);
+        nk_fill_rect(cv, vis, rad, col(v, pressed ? CANLIN_THEME_ACCENT : CANLIN_THEME_BACKGROUND));
+        if (key->fn == CANLIN_UI_KBD_SHIFT && v->kb_shift == 2)
+            nk_stroke_rect(cv, vis, rad, th, col(v, CANLIN_THEME_ACCENT));
+        if (n == 0)
+            continue;
+        ellipsize(v, f, s, n, vis.w, &out, &outlen, &shown);
+        tw = text_w(f, out, outlen);
+        nk_draw_text(cv,
+                     nk_rect(floorf(vis.x + (vis.w - tw) / 2.0f),
+                             floorf(vis.y + (vis.h - f->height) / 2.0f), tw, f->height),
+                     out, (int)outlen, f, nk_rgba(0, 0, 0, 0),
+                     col(v, pressed ? CANLIN_THEME_BACKGROUND : fg));
+    }
 }
 
 static int ui_newindex(lua_State *L)

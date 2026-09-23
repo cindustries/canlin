@@ -98,6 +98,52 @@ int canlin_ui_output_set_scale(canlin_ui_output *o, int percent);
 int canlin_ui_output_set_dpi(canlin_ui_output *o, float dpi);
 int canlin_ui_output_set_size(canlin_ui_output *o, int w, int h);
 
+/* Input class of an output (flags, canlin#45): what the platform can deliver on it. The
+ * shell sets it from its own output flags (shell.h CANLIN_SHELL_IN_*, same values); it is
+ * not part of the description. A new output has 0 (unknown): no on-screen keyboard.
+ * Changing it follows the setter rules above (EINVAL for unknown bits, EBUSY, dirty). */
+enum {
+    CANLIN_UI_INPUT_POINTER = 1,
+    CANLIN_UI_INPUT_TOUCH = 2,
+    CANLIN_UI_INPUT_KEYBOARD = 4
+};
+int canlin_ui_output_set_input(canlin_ui_output *o, unsigned flags);
+unsigned canlin_ui_output_input(const canlin_ui_output *o);
+
+/* On-screen keyboard (UI spec §3, canlin#45). While a field or area of a view has the
+ * focus and the view's output has TOUCH but not KEYBOARD, the view shows a keyboard panel
+ * across its bottom: the scrollable content area shrinks by the panel's height and the
+ * focused widget is scrolled into view when the panel appears and while it is typed into.
+ * German QWERTZ with ü ö ä ß; shift is one-shot, a second tap within
+ * CANLIN_UI_DOUBLE_TAP_MS locks capitals, a third tap unlocks; ?123 switches to digits,
+ * punctuation, € and @. Enter inserts a newline in an area and moves the focus to the next
+ * focusable widget in a field (as Tab). Hide removes the panel without unfocusing; a tap
+ * on the focused widget, or focusing another field, shows it again.
+ *
+ * Keys tile the panel's inner width (view width minus the view padding) in 11 columns,
+ * each CANLIN_UI_KBD_KEY_EM square. In narrower views every key shrinks evenly to fit the
+ * width and stays square down to CANLIN_UI_KBD_KEY_MIN_EM; below that (a view narrower
+ * than 11 x that plus padding) the width keeps shrinking so the keys still tile the width,
+ * and the height stays at the minimum. The panel is not shown if it would leave less than
+ * one touch row (2.5 em) of content.
+ *
+ * Presses on the panel never reach Nuklear or Lua: a key acts at release inside the key
+ * it was pressed on (the pressed key shows the accent colour meanwhile) and posts ordinary
+ * input to the view's own queue (text, or Backspace / Enter / Tab key edges), applied in
+ * the following frames like any other input. canlin_ui_view_pending counts it, and also
+ * one pending re-layout when the panel is to appear or disappear, so the host draws again. */
+
+/* Function of a keyboard key (record part CANLIN_UI_P_KEY, field len). */
+typedef enum canlin_ui_kbd_fn {
+    CANLIN_UI_KBD_CHAR = 0,  /* off = the scalar value it types now (shift applied) */
+    CANLIN_UI_KBD_SHIFT,     /* off = 0 off, 1 one-shot, 2 caps lock */
+    CANLIN_UI_KBD_BACKSPACE,
+    CANLIN_UI_KBD_LAYER,     /* off = the current layer: 0 letters, 1 symbols */
+    CANLIN_UI_KBD_SPACE,     /* off = U+0020 */
+    CANLIN_UI_KBD_ENTER,     /* off = 1 in an area (newline), 0 in a field (next) */
+    CANLIN_UI_KBD_HIDE
+} canlin_ui_kbd_fn;
+
 /* ---- normalised input (fed by the core; never delivered to Lua as events) ---- */
 
 typedef enum canlin_ui_key {
@@ -121,12 +167,15 @@ typedef enum canlin_ui_key {
  * in draw order: field, area, button, toggle, choice, section header, graph. Tab /
  * Shift-Tab move it to the next / previous focusable widget of the last finished frame's
  * draw order (wrapping); the widget then shows an accent focus mark (record part
- * P_FOCUS) until a pointer press. Enter or Space (text U+0020) activates a focused
+ * P_FOCUS) until a pointer press, and the view scrolls in the same frame so the widget's
+ * box (with its label row) is fully visible, by the least amount, keeping the view
+ * padding around it; a box taller than the view shows its top (canlin#46). Enter or Space (text U+0020) activates a focused
  * button, toggle, section header or choice (expands/collapses); Up/Down step a focused
  * choice's index. A focused graph keeps Tab / Shift-Tab (node cycling) and Del for
  * itself; Esc leaves its keyboard mode, and the next Tab moves on from it. A pointer
  * press clears the focus of button, toggle, choice and section; fields and graphs take
- * the focus by press as before. Keys reserved by the shell never reach a view. */
+ * the focus by press as before. A Tab that moves the focus is navigation only: it is not
+ * typed into the area it lands on. Keys reserved by the shell never reach a view. */
 
 /* Pointer buttons of CANLIN_UI_IN_BUTTON (canlin#32). Primary is 0, so a zeroed event is
  * a primary edge. Touch contact is primary; backends map a platform's context gesture to
@@ -181,7 +230,8 @@ int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in);
  * buttons (every button held) and keys at the next frame and cancel graph gestures without edits. No-op inside
  * a frame. */
 void canlin_ui_view_input_reset(canlin_ui_view *v);
-/* Queued events not yet applied: the host requests another draw while this is > 0. */
+/* Queued events not yet applied (including input posted by the on-screen keyboard and a
+ * pending keyboard re-layout): the host requests another draw while this is > 0. */
 size_t canlin_ui_view_pending(const canlin_ui_view *v);
 
 /* ---- view lifecycle ---- */
@@ -246,7 +296,7 @@ typedef enum canlin_ui_kind {
     CANLIN_UI_W_HEADING = 1, CANLIN_UI_W_TEXT, CANLIN_UI_W_BUBBLE, CANLIN_UI_W_FIELD,
     CANLIN_UI_W_AREA, CANLIN_UI_W_BUTTON, CANLIN_UI_W_TOGGLE, CANLIN_UI_W_CHOICE,
     CANLIN_UI_W_METER, CANLIN_UI_W_SEPARATOR, CANLIN_UI_W_COLUMNS, CANLIN_UI_W_SECTION,
-    CANLIN_UI_W_GRAPH
+    CANLIN_UI_W_GRAPH, CANLIN_UI_W_KEYBOARD /* the on-screen keyboard panel (not a Lua widget) */
 } canlin_ui_kind;
 
 typedef enum canlin_ui_part {
@@ -258,9 +308,11 @@ typedef enum canlin_ui_part {
     CANLIN_UI_P_PORT,     /* graph: a visible port touch target; off = node index,
                            * len = port index, inputs first then outputs */
     CANLIN_UI_P_FOCUS,    /* keyboard focus mark around the focused widget (canlin#26) */
-    CANLIN_UI_P_HOLD      /* graph: long-press feedback shown while a press is held past
+    CANLIN_UI_P_HOLD,     /* graph: long-press feedback shown while a press is held past
                            * CANLIN_UI_LONG_PRESS_MS; off = node index, or
                            * CANLIN_UI_HOLD_CANVAS for a hold on empty canvas */
+    CANLIN_UI_P_KEY       /* keyboard: one key's touch target (they tile each row); off
+                           * and len as canlin_ui_kbd_fn. The panel itself is P_BOX. */
 } canlin_ui_part;
 
 #define CANLIN_UI_HOLD_CANVAS 0xffffffffu
