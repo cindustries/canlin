@@ -30,11 +30,20 @@ typedef struct op {
     canlin_ev_producer prod;
 } op;
 
-typedef struct mod {
-    canlin_ev_gen gen;         /* active generation, 0 = inactive */
+/* Per-generation state of a slot. */
+typedef struct genst {
+    canlin_ev_gen gen;         /* 0 = none */
     uint32_t serial;           /* last handle serial issued in `gen` */
     unsigned ctl;
     int dirty;
+} genst;
+
+/* A slot holds its live generation and, while a reload is staged, the staged one. Queue,
+ * reservations and operation counts are per slot: both generations share the slot's
+ * limits during the overlap. A slot with a staged generation dispatches nothing. */
+typedef struct mod {
+    genst live;
+    genst stage;
     item ring[CANLIN_EV_MOD_MAX_ITEMS];
     unsigned head, count;
     unsigned items;            /* queued + reserved */
@@ -139,15 +148,26 @@ static void ring_pop(mod *m, item *out)
 
 /* ---- lookup ---- */
 
-static mod *find_mod(canlin_ev *ev, canlin_ev_gen gen)
+/* Live or staged generation `gen`; *mo gets its slot. */
+static genst *find_gs(canlin_ev *ev, canlin_ev_gen gen, mod **mo)
 {
     unsigned s;
     if (gen == 0)
         return NULL;
-    for (s = 0; s < CANLIN_EV_MAX_MODULES; s++)
-        if (ev->mods[s].gen == gen)
-            return &ev->mods[s];
+    for (s = 0; s < CANLIN_EV_MAX_MODULES; s++) {
+        mod *m = &ev->mods[s];
+        if (m->live.gen == gen || m->stage.gen == gen) {
+            *mo = m;
+            return m->live.gen == gen ? &m->live : &m->stage;
+        }
+    }
     return NULL;
+}
+
+static mod *find_mod(canlin_ev *ev, canlin_ev_gen gen)
+{
+    mod *m = NULL;
+    return find_gs(ev, gen, &m) ? m : NULL;
 }
 
 static int find_op(const canlin_ev *ev, canlin_ev_handle h)
@@ -215,12 +235,12 @@ static void queue_terminal(canlin_ev *ev, int i, int detail, void *payload, size
     ring_push(m, &it);
 }
 
-static int alloc_handle(mod *m, canlin_ev_handle *out)
+static int alloc_handle(genst *g, canlin_ev_handle *out)
 {
-    if (m->serial == UINT32_MAX)
+    if (g->serial == UINT32_MAX)
         return CANLIN_EV_ELIMIT;
-    m->serial++;
-    *out = ((canlin_ev_handle)m->gen << 32) | m->serial;
+    g->serial++;
+    *out = ((canlin_ev_handle)g->gen << 32) | g->serial;
     return CANLIN_EV_OK;
 }
 
@@ -272,16 +292,14 @@ int canlin_ev_free(canlin_ev *ev)
 
 /* ---- public: lifecycle ---- */
 
-static int start_in_slot(canlin_ev *ev, mod *m, canlin_ev_gen *gen_out)
+static int start_gs(canlin_ev *ev, genst *g, canlin_ev_gen *gen_out)
 {
     if (ev->next_gen == 0)
         return CANLIN_EV_ELIMIT;
-    m->gen = ev->next_gen;
+    memset(g, 0, sizeof *g);
+    g->gen = ev->next_gen;
     ev->next_gen = (ev->next_gen == UINT32_MAX) ? 0 : ev->next_gen + 1;
-    m->serial = 0;
-    m->ctl = 0;
-    m->dirty = 0;
-    *gen_out = m->gen;
+    *gen_out = g->gen;
     return CANLIN_EV_OK;
 }
 
@@ -290,25 +308,25 @@ int canlin_ev_module_start(canlin_ev *ev, canlin_ev_gen *gen_out)
     unsigned s;
     for (s = 0; s < CANLIN_EV_MAX_MODULES; s++) {
         mod *m = &ev->mods[s];
-        if (m->gen == 0 && m->items == 0 && m->ops == 0 && m->count == 0)
-            return start_in_slot(ev, m, gen_out);
+        if (m->live.gen == 0 && m->stage.gen == 0 && m->items == 0 && m->ops == 0 &&
+            m->count == 0)
+            return start_gs(ev, &m->live, gen_out);
     }
     return CANLIN_EV_EFULL;
 }
 
 int canlin_ev_module_stop(canlin_ev *ev, canlin_ev_gen gen)
 {
-    mod *m = find_mod(ev, gen);
+    mod *m = NULL;
+    genst *g = find_gs(ev, gen, &m);
     unsigned slot, i;
 
-    if (!m)
+    if (!g)
         return CANLIN_EV_ESTALE;
     slot = (unsigned)(m - ev->mods);
 
     /* 1. inactive: no admissions, no callbacks, latches dropped. */
-    m->gen = 0;
-    m->ctl = 0;
-    m->dirty = 0;
+    memset(g, 0, sizeof *g);
 
     /* 2. cancel timers and pending operations. */
     for (i = 0; i < CANLIN_EV_PROC_MAX_OPS; i++) {
@@ -345,12 +363,53 @@ int canlin_ev_module_reload(canlin_ev *ev, canlin_ev_gen old_gen, canlin_ev_gen 
     int rc;
     if (!m)
         return CANLIN_EV_ESTALE;
+    if (m->live.gen != old_gen || m->stage.gen != 0)
+        return CANLIN_EV_EINVAL; /* a staged reload is committed or aborted first */
     if (ev->next_gen == 0)
         return CANLIN_EV_ELIMIT;
     rc = canlin_ev_module_stop(ev, old_gen);
     if (rc < 0)
         return rc;
-    return start_in_slot(ev, m, new_gen);
+    return start_gs(ev, &m->live, new_gen);
+}
+
+int canlin_ev_module_stage(canlin_ev *ev, canlin_ev_gen old_gen, canlin_ev_gen *new_gen)
+{
+    mod *m = find_mod(ev, old_gen);
+    if (!m)
+        return CANLIN_EV_ESTALE;
+    if (!new_gen || m->live.gen != old_gen || m->stage.gen != 0)
+        return CANLIN_EV_EINVAL;
+    /* Admission: the slot's shared limits must leave the new generation room for at
+     * least one item and one operation; otherwise it could not even arm a timer. */
+    if (m->items >= CANLIN_EV_MOD_MAX_ITEMS || ev->items >= CANLIN_EV_PROC_MAX_ITEMS ||
+        m->ops >= CANLIN_EV_MOD_MAX_OPS || ev->nops >= CANLIN_EV_PROC_MAX_OPS)
+        return CANLIN_EV_EFULL;
+    return start_gs(ev, &m->stage, new_gen);
+}
+
+int canlin_ev_module_commit(canlin_ev *ev, canlin_ev_gen new_gen)
+{
+    mod *m = find_mod(ev, new_gen);
+    if (!m)
+        return CANLIN_EV_ESTALE;
+    if (m->stage.gen != new_gen)
+        return CANLIN_EV_EINVAL;
+    if (m->live.gen)
+        canlin_ev_module_stop(ev, m->live.gen); /* event runtime §7 steps 1-4 */
+    m->live = m->stage;
+    memset(&m->stage, 0, sizeof m->stage);
+    return CANLIN_EV_OK;
+}
+
+int canlin_ev_module_abort(canlin_ev *ev, canlin_ev_gen new_gen)
+{
+    mod *m = find_mod(ev, new_gen);
+    if (!m)
+        return CANLIN_EV_ESTALE;
+    if (m->stage.gen != new_gen)
+        return CANLIN_EV_EINVAL;
+    return canlin_ev_module_stop(ev, new_gen);
 }
 
 int canlin_ev_module_slot(const canlin_ev *ev, canlin_ev_gen gen)
@@ -359,7 +418,7 @@ int canlin_ev_module_slot(const canlin_ev *ev, canlin_ev_gen gen)
     if (gen == 0)
         return CANLIN_EV_ESTALE;
     for (s = 0; s < CANLIN_EV_MAX_MODULES; s++)
-        if (ev->mods[s].gen == gen)
+        if (ev->mods[s].live.gen == gen || ev->mods[s].stage.gen == gen)
             return (int)s;
     return CANLIN_EV_ESTALE;
 }
@@ -419,21 +478,23 @@ int canlin_ev_post_latest(canlin_ev *ev, canlin_ev_gen gen, uint32_t source, uin
 
 int canlin_ev_signal(canlin_ev *ev, canlin_ev_gen gen, unsigned control_bits)
 {
-    mod *m = find_mod(ev, gen);
-    if (!m)
+    mod *m = NULL;
+    genst *g = find_gs(ev, gen, &m);
+    if (!g)
         return CANLIN_EV_ESTALE;
     if (control_bits == 0)
         return CANLIN_EV_EINVAL;
-    m->ctl |= control_bits;
+    g->ctl |= control_bits;
     return CANLIN_EV_OK;
 }
 
 int canlin_ev_invalidate(canlin_ev *ev, canlin_ev_gen gen)
 {
-    mod *m = find_mod(ev, gen);
-    if (!m)
+    mod *m = NULL;
+    genst *g = find_gs(ev, gen, &m);
+    if (!g)
         return CANLIN_EV_ESTALE;
-    m->dirty = 1;
+    g->dirty = 1;
     return CANLIN_EV_OK;
 }
 
@@ -442,10 +503,11 @@ int canlin_ev_invalidate(canlin_ev *ev, canlin_ev_gen gen)
 static int admit_op(canlin_ev *ev, canlin_ev_gen gen, size_t bytes, int is_timer, int *idx,
                     canlin_ev_handle *h)
 {
-    mod *m = find_mod(ev, gen);
+    mod *m = NULL;
+    genst *g = find_gs(ev, gen, &m);
     int i, rc;
 
-    if (!m)
+    if (!g)
         return CANLIN_EV_ESTALE;
     if (m->ops >= CANLIN_EV_MOD_MAX_OPS || ev->nops >= CANLIN_EV_PROC_MAX_OPS)
         return CANLIN_EV_EFULL;
@@ -457,7 +519,7 @@ static int admit_op(canlin_ev *ev, canlin_ev_gen gen, size_t bytes, int is_timer
     i = alloc_op(ev);
     if (i < 0)
         return CANLIN_EV_EFULL;
-    rc = alloc_handle(m, h);
+    rc = alloc_handle(g, h);
     if (rc < 0)
         return rc;
 
@@ -552,17 +614,18 @@ int canlin_ev_timer_start(canlin_ev *ev, canlin_ev_gen gen, canlin_ev_time delay
 
 int canlin_ev_cancel(canlin_ev *ev, canlin_ev_gen gen, canlin_ev_handle h)
 {
-    mod *m = find_mod(ev, gen);
+    mod *m = NULL;
+    genst *g = find_gs(ev, gen, &m);
     int i;
     op *o;
 
-    if (!m || CANLIN_EV_HANDLE_GEN(h) != gen)
+    if (!g || CANLIN_EV_HANDLE_GEN(h) != gen)
         return CANLIN_EV_ESTALE;
     i = find_op(ev, h);
     if (i < 0) {
         uint32_t serial = (uint32_t)(h & 0xffffffffu);
         /* Issued by this generation and already finished: repeat cancel is harmless. */
-        return (serial != 0 && serial <= m->serial) ? CANLIN_EV_ALREADY : CANLIN_EV_ESTALE;
+        return (serial != 0 && serial <= g->serial) ? CANLIN_EV_ALREADY : CANLIN_EV_ESTALE;
     }
     o = &ev->ops[i];
     switch (o->state) {
@@ -628,18 +691,19 @@ static void expire_timers(canlin_ev *ev, canlin_ev_time now)
 static int dispatch_one(canlin_ev *ev, unsigned s, unsigned *quota, int *drawn, int *ctl_done)
 {
     mod *m = &ev->mods[s];
+    genst *g = &m->live;
     canlin_ev_delivery d;
 
-    if (m->gen == 0)
-        return 0;
+    if (g->gen == 0 || m->stage.gen != 0)
+        return 0; /* inactive, or staging: no generation of this slot gets deliveries */
     memset(&d, 0, sizeof d);
     d.slot = s;
-    d.gen = m->gen;
+    d.gen = g->gen;
 
-    if (m->ctl && !*ctl_done) {
+    if (g->ctl && !*ctl_done) {
         d.kind = CANLIN_EV_D_CONTROL;
-        d.control = m->ctl;
-        m->ctl = 0;
+        d.control = g->ctl;
+        g->ctl = 0;
         *ctl_done = 1;
         deliver(ev, &d);
         return 1;
@@ -668,9 +732,9 @@ static int dispatch_one(canlin_ev *ev, unsigned s, unsigned *quota, int *drawn, 
         item_retire(ev, m, &it); /* after the boundary: payload, accounting, op */
         return 1;
     }
-    if (m->dirty && !*drawn) {
+    if (g->dirty && !*drawn) {
         d.kind = CANLIN_EV_D_DRAW;
-        m->dirty = 0;
+        g->dirty = 0;
         *drawn = 1;
         deliver(ev, &d);
         return 1;
@@ -712,7 +776,9 @@ int canlin_ev_turn(canlin_ev *ev, canlin_ev_turn_result *out)
 
     for (s = 0; s < CANLIN_EV_MAX_MODULES; s++) {
         const mod *m = &ev->mods[s];
-        if (m->count || (m->gen && (m->ctl || m->dirty)))
+        if (m->stage.gen)
+            continue; /* staging: nothing runnable until commit or abort */
+        if (m->count || (m->live.gen && (m->live.ctl || m->live.dirty)))
             r.more = 1;
     }
     for (i = 0; i < CANLIN_EV_PROC_MAX_OPS; i++) {
@@ -754,9 +820,10 @@ int canlin_ev_get_stats(const canlin_ev *ev, int slot, canlin_ev_stats *out)
         out->queued = m->count;
         out->ops = m->ops;
         out->timers = m->timers;
-        out->control = m->ctl;
-        out->dirty = m->dirty;
-        out->gen = m->gen;
+        out->control = m->live.ctl;
+        out->dirty = m->live.dirty;
+        out->gen = m->live.gen;
+        out->staged = m->stage.gen;
     }
     return CANLIN_EV_OK;
 }

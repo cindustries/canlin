@@ -1,9 +1,17 @@
 /* CanLin module layer. See include/canlin/module.h for the contract.
  *
  * Isolation: every canlin.* closure carries this module as a light-userdata upvalue that
- * Lua cannot read (no debug library), and acts only on m->gen. A Lua state belongs to
- * exactly one generation: on reload/fault/stop the state is closed before the module can
- * be entered again, so a closure can never act on a later generation.
+ * Lua cannot read (no debug library), and acts only on api_gen(m), the generation whose
+ * Lua state is running. A Lua state belongs to exactly one generation: on reload/fault/
+ * stop the state is closed before the module can be entered again, so a closure can
+ * never act on a later generation.
+ *
+ * Staged reload (core API §6, canlin#16): the new generation's sandbox, lua#main and init
+ * run while the old generation stays live in the scheduler (canlin_ev_module_stage) but
+ * gets no deliveries. During that window `staged` is the generation the canlin.*
+ * closures act on (only the new Lua state runs), while m->gen, m->sb and the input path
+ * still belong to the old one. Commit retires the old generation; any failure aborts the
+ * staged one and the old generation resumes exactly where it was.
  */
 #include "canlin/module.h"
 #include "canlin/sandbox_limits.h"
@@ -26,6 +34,8 @@ struct canlin_module {
     canlin_ev *ev;
     canlin_sandbox *sb;
     canlin_ev_gen gen;
+    canlin_ev_gen staged;   /* generation being staged by a reload, else 0 */
+    int reload_err;         /* code of the last failed staged reload, 0 if none */
     canlin_module_state state;
     unsigned errors;
     int in_call;
@@ -227,6 +237,13 @@ static canlin_module *mod_of(lua_State *L)
     return lua_touserdata(L, lua_upvalueindex(1));
 }
 
+/* The generation whose Lua is running: the staged one while a reload stages (the old
+ * Lua state is never entered then), otherwise the live one. */
+static canlin_ev_gen api_gen(const canlin_module *m)
+{
+    return m->staged ? m->staged : m->gen;
+}
+
 static int fail(lua_State *L, const char *code, const char *msg)
 {
     lua_pushnil(L);
@@ -244,7 +261,7 @@ static int l_timer_after(lua_State *L)
 
     if (ms < 0 || (lua_Unsigned)ms > (lua_Unsigned)CANLIN_TIMER_MAX_MS)
         return fail(L, "invalid", "timer delay out of range");
-    rc = canlin_ev_timer_start(m->ev, m->gen, (canlin_ev_time)ms, &h);
+    rc = canlin_ev_timer_start(m->ev, api_gen(m), (canlin_ev_time)ms, &h);
     switch (rc) {
     case CANLIN_EV_OK:
         lua_pushinteger(L, (lua_Integer)h);
@@ -264,7 +281,7 @@ static int l_cancel(lua_State *L)
     lua_Integer h = luaL_checkinteger(L, 1);
     if (m->ui_timer != 0 && (canlin_ev_handle)h == m->ui_timer)
         return fail(L, "stale", "handle unknown, foreign or dead"); /* core-owned */
-    switch (canlin_ev_cancel(m->ev, m->gen, (canlin_ev_handle)h)) {
+    switch (canlin_ev_cancel(m->ev, api_gen(m), (canlin_ev_handle)h)) {
     case CANLIN_EV_OK:
         lua_pushliteral(L, "cancelled");
         return 1;
@@ -282,7 +299,7 @@ static int l_cancel(lua_State *L)
 static int l_invalidate(lua_State *L)
 {
     canlin_module *m = mod_of(L);
-    canlin_ev_invalidate(m->ev, m->gen);
+    canlin_ev_invalidate(m->ev, api_gen(m));
     return 0;
 }
 
@@ -333,7 +350,7 @@ static int push_ctx(lua_State *L, void *ud)
     lua_setfield(L, -2, "name");
     lua_pushstring(L, m->version);
     lua_setfield(L, -2, "version");
-    lua_pushinteger(L, (lua_Integer)m->gen);
+    lua_pushinteger(L, (lua_Integer)api_gen(m));
     lua_setfield(L, -2, "generation");
     lua_setfield(L, -2, "__index");
     lua_pushcfunction(L, ctx_newindex);
@@ -455,68 +472,171 @@ static int copy_meta(canlin_module *m, const canlin_module_source *src)
     return CANLIN_MODULE_OK;
 }
 
-/* Start a new generation from src. If a generation is live it is retired only once the
- * new sandbox exists; after that point every failure leaves the module FAULTED. */
-static int start_gen(canlin_module *m, const canlin_module_source *src)
+static int src_valid(const canlin_module_source *src)
+{
+    return src != NULL && bounded_len(src->name, CANLIN_MODULE_NAME_MAX) > 0 &&
+           (src->version == NULL || bounded_len(src->version, CANLIN_MODULE_NAME_MAX) >= 0) &&
+           src->main != NULL;
+}
+
+static canlin_sandbox *new_sandbox(canlin_module *m)
 {
     canlin_sandbox_config sc;
-    canlin_sandbox *sb;
-    canlin_ev_gen g;
-    canlin_sandbox_status st;
-    int rc, called;
-
-    if (src == NULL || bounded_len(src->name, CANLIN_MODULE_NAME_MAX) <= 0 ||
-        (src->version && bounded_len(src->version, CANLIN_MODULE_NAME_MAX) < 0) ||
-        src->main == NULL)
-        return CANLIN_MODULE_EINVAL;
-
     memset(&sc, 0, sizeof sc);
     sc.mem_limit = m->mem_limit;
     sc.budget = m->budget;
     sc.log = sb_log;
     sc.require = sb_require;
     sc.ud = m;
-    sb = canlin_sandbox_new(&sc);
+    return canlin_sandbox_new(&sc);
+}
+
+/* Install canlin.*, run lua#main and M.init in sb, each under its budget. The generation
+ * the closures act on (api_gen) must already exist in the scheduler. On failure *what
+ * names the step; the sandbox's errmsg says why. */
+static int boot(canlin_module *m, canlin_sandbox *sb, const canlin_module_source *src,
+                const char **what)
+{
+    int called, rc = CANLIN_MODULE_OK;
+
+    m->in_call = 1;
+    if (canlin_sandbox_host(sb, install_api, m) != CANLIN_SANDBOX_OK) {
+        *what = "install";
+        rc = CANLIN_MODULE_ENOMEM;
+    } else if (canlin_sandbox_load_main(sb, src->main, src->main_len, "=lua#main") !=
+               CANLIN_SANDBOX_OK) {
+        *what = "lua#main";
+        rc = CANLIN_MODULE_ELOAD;
+    } else if (canlin_sandbox_call_budget(sb, "init", 0, 1, push_ctx, m, &called) !=
+               CANLIN_SANDBOX_OK) {
+        *what = "init";
+        rc = CANLIN_MODULE_EINIT;
+    }
+    m->in_call = 0;
+    return rc;
+}
+
+/* Start a generation in a free scheduler slot: nothing is live (first load, or restart
+ * of a stopped/faulted module). A failure leaves the module FAULTED. */
+static int start_gen(canlin_module *m, const canlin_module_source *src)
+{
+    canlin_sandbox *sb;
+    canlin_ev_gen g;
+    const char *what = "";
+    int rc;
+
+    if (!src_valid(src))
+        return CANLIN_MODULE_EINVAL;
+    sb = new_sandbox(m);
     if (sb == NULL)
         return CANLIN_MODULE_ENOMEM;
-
-    rc = m->gen ? canlin_ev_module_reload(m->ev, m->gen, &g) : canlin_ev_module_start(m->ev, &g);
-    if (rc < 0) {
+    if (canlin_ev_module_start(m->ev, &g) < 0) {
         canlin_sandbox_free(sb);
-        return CANLIN_MODULE_EEV; /* a live old generation is untouched */
+        return CANLIN_MODULE_EEV;
     }
-    canlin_sandbox_free(m->sb); /* old generation already retired by the reload */
     canlin_ui_view_reset(m->view); /* widget state belongs to one generation */
-    m->scroll_seen = m->scroll_posted; /* old-generation scroll was retired with it */
+    m->scroll_seen = m->scroll_posted;
     m->sb = sb;
     m->gen = g;
     m->ui_timer = 0;
     m->errors = 0;
     m->stop_pending = 0;
+    m->reload_err = 0;
     copy_meta(m, src);
     m->state = CANLIN_MODULE_RUNNING;
 
-    m->in_call = 1;
-    st = canlin_sandbox_host(sb, install_api, m);
-    if (st != CANLIN_SANDBOX_OK) {
-        m->in_call = 0;
-        fault(m, "install", canlin_sandbox_errmsg(sb));
-        return CANLIN_MODULE_ENOMEM;
-    }
-    st = canlin_sandbox_load_main(sb, src->main, src->main_len, "=lua#main");
-    if (st != CANLIN_SANDBOX_OK) {
-        m->in_call = 0;
-        fault(m, "lua#main", canlin_sandbox_errmsg(sb));
-        return CANLIN_MODULE_ELOAD;
-    }
-    st = canlin_sandbox_call_budget(sb, "init", 0, 1, push_ctx, m, &called);
-    m->in_call = 0;
-    if (st != CANLIN_SANDBOX_OK) {
-        fault(m, "init", canlin_sandbox_errmsg(sb));
-        return CANLIN_MODULE_EINIT;
+    rc = boot(m, sb, src, &what);
+    if (rc != CANLIN_MODULE_OK) {
+        fault(m, what, canlin_sandbox_errmsg(sb));
+        return rc;
     }
     canlin_ev_invalidate(m->ev, m->gen); /* first frame */
     return CANLIN_MODULE_OK;
+}
+
+/* Staged reload of a RUNNING module (core API §6). The old generation keeps its Lua
+ * state, view, timers, operations and queued work, and gets no deliveries until the
+ * outcome is known. Staging is one synchronous call on the owner thread, so no turn runs
+ * in between; work that reaches the old generation meanwhile (a producer completing,
+ * input posted by the backend) is queued for it as usual: delivered after an abort,
+ * retired with it after a commit, where the view reset releases held input exactly like
+ * the input-overflow reset. */
+static int stage_reload(canlin_module *m, const canlin_module_source *src)
+{
+    char name[sizeof m->name], version[sizeof m->version];
+    char why[sizeof m->errmsg - sizeof "reload: " + 1]; /* fits set_err(m, "reload", why) */
+    canlin_sandbox_require_fn require = m->require;
+    void *require_ud = m->require_ud;
+    canlin_sandbox *sb;
+    canlin_ev_gen g;
+    const char *what = "";
+    int rc;
+
+    if (!src_valid(src))
+        return CANLIN_MODULE_EINVAL;
+    sb = new_sandbox(m);
+    if (sb == NULL) {
+        rc = CANLIN_MODULE_ENOMEM;
+        set_err(m, "reload", "sandbox could not be created");
+        goto refused;
+    }
+    rc = canlin_ev_module_stage(m->ev, m->gen, &g);
+    if (rc < 0) {
+        canlin_sandbox_free(sb);
+        if (rc == CANLIN_EV_EFULL) {
+            rc = CANLIN_MODULE_EFULL;
+            set_err(m, "reload", "full: no scheduler room for a second generation");
+        } else {
+            rc = CANLIN_MODULE_EEV;
+            set_err(m, "reload", "scheduler refused a new generation");
+        }
+        goto refused;
+    }
+
+    memcpy(name, m->name, sizeof name);
+    memcpy(version, m->version, sizeof version);
+    copy_meta(m, src); /* ctx, log lines and require of the new generation */
+    m->staged = g;
+    rc = boot(m, sb, src, &what);
+    m->staged = 0;
+
+    if (rc == CANLIN_MODULE_OK && !m->stop_pending) {
+        /* Commit: event runtime §7 order for the old generation, then its Lua state. */
+        canlin_ev_module_commit(m->ev, g);
+        canlin_sandbox_free(m->sb);
+        canlin_ui_view_reset(m->view); /* widget state belongs to one generation */
+        m->scroll_seen = m->scroll_posted; /* old-generation scroll was retired with it */
+        m->sb = sb;
+        m->gen = g;
+        m->ui_timer = 0; /* the old generation's view timer was retired with it */
+        m->errors = 0;
+        m->reload_err = 0;
+        canlin_ev_invalidate(m->ev, m->gen); /* first frame */
+        return CANLIN_MODULE_OK;
+    }
+
+    /* Rollback: retire everything the new generation admitted, close its Lua state and
+     * give the old generation its metadata back. */
+    if (rc == CANLIN_MODULE_OK)
+        snprintf(why, sizeof why, "stopped while staging");
+    else
+        snprintf(why, sizeof why, "%s: %s", what, canlin_sandbox_errmsg(sb));
+    canlin_ev_module_abort(m->ev, g);
+    canlin_sandbox_free(sb);
+    memcpy(m->name, name, sizeof name);
+    memcpy(m->version, version, sizeof version);
+    m->require = require;
+    m->require_ud = require_ud;
+    set_err(m, "reload", why);
+    if (m->stop_pending) {
+        /* canlin_module_stop was called while staging: it wins over both generations. */
+        end_gen(m, CANLIN_MODULE_STOPPED);
+        return CANLIN_MODULE_ESTALE;
+    }
+refused:
+    m->reload_err = rc;
+    mlog(m, "reload failed, old generation kept", m->errmsg);
+    return rc;
 }
 
 canlin_module *canlin_module_load(canlin_ev *ev, const canlin_module_source *src,
@@ -565,8 +685,9 @@ int canlin_module_reload(canlin_module *m, const canlin_module_source *src)
         return CANLIN_MODULE_EINVAL;
     if (m->in_call)
         return CANLIN_MODULE_EBUSY;
-    if (m->state != CANLIN_MODULE_RUNNING)
-        end_gen(m, m->state); /* restart: nothing live, new generation via start */
+    if (m->state == CANLIN_MODULE_RUNNING)
+        return stage_reload(m, src);
+    end_gen(m, m->state); /* restart: nothing live to fall back to, plain start */
     return start_gen(m, src);
 }
 
@@ -601,6 +722,11 @@ canlin_module_state canlin_module_get_state(const canlin_module *m)
 canlin_ev_gen canlin_module_gen(const canlin_module *m)
 {
     return m->state == CANLIN_MODULE_RUNNING ? m->gen : 0;
+}
+
+int canlin_module_reload_error(const canlin_module *m)
+{
+    return m->reload_err;
 }
 
 unsigned canlin_module_errors(const canlin_module *m)
