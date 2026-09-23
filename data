@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T18:19:29Z
+claimed_by: canlin
+class: standard
+created: 2026-09-23T05:13:42Z
+id: 41
+priority: high
+started: 2026-09-23T17:32:41Z
+status: review
+tags:
+- net
+- transport
+- spec
+title: Native HTTP/1.1 + TLS transport spec and implementation (mbedtls)
+updated: 2026-09-23T18:19:29Z
+---
+
+LLM providers spec §8. DNS, TLS verification, chunked, redirects, credential origin binding, event-runtime integration.
+
+Spec: docs/superpowers/specs/2026-09-23-canlin-http-transport-design.md (cabc7b7). Worker dispatched.
+
+Landed d9dfc3d..d35db93 (+ spec 774dbc2). host make test green; i686 build + all net/llm tests under qemu-i386 -cpu pentium2 user-mode green; objdump: no SSE/MMX/AES-NI/cpuid/rdrand. Not run: canlin-os qemu-system harness, P2 handshake timing, real system CA bundle, rawfb/SDL2 loop wiring, live provider.
