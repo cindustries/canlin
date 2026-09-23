@@ -92,6 +92,21 @@ In `include/canlin/shell_limits.h`:
 | `CANLIN_SHELL_TILED_MIN` | 60 em output width |
 | `CANLIN_SHELL_TILED_DEFAULT` | 80 em output width |
 | `CANLIN_SHELL_BAR_HEIGHT` | 2.5 em |
+| `CANLIN_SHELL_DIVIDER_HIT` | 2.5 em |
+| `CANLIN_SHELL_OUTPUTS_MAX` | 4 |
+| `CANLIN_SHELL_MODULES_MAX` | 32 modules in the switcher |
+| `CANLIN_SHELL_SWITCHER_WIDTH` | 24 em (at most the output) |
+| `CANLIN_SHELL_SWIPE` | 2.5 em down from the bar opens the switcher |
+
+The last five were chosen during canlin#35 and are provisional.
+
+**Host drawing protocol (canlin#35):** after its scheduler turns the host calls
+`canlin_shell_update()`, then for each output whose `canlin_shell_dirty()` is non-zero
+`canlin_render_begin`, `canlin_shell_render`, `canlin_render_end`. Pointer input and all
+rectangles are in output pixels; a view's rectangle is set in its output's coordinates,
+so the shell forwards pointer positions unchanged to the view under the point. Every
+output keeps a tiling of 2–3 slots; full-screen shows the current slot, and assigning a
+module that sits in another slot swaps them, so a view is never shown twice.
 
 ## 7. Tests
 
