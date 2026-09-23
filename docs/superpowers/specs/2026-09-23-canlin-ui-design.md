@@ -294,7 +294,17 @@ Its argument is JSON mapped onto the same widget set:
   section (with nested `widgets`), columns (`left`/`right` arrays), graph, button.
   `icon` references built-in assistant icons only.
 - `id`: `[a-z0-9_-]{1,32}`, unique within the view; required for every input widget
-  and every button. Control characters are rejected in every string (core API D5).
+  and every button. Control characters are rejected in ids, labels, titles, options and
+  enum values (core API D5); multi-line content (`text`, `bubble`, `area` values) may
+  contain `\n` and `\t` but no other control character.
+- Bubble roles in model views are `user` and `assistant` only; `system` is reserved for
+  trusted content and rejected in `set_view`.
+- Field names (canlin#20): `value` is the initial value of field, area and toggle and
+  the value of a meter; `choice` uses a 1-based `index` (as `ui:choice`), also in the
+  submission; edges are `{from: [node, port], to: [node, port]}`; unknown keys, duplicate
+  JSON keys and non-integer numbers where integers are expected are rejected. A view has
+  at most 8 graphs. Recorded results per turn: at most 16; a repeated call id returns the
+  recorded result, the same id with different arguments is `invalid`.
 - The only `action` in v1 is `submit`. A submit sends
   `{revision, action = <button id>, values = {<id>: <value>}}` for the input widgets of
   that view — field/area text, toggle boolean, choice index, graph `{nodes, edges}` —
