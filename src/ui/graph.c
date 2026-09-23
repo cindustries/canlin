@@ -26,6 +26,9 @@
  *   tap (moved < slop)   node/port -> select, second tap on it within DOUBLE_TAP_MS or a
  *                        press held >= LONG_PRESS_MS -> open; edge -> select edge; empty
  *                        -> select none, or add at that point when held >= LONG_PRESS_MS
+ *   secondary press      on empty canvas -> add at that point (spec §5.2 context action),
+ *                        at the press edge; nothing on nodes, ports or edges; ignored
+ *                        while a primary gesture is held. Middle does nothing.
  *   keys (graph focused by a press inside it): Del -> delete / disconnect the selection,
  *                        Tab / Shift-Tab -> select next / previous node
  * Long-press is recognised at release: the view redraws on input only, so a held press
@@ -1257,6 +1260,20 @@ void canlin_ui_graph_run(lua_State *L, canlin_ui_graph *g, int fit, canlin_ui_gr
     } else if (st->drag && !b->down) {
         st->drag = G_NONE; /* release not seen (view reset); drop the gesture */
         c.preview = 0;
+    }
+
+    /* Secondary press (canlin#32): the context action on empty canvas is `add`. */
+    {
+        const struct nk_mouse_button *rb = &in->mouse.buttons[NK_BUTTON_RIGHT];
+        float px = rb->clicked_pos.x, py = rb->clicked_pos.y;
+        if (rb->clicked && rb->down && !st->drag && in_rect(c.clip, px, py)) {
+            *e->focus = e->id;
+            if (hit(&c, px, py, &ni, &pi) == H_NONE) {
+                gedit *x = add_edit(ed, &ned, E_ADD);
+                x->x = q4((px - c.ox) / em);
+                x->y = q4((py - c.oy) / em);
+            }
+        }
     }
 
     /* Keyboard (spec §5.3), only while this graph has the view's focus. */

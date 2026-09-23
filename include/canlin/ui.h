@@ -115,9 +115,18 @@ typedef enum canlin_ui_key {
     CANLIN_UI_KEY_CTRL
 } canlin_ui_key;
 
+/* Pointer buttons of CANLIN_UI_IN_BUTTON (canlin#32). Primary is 0, so a zeroed event is
+ * a primary edge. Touch contact is primary; backends map a platform's context gesture to
+ * SECONDARY only where the platform itself does (no long-press synthesis here). */
+typedef enum canlin_ui_button {
+    CANLIN_UI_BUTTON_PRIMARY = 0,
+    CANLIN_UI_BUTTON_SECONDARY = 1,
+    CANLIN_UI_BUTTON_MIDDLE = 2
+} canlin_ui_button;
+
 typedef enum canlin_ui_input_type {
     CANLIN_UI_IN_MOTION = 1, /* x, y: pointer position, screen px */
-    CANLIN_UI_IN_BUTTON,     /* x, y, down: primary button / touch contact edge */
+    CANLIN_UI_IN_BUTTON,     /* x, y, down, button: button / touch contact edge */
     CANLIN_UI_IN_KEY,        /* key, down */
     CANLIN_UI_IN_TEXT,       /* cp: one Unicode scalar value (no surrogates, <= 0x10FFFF) */
     CANLIN_UI_IN_SCROLL      /* dy: px, positive scrolls content up (towards the end) */
@@ -127,6 +136,7 @@ typedef struct canlin_ui_input {
     canlin_ui_input_type type;
     int x, y;
     int down;
+    int button;  /* BUTTON: canlin_ui_button; ignored for every other type */
     int key;
     uint32_t cp;
     int dy;
@@ -144,18 +154,18 @@ enum {
     CANLIN_UI_EBUSY = -5    /* a frame is open */
 };
 
-/* 1 if in is a well-formed input event (known type, key in range, text a Unicode scalar
- * value other than 0), else 0. */
+/* 1 if in is a well-formed input event (known type, button and key in range, text a
+ * Unicode scalar value other than 0), else 0. */
 int canlin_ui_input_valid(const canlin_ui_input *in);
 
-/* Queues one input event in order. At most one edge per button and per key is applied
+/* Queues one input event in order. At most one edge (of any button or key) is applied
  * per frame; later edges stay queued for the next frame (canlin_ui_view_pending), so a
  * press and release between two draws still produce a press frame. On overflow
  * (CANLIN_UI_INPUT_MAX) the view is reset as by canlin_ui_view_input_reset (event
  * runtime §5: overflow clears stuck interaction state) and EFULL returned. */
 int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in);
 /* Input was lost (overflow outside or inside the view): drop the queue, release pressed
- * buttons/keys at the next frame and cancel graph gestures without edits. No-op inside
+ * buttons (every button held) and keys at the next frame and cancel graph gestures without edits. No-op inside
  * a frame. */
 void canlin_ui_view_input_reset(canlin_ui_view *v);
 /* Queued events not yet applied: the host requests another draw while this is > 0. */

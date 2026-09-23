@@ -1132,6 +1132,56 @@ static void test_post_time_stamps(void)
     h_done(&h);
 }
 
+static void sec(harness *h, int button, int x, int y)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_MOTION;
+    in.x = x;
+    in.y = y;
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.button = button;
+    in.down = 1;
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    h_drain(h);
+    in.down = 0;
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    h_drain(h);
+}
+
+/* canlin#32, spec §5.2: a secondary click on empty canvas is the context action `add` at
+ * that point (one edit, at the press); on nodes, ports and edges it does nothing, and
+ * middle does nothing. A secondary press during a primary gesture is ignored. */
+static void test_secondary(void)
+{
+    harness h;
+    const canlin_ui_rect *a, *p;
+    base(&h, "nil");
+    sec(&h, CANLIN_UI_BUTTON_SECONDARY, 8 + 30 * 16 + 3, 8 + 20 * 16 + 1);
+    CHECK(has(&h, "E add 30.25 20.0\n") && edits(&h) == 1);
+    clear_log(&h);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    p = grec(&h, 0, CANLIN_UI_P_PORT, 1, 1);
+    CHECK(a && p);
+    if (a && p) {
+        sec(&h, CANLIN_UI_BUTTON_SECONDARY, cx(a), a->y + 16);
+        sec(&h, CANLIN_UI_BUTTON_SECONDARY, cx(p), cy(p));
+    }
+    sec(&h, CANLIN_UI_BUTTON_MIDDLE, 8 + 30 * 16, 8 + 20 * 16);
+    CHECK(edits(&h) == 0);
+    /* Held primary pan: secondary press ignored, the pan's release still a plain tap. */
+    press(&h, 488, 328);
+    sec(&h, CANLIN_UI_BUTTON_SECONDARY, 488, 328);
+    release(&h, 488, 328);
+    CHECK(edits(&h) == 0);
+    /* Primary input works normally afterwards. */
+    gap(&h);
+    tap_title(&h, 2);
+    CHECK(has(&h, "E select C\n"));
+    h_done(&h);
+}
+
 int main(void)
 {
     test_edit_kinds();
@@ -1148,6 +1198,7 @@ int main(void)
     test_drag_marking();
     test_overflow_cancels_drag();
     test_post_time_stamps();
+    test_secondary();
     printf("test_graph: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

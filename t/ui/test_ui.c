@@ -813,6 +813,90 @@ static int nk_left_down(harness *h)
     return ctx->input.mouse.buttons[NK_BUTTON_LEFT].down;
 }
 
+static void button_edge(harness *h, int button, int x, int y, int down, int want)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.button = button;
+    in.x = x;
+    in.y = y;
+    in.down = down;
+    CHECK(canlin_module_post_input(h->m, &in) == want);
+}
+
+static int nk_btn_down(harness *h, int b)
+{
+    struct nk_context *ctx = canlin_ui_view_nk(canlin_module_view(h->m));
+    return ctx->input.mouse.buttons[b].down;
+}
+
+/* canlin#32: secondary and middle buttons travel the same path as primary (validation,
+ * scheduler posting, view), ordinary widgets ignore them, and an overflow releases every
+ * held button. */
+static void test_secondary_button(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    canlin_ui_input in;
+    int bx, by, n = 0;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (!b) {
+        h_done(&h);
+        return;
+    }
+    bx = b->x + b->w / 2;
+    by = b->y + b->h / 2;
+    /* Out-of-range buttons are malformed. */
+    button_edge(&h, 3, bx, by, 1, CANLIN_MODULE_EINVAL);
+    button_edge(&h, -1, bx, by, 1, CANLIN_MODULE_EINVAL);
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.button = 3;
+    CHECK(!canlin_ui_input_valid(&in));
+    in.type = CANLIN_UI_IN_MOTION; /* ignored for other types */
+    CHECK(canlin_ui_input_valid(&in));
+    /* Secondary and middle clicks on a button do not activate it. */
+    input(&h, CANLIN_UI_IN_MOTION, bx, by, 0);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 1, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(nk_btn_down(&h, NK_BUTTON_RIGHT) && !nk_btn_down(&h, NK_BUTTON_LEFT));
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 0, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_MIDDLE, bx, by, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_MIDDLE, bx, by, 0, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(!has(&h, "clicked"));
+    CHECK(!nk_btn_down(&h, NK_BUTTON_RIGHT) && !nk_btn_down(&h, NK_BUTTON_MIDDLE));
+    /* Primary still works; a secondary release in between does not end its press. */
+    button_edge(&h, CANLIN_UI_BUTTON_PRIMARY, bx, by, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 0, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(nk_btn_down(&h, NK_BUTTON_LEFT) && !nk_btn_down(&h, NK_BUTTON_RIGHT));
+    button_edge(&h, CANLIN_UI_BUTTON_PRIMARY, bx, by, 0, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(count(&h, "clicked") == 1);
+
+    /* Overflow with primary and secondary held: the reset releases both. */
+    button_edge(&h, CANLIN_UI_BUTTON_PRIMARY, 290, 290, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, 290, 290, 1, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(nk_btn_down(&h, NK_BUTTON_LEFT) && nk_btn_down(&h, NK_BUTTON_RIGHT));
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_TEXT;
+    in.cp = 'a';
+    while (canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK && n < 1000)
+        n++;
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, 290, 290, 0, CANLIN_MODULE_EFULL);
+    h_drain(&h);
+    CHECK(!nk_btn_down(&h, NK_BUTTON_LEFT) && !nk_btn_down(&h, NK_BUTTON_RIGHT));
+    CHECK(count(&h, "clicked") == 1);
+    h_done(&h);
+}
+
 /* motion A -> press -> motion B stays three items in that order; motions coalesce only
  * with an adjacent motion, to the latest position. */
 static void test_input_order(void)
@@ -1847,6 +1931,7 @@ int main(void)
     test_input_overflow();
     test_input_order();
     test_input_overflow_latch();
+    test_secondary_button();
     test_input_stale_generation();
     test_input_no_lua();
     test_scroll();

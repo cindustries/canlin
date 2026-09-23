@@ -75,7 +75,8 @@ struct canlin_ui_view {
     canlin_ui_input q[CANLIN_UI_INPUT_MAX];
     size_t qhead, qn;
     int overflow;
-    int btn_down, last_x, last_y;
+    unsigned btn_down;        /* bit per canlin_ui_button held */
+    int last_x, last_y;
     unsigned char key_down[CANLIN_UI_KEY_CTRL + 1];
 
     float scroll;
@@ -603,9 +604,10 @@ int canlin_ui_input_valid(const canlin_ui_input *in)
         return 0;
     switch (in->type) {
     case CANLIN_UI_IN_MOTION:
-    case CANLIN_UI_IN_BUTTON:
     case CANLIN_UI_IN_SCROLL:
         return 1;
+    case CANLIN_UI_IN_BUTTON:
+        return in->button >= CANLIN_UI_BUTTON_PRIMARY && in->button <= CANLIN_UI_BUTTON_MIDDLE;
     case CANLIN_UI_IN_KEY:
         return in->key >= CANLIN_UI_KEY_BACKSPACE && in->key <= CANLIN_UI_KEY_CTRL;
     case CANLIN_UI_IN_TEXT:
@@ -661,6 +663,13 @@ static enum nk_keys nk_key_of(int k)
     }
 }
 
+static enum nk_buttons nk_button_of(int b)
+{
+    return b == CANLIN_UI_BUTTON_SECONDARY ? NK_BUTTON_RIGHT
+         : b == CANLIN_UI_BUTTON_MIDDLE    ? NK_BUTTON_MIDDLE
+                                           : NK_BUTTON_LEFT;
+}
+
 static int utf8_bytes(uint32_t cp)
 {
     return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
@@ -679,8 +688,9 @@ static void apply_input(canlin_ui_view *v)
     nk_input_begin(ctx);
     if (v->overflow) {
         /* Edges were lost: release what is held so no interaction stays stuck. */
-        if (v->btn_down)
-            nk_input_button(ctx, NK_BUTTON_LEFT, v->last_x, v->last_y, 0);
+        for (k = CANLIN_UI_BUTTON_PRIMARY; k <= CANLIN_UI_BUTTON_MIDDLE; k++)
+            if (v->btn_down & (1u << k))
+                nk_input_button(ctx, nk_button_of(k), v->last_x, v->last_y, 0);
         for (k = CANLIN_UI_KEY_BACKSPACE; k <= CANLIN_UI_KEY_CTRL; k++)
             if (v->key_down[k])
                 nk_input_key(ctx, nk_key_of(k), 0);
@@ -706,10 +716,13 @@ static void apply_input(canlin_ui_view *v)
             break;
         case CANLIN_UI_IN_BUTTON:
             nk_input_motion(ctx, e->x, e->y);
-            nk_input_button(ctx, NK_BUTTON_LEFT, e->x, e->y, e->down ? 1 : 0);
+            nk_input_button(ctx, nk_button_of(e->button), e->x, e->y, e->down ? 1 : 0);
             v->last_x = e->x;
             v->last_y = e->y;
-            v->btn_down = e->down != 0;
+            if (e->down)
+                v->btn_down |= 1u << e->button;
+            else
+                v->btn_down &= ~(1u << e->button);
             v->btn_t = e->t;
             group = G_BUTTON;
             break;
