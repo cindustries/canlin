@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T05:25:22Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T04:31:19Z
+id: 32
+priority: low
+started: 2026-09-23T05:06:44Z
+status: review
+tags:
+- ui
+- input
+title: Secondary button in normalised input (right-click -> graph add)
+updated: 2026-09-23T05:25:22Z
+---
+
+canlin_ui_input has only a primary button. From canlin#19.
+
+Merged f26f21d. Host + ASan/UBSan green. i686 skipped.
