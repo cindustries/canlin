@@ -24,8 +24,8 @@ handles, `canlin_` naming, limits headers) are those of the core API design.
 
 ## 2. Units and layout
 
-- **em** = theme base font size (px at DPI 1.0) × platform DPI factor. All sizes below
-  are in em. Interactive elements are at least 2.5 em high (system design §5); touch
+- **em** = theme base font size (px at DPI 1.0) × the output's DPI factor × the
+  output's UI scale (§2.1). All sizes below are in em. Interactive elements are at least 2.5 em high (system design §5); touch
   targets of graph ports are at least 2.5 em square even when the drawn dot is smaller.
 - **View** = the module's content area, one vertical scroll region owned by the core.
   The module cannot scroll it programmatically in v1.
@@ -38,12 +38,46 @@ handles, `canlin_` naming, limits headers) are those of the core API design.
   horizontally. All text is UTF-8; invalid UTF-8 from a module is a Lua error.
 - **Rounding:** layout computes in float em, rounds each widget rectangle to whole
   pixels once, and never lets rounding shrink an interactive element below 2.5 em.
+- **Spacing unit** = `theme#spacing` × 0.25 em. View padding and the gap between
+  widgets are 2 units; the gap between columns is 4 units.
+
+### 2.1 Outputs and UI scale
+
+An **output** is one display surface: pixel size, DPI factor, UI scale and a stable
+identity supplied by the platform (SDL display, framebuffer device, browser window).
+Every view is laid out for exactly one output; nothing in `src/ui` or `src/render`
+keeps display metrics as process-wide or theme-wide state.
+
+- **UI scale** is a device setting per output identity in `system/local/`, changed only
+  in trusted settings, never by a module or model view. Steps: 75, 100, 125, 150, 200 %;
+  default 100 %. It multiplies em, so the whole view — nested sections, columns, graph
+  nodes and touch targets — grows or shrinks together. Because columns switch at 40 em,
+  a scaled-up view on a small output falls back to one column instead of clipping.
+- **Changing scale or DPI** (setting changed, SDL window moved to a display with other
+  DPI) re-lays out and invalidates every view on that output. Fonts are baked once per
+  distinct pixel size; at most `CANLIN_UI_FONT_SIZES_MAX` sizes are held, least recently
+  used ones are released. No continuous scaling, and no per-module or per-section scale:
+  modules must look consistent and cannot shrink touch targets below 2.5 em.
+- **v1 drives one output.** The API is shaped for several; running them is follow-up
+  canlin#25:
+  - The shell assigns module views to outputs (for example a dashboard or flow view on
+    a second monitor, a kiosk wall). A module does not know which output it is on; it
+    just gets `draw(ui)` with that view's metrics. One view is shown on one output at a
+    time; hardware/OS mirroring counts as a single output.
+  - Pointer and touch coordinates are per output; keyboard focus belongs to one view
+    across all outputs, and the shell shows which one.
+  - Backends: SDL2 opens one window per output. rawfb uses `/dev/fb0` in v1; several
+    framebuffers or KMS/DRM multi-head are a canlin-os kernel/driver question first.
+    The browser target stays one canvas; mobile stays one display.
 
 ## 3. Widget API (Lua)
 
-`ui` is a per-draw object; using it after `draw` returned is a Lua error. Stateful
-widgets are identified by `opts.id` if given, else by label plus ordinal within the
-draw; two stateful widgets with the same identity in one draw are a Lua error.
+`ui` is a per-draw object (a table with a protected metatable, methods called as
+`ui:x()`); using it after `draw` returned is a Lua error. Stateful widgets are identified
+by `opts.id` if given, else by label plus its ordinal among widgets with the same label
+in this draw. Explicit ids and automatic identities are separate namespaces; two widgets
+with the same explicit id in one draw are a Lua error. Field focus follows identity, not
+draw position. A module without a view still gets `draw(ui)`, but every method raises.
 
 | call | returns | notes |
 |---|---|---|
@@ -54,12 +88,12 @@ draw; two stateful widgets with the same identity in one draw are a Lua error.
 | `ui:area(label, value [, opts])` | new value | multi-line; `opts.rows` 2–20 |
 | `ui:button(label [, opts])` | `true` once when activated | |
 | `ui:toggle(label, on)` | new boolean | |
-| `ui:choice(label, options, index)` | new index | options: array of strings |
+| `ui:choice(label, options, index)` | new index | options: array of strings; expands inline with touch-height rows |
 | `ui:meter(label, value)` | — | value clamped to 0.0–1.0 |
-| `ui:icon(name)` | — | `icon#<name>` of the module bundle only |
+| `ui:icon(name)` | — | `icon#<name>` of the module bundle only; raises `unsupported` until the PNG decoder (canlin#23) |
 | `ui:separator()` | — | |
 | `ui:columns(left_fn, right_fn)` | — | see §2; the functions run immediately, in order |
-| `ui:section(title, fn [, opts])` | — | collapsible group; `opts.open` default |
+| `ui:section(title, fn [, opts])` | — | collapsible group, open unless `opts.open == false`; content indented 1 em |
 | `ui:graph(graph [, opts])` | array of edits | §5 |
 
 There is no secret/password field for modules: credential entry exists only in trusted
@@ -256,6 +290,7 @@ Initial values, in `include/canlin/ui_limits.h`, to be checked on P2 hardware:
 | `CANLIN_UI_TOOL_MAX_WIDGETS` | 128 | widgets in one model view (graph nodes counted separately) |
 | `CANLIN_THEME_FONT_MAX` | 2 MiB | per font blob |
 | `CANLIN_THEME_LOGO_MAX` | 256 KiB | |
+| `CANLIN_UI_FONT_SIZES_MAX` | 4 | baked font pixel sizes held at once |
 
 ## 9. Rendering path
 
