@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T02:13:04Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-22T19:40:33Z
+id: 7
+priority: high
+started: 2026-09-23T02:02:31Z
+status: review
+tags:
+- lua
+- sandbox
+- security
+title: 'Sandbox: bound Lua pattern matching (find/match/gmatch/gsub)'
+updated: 2026-09-23T02:13:04Z
+---
+
+Backtracking in lstrlib runs in C without hook. Decide: patch file for vendored lstrlib vs owned matcher vs input/pattern caps. From canlin#6.
+
+Decision (Getty): keep lstrlib; add step-counter via patch file under patches/lua/, applied at build, third_party untouched.
+
+Merged 502f0eb (7fce52f). Host + ASan/UBSan green, 316 sandbox checks, third_party untouched. i686 skipped. Cost factors provisional, need P2 calibration.
