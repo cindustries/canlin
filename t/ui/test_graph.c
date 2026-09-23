@@ -1182,6 +1182,110 @@ static void test_secondary(void)
     h_done(&h);
 }
 
+static unsigned timers(harness *h)
+{
+    canlin_ev_stats st;
+    int slot = canlin_ev_module_slot(h->ev, canlin_module_gen(h->m));
+    CHECK(canlin_ev_get_stats(h->ev, slot, &st) == CANLIN_EV_OK);
+    return st.timers;
+}
+
+static const canlin_ui_rect *hold_mark(harness *h)
+{
+    size_t n, i;
+    const canlin_ui_rect *r = rec(h, &n);
+    for (i = 0; i < n; i++)
+        if (r[i].kind == CANLIN_UI_W_GRAPH && r[i].part == CANLIN_UI_P_HOLD)
+            return &r[i];
+    return NULL;
+}
+
+/* canlin#33: a press held in place shows long-press feedback once CANLIN_UI_LONG_PRESS_MS
+ * has elapsed, with no further input: a core timer wakes the view, and Lua never sees
+ * it. Recognition stays at release (one open/add). Movement or release cancel it. */
+static void test_long_press_feedback(void)
+{
+    static char src[sizeof srcbuf + 128];
+    harness h;
+    const canlin_ui_rect *a, *m;
+    int ax, ay;
+    char *end;
+
+    snprintf(src, sizeof src, "%s", module_src("nil", 0, "{ id = 'flow' }"));
+    end = strstr(src, "return M\n");
+    CHECK(end != NULL);
+    if (end)
+        snprintf(end, sizeof src - (size_t)(end - src),
+                 "function M.event(n, p) print('EV ' .. tostring(n)) end\nreturn M\n");
+    h_init(&h, 1.0f, src, 800, 600);
+    clear_log(&h);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a != NULL);
+    ax = a ? cx(a) : 0;
+    ay = a ? a->y + 16 : 0;
+
+    /* Held on node A: nothing yet, one core timer armed. */
+    press(&h, ax, ay);
+    CHECK(hold_mark(&h) == NULL && timers(&h) == 1);
+    canlin_ev_fake_clock_advance(&h.clock, CANLIN_UI_LONG_PRESS_MS - 1);
+    h_drain(&h);
+    CHECK(hold_mark(&h) == NULL);
+    canlin_ev_fake_clock_advance(&h.clock, 1);
+    h_drain(&h);
+    m = hold_mark(&h);
+    CHECK(m != NULL && m->off == 0);
+    if (m && a)
+        CHECK(m->x < a->x && m->y < a->y && m->x + m->w > a->x + a->w); /* ring around A */
+    CHECK(timers(&h) == 0 && edits(&h) == 0 && !has(&h, "EV "));
+    release(&h, ax, ay);
+    CHECK(has(&h, "E open A\n") && edits(&h) == 1);
+    CHECK(hold_mark(&h) == NULL && !has(&h, "EV "));
+
+    /* Held on empty canvas: a marker at the press point, then add at release. */
+    gap(&h);
+    clear_log(&h);
+    press(&h, 488, 328);
+    canlin_ev_fake_clock_advance(&h.clock, CANLIN_UI_LONG_PRESS_MS);
+    h_drain(&h);
+    m = hold_mark(&h);
+    CHECK(m != NULL && m->off == CANLIN_UI_HOLD_CANVAS);
+    if (m)
+        CHECK(m->x < 488 && m->x + m->w > 488 && m->y < 328 && m->y + m->h > 328);
+    release(&h, 488, 328);
+    CHECK(has(&h, "E add ") && edits(&h) == 1 && hold_mark(&h) == NULL);
+
+    /* Movement past the slop cancels: timer gone, no feedback, a move instead. */
+    gap(&h);
+    clear_log(&h);
+    press(&h, ax, ay);
+    CHECK(timers(&h) == 1);
+    input(&h, CANLIN_UI_IN_MOTION, ax + 40, ay, 0);
+    h_drain(&h);
+    CHECK(timers(&h) == 0);
+    canlin_ev_fake_clock_advance(&h.clock, CANLIN_UI_LONG_PRESS_MS);
+    h_drain(&h);
+    CHECK(hold_mark(&h) == NULL);
+    release(&h, ax + 40, ay);
+    CHECK(has(&h, "E move A ") && edits(&h) == 1);
+
+    /* Released before the deadline: timer cancelled, plain tap. */
+    gap(&h);
+    clear_log(&h);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 1, 0);
+    CHECK(a != NULL);
+    if (a) {
+        press(&h, cx(a), a->y + 16);
+        canlin_ev_fake_clock_advance(&h.clock, 100);
+        release(&h, cx(a), a->y + 16);
+    }
+    CHECK(timers(&h) == 0);
+    canlin_ev_fake_clock_advance(&h.clock, CANLIN_UI_LONG_PRESS_MS);
+    h_drain(&h);
+    CHECK(hold_mark(&h) == NULL && has(&h, "E select B\n") && edits(&h) == 1);
+    CHECK(!has(&h, "EV "));
+    h_done(&h);
+}
+
 int main(void)
 {
     test_edit_kinds();
@@ -1199,6 +1303,7 @@ int main(void)
     test_overflow_cancels_drag();
     test_post_time_stamps();
     test_secondary();
+    test_long_press_feedback();
     printf("test_graph: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

@@ -31,8 +31,12 @@
  *                        while a primary gesture is held. Middle does nothing.
  *   keys (graph focused by a press inside it): Del -> delete / disconnect the selection,
  *                        Tab / Shift-Tab -> select next / previous node
- * Long-press is recognised at release: the view redraws on input only, so a held press
- * with no further input produces no frame to act in.
+ * Long-press is recognised at release (spec §5.2), exactly one open/add edit. While a
+ * press on a node, port or empty canvas is held within the slop, the frame asks the
+ * view owner for a redraw at press + LONG_PRESS_MS (canlin_ui_graph_wake; the module
+ * arms a core timer that never reaches Lua); from that time on the node gets an accent
+ * ring, empty canvas an accent circle at the press point (record part P_HOLD), showing
+ * that releasing now opens/adds. Movement past the slop or the release removes it.
  */
 #include "graph.h"
 
@@ -1335,6 +1339,25 @@ void canlin_ui_graph_run(lua_State *L, canlin_ui_graph *g, int fit, canlin_ui_gr
             else
                 edge_ctrl(em, c.mx, c.my, sx, sy, q);
             draw_curve(out, c.clip, q, th, role(e, CANLIN_THEME_ACCENT));
+        }
+        /* Long-press feedback (canlin#33): shown, or its time asked for, while held. */
+        if (b->down && !st->moved &&
+            (st->drag == G_NODE || st->drag == G_PORT || st->drag == G_PAN)) {
+            uint64_t due = st->press_t + CANLIN_UI_LONG_PRESS_MS;
+            if (e->now < due) {
+                canlin_ui_graph_wake(e->view, due);
+            } else if (st->drag == G_PAN) {
+                float r = em;
+                struct nk_rect m = nk_rect(st->px0 - r, st->py0 - r, 2.0f * r, 2.0f * r);
+                nk_stroke_circle(out, m, 2.0f * th, role(e, CANLIN_THEME_ACCENT));
+                canlin_ui_graph_record(e->view, CANLIN_UI_P_HOLD, m, CANLIN_UI_HOLD_CANVAS, 0);
+            } else if ((ni = node_by_hash(g, st->dnode)) >= 0) {
+                struct nk_rect r = node_rect(&c, ni);
+                float grow = 2.0f * th, rad = e->theme->radius * em + grow;
+                r = nk_rect(r.x - grow, r.y - grow, r.w + 2.0f * grow, r.h + 2.0f * grow);
+                nk_stroke_rect(out, r, rad, 2.0f * th, role(e, CANLIN_THEME_ACCENT));
+                canlin_ui_graph_record(e->view, CANLIN_UI_P_HOLD, r, (uint32_t)ni, 0);
+            }
         }
         nk_push_scissor(out, old);
     }

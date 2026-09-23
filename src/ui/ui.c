@@ -103,6 +103,9 @@ struct canlin_ui_view {
 
     canlin_ui_graph_state gstate[CANLIN_UI_GRAPH_STATES]; /* ui:graph pan/drag state */
     uint64_t btn_t;                        /* timestamp of the last applied button edge */
+    uint64_t now;                          /* owner's monotonic time for this frame */
+    uint64_t wake_at, wake_next;           /* time-driven redraw of the last / open frame */
+    int has_wake, has_wake_next;
 };
 
 /* ---- shared ui and font cache ---- */
@@ -841,6 +844,7 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
 
     v->frame++;
     v->in_frame = 1;
+    v->has_wake_next = 0;
     v->widgets = 0;
     v->depth = 0;
     v->nrec = 0;
@@ -889,6 +893,8 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
     nk_end(ctx);
     slots_evict(v);
     canlin_ui_graph_state_evict(v->gstate, v->frame);
+    v->has_wake = v->has_wake_next;
+    v->wake_at = v->wake_next;
     {
         /* Focus of a field that was not drawn this frame is gone. */
         size_t mask = CANLIN_UI_STATE_SLOTS - 1, i = (size_t)(v->focus ^ (v->focus >> 32)) & mask;
@@ -913,6 +919,28 @@ void canlin_ui_view_render(canlin_ui_view *v, canlin_render *r)
         return;
     canlin_render_set_atlas(r, v->fe->font.alpha, v->fe->font.w, v->fe->font.h);
     canlin_render_commands(r, &v->nk);
+}
+
+void canlin_ui_view_set_now(canlin_ui_view *v, uint64_t now)
+{
+    if (v && !v->in_frame)
+        v->now = now;
+}
+
+int canlin_ui_view_wake(const canlin_ui_view *v, uint64_t *at)
+{
+    if (v == NULL || !v->has_wake)
+        return 0;
+    if (at)
+        *at = v->wake_at;
+    return 1;
+}
+
+void canlin_ui_graph_wake(canlin_ui_view *v, uint64_t at)
+{
+    if (!v->has_wake_next || at < v->wake_next)
+        v->wake_next = at;
+    v->has_wake_next = 1;
 }
 
 const canlin_ui_rect *canlin_ui_view_record(const canlin_ui_view *v, size_t *n, int *overflow)
@@ -1668,6 +1696,7 @@ static void graph_env(canlin_ui_view *v, canlin_ui_graph_env *e)
     e->vis = nk_rect((float)v->x, (float)v->y, (float)v->w, (float)v->h);
     e->focus = &v->focus;
     e->btn_t = v->btn_t;
+    e->now = v->now;
 }
 
 void canlin_ui_graph_record(canlin_ui_view *v, int part, struct nk_rect r, uint32_t off,

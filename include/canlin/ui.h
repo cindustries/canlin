@@ -215,6 +215,15 @@ struct lua_State;
  * frame_begin and frame_end; the object raises when used outside that frame. */
 int canlin_ui_push(struct lua_State *L, canlin_ui_view *v);
 
+/* Time-driven redraw (canlin#33). The owner passes the scheduler's monotonic time before
+ * each frame_begin (same clock as canlin_ui_input.t); widgets that change look with time
+ * alone (graph long-press feedback) read it. canlin_ui_view_wake returns 1 and *at when
+ * the last finished frame needs another draw at monotonic ms *at even without input, else
+ * 0. The owner arms a core-owned one-shot timer for it (never delivered to Lua) and cancels
+ * it once a frame no longer asks. Without set_now the time is 0 (nothing is due). */
+void canlin_ui_view_set_now(canlin_ui_view *v, uint64_t now);
+int canlin_ui_view_wake(const canlin_ui_view *v, uint64_t *at);
+
 /* Rasterizes the last finished frame into r; sets r's atlas to the view's font. */
 void canlin_ui_view_render(canlin_ui_view *v, canlin_render *r);
 
@@ -233,9 +242,14 @@ typedef enum canlin_ui_part {
     CANLIN_UI_P_LINE,     /* one wrapped text line */
     CANLIN_UI_P_OPTION,   /* one option row of an expanded choice */
     CANLIN_UI_P_NODE,     /* graph: a visible node panel; off = node index (from 0) */
-    CANLIN_UI_P_PORT      /* graph: a visible port touch target; off = node index,
+    CANLIN_UI_P_PORT,     /* graph: a visible port touch target; off = node index,
                            * len = port index, inputs first then outputs */
+    CANLIN_UI_P_HOLD      /* graph: long-press feedback shown while a press is held past
+                           * CANLIN_UI_LONG_PRESS_MS; off = node index, or
+                           * CANLIN_UI_HOLD_CANVAS for a hold on empty canvas */
 } canlin_ui_part;
+
+#define CANLIN_UI_HOLD_CANVAS 0xffffffffu
 
 typedef struct canlin_ui_rect {
     unsigned char kind, part;
