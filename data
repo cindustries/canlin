@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T17:41:13Z
+id: 57
+priority: low
+status: backlog
+tags:
+- llm
+- assistant
+title: 'LLM: align tool-call id limit (dialect 256 vs set_view 128)'
+updated: 2026-09-23T17:41:13Z
+---
+
+From #51: ids of 129–256 bytes pass the dialect but get an invalid result from set_view. Pick one limit in llm_limits.h and test both sides.
