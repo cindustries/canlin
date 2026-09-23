@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-09-23T05:49:07Z
+id: 52
+priority: low
+status: backlog
+tags:
+- ui
+title: Render \t in text/bubble/area as tab stop
+updated: 2026-09-23T05:49:07Z
+---
+
+wrap()/emit_line pass \\t to the font. From canlin#47.
