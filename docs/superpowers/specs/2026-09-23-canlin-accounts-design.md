@@ -1,7 +1,7 @@
 # CanLin — accounts, instances and configuration storage
 
-Status: draft. The owner answered §8 questions 1, 2, 3 and 4 on 2026-09-23 (see §2, §4
-and §6.1); question 5 is open. It extends the
+Status: draft. The owner answered all §8 questions on 2026-09-23 (see §2, §3.2, §4 and
+§6.1). It extends the
 standalone-first model of the [system design](2026-09-22-canlin-system-design.md) §1 and
 the provider setup of the [LLM providers design](2026-09-23-canlin-llm-providers-design.md).
 
@@ -53,6 +53,16 @@ the service endpoints and the auth method. No answer or an invalid document is s
 "no CanLin service at this domain" — no guessing, no fallback to a storage protocol.
 Authentication and everything the service offers (presets, gateway, modules, sync,
 speech) belong to the planned `canlin-server` and its own spec (system design §11).
+
+**Storage-only domains** (decided 2026-09-23, owner): the `.well-known/canlin` document
+may name a storage root instead of (or besides) a `canlin-server`, e.g.
+`{"storage": "davs://dav.example.de/canlin/{user}"}`. The instance then behaves exactly
+like a storage account (§3.3) with that URL, `{user}` replaced by the local part of the
+input. Rules: the document is fetched over HTTPS only; only encrypted storage schemes
+are accepted (§4); if the storage host is not `<domain>` or a subdomain of it, the
+host is shown to the user before any password is sent; the password is asked for by
+CanLin, never taken from the document. So a domain owner can offer CanLin accounts
+with a plain WebDAV share, without running `canlin-server`.
 
 ### 3.3 Storage (URL)
 
@@ -134,7 +144,8 @@ module.
 3. `davs://` storage backend on the native HTTP/TLS transport; upload/download, atomic
    replace, writer token, offline queue.
 4. Copy between instances.
-5. Service accounts once `canlin-server` exists.
+5. `user@domain` with a storage-only `.well-known` document (§3.2); service accounts
+   with `canlin-server` once it exists.
 
 ## 8. Open questions for the owner
 
@@ -147,6 +158,5 @@ module.
    protocols?
 4. **Secrets in storage** — passphrase-encrypted as in §5 acceptable, or never store keys
    remotely?
-5. **Service accounts** — should `user@domain` also be able to point at a storage (e.g.
-   the `.well-known` document names a WebDAV root) so a domain owner can offer storage
-   without running `canlin-server`?
+5. ~~**Service accounts**~~ — answered: yes, `.well-known/canlin` may name a WebDAV
+   root directly (§3.2).
