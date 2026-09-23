@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-23T05:06:42Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-22T19:40:34Z
+id: 10
+priority: high
+started: 2026-09-23T05:06:42Z
+status: review
+tags:
+- spec
+title: 'Core API spec: numeric limits, C/Lua signatures, cancel semantics'
+updated: 2026-09-23T05:06:42Z
+---
+
+Collect from #4/#5/#6: CANCELLED delivery, retiring reservations vs quota, suspension clock policy, JSON NUL policy, SSE UTF-8, per-dialect parser limits, memory fault = scope death, restricted coroutines.
+
+Draft: docs/superpowers/specs/2026-09-23-canlin-core-api-design.md (decisions D1-D8, budgets §7). Needs Getty review.
