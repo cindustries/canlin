@@ -26,6 +26,7 @@
  */
 #include "canlin/render.h"
 #include "canlin/ui_limits.h"
+#include "font_builtin.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -581,7 +582,19 @@ int canlin_render_font_default_sizes(canlin_render_font *f, const float *px, int
     nk_font_atlas_init_default(&f->atlas);
     nk_font_atlas_begin(&f->atlas);
     for (i = 0; i < n; i++) {
-        f->size[i] = nk_font_atlas_add_default(&f->atlas, px[i], NULL);
+        /* Built-in DejaVu Sans subset, 1:1 in the atlas (no oversampling: text() blits
+         * nearest-neighbour, so the atlas must already hold the anti-aliased coverage
+         * at the drawn size). Missing codepoints fall back to the U+25A1 box. The blob
+         * is static and read-only; the atlas never owns or frees it. */
+        struct nk_font_config cfg = nk_font_config(px[i]);
+        cfg.ttf_blob = (void *)canlin_font_builtin_ttf;
+        cfg.ttf_size = (nk_size)canlin_font_builtin_ttf_size;
+        cfg.ttf_data_owned_by_atlas = 0;
+        cfg.range = canlin_font_builtin_ranges;
+        cfg.fallback_glyph = CANLIN_FONT_BUILTIN_BOX;
+        cfg.oversample_h = 1;
+        cfg.oversample_v = 1;
+        f->size[i] = nk_font_atlas_add(&f->atlas, &cfg);
         if (!f->size[i])
             goto fail;
     }

@@ -63,6 +63,7 @@ typedef struct shell_out {
     int drag;                             /* divider being dragged, -1 none */
     int drag_off;
     int cap;                              /* module capturing the pointer, -1 none */
+    unsigned cap_btns;                    /* buttons held in the captured view (bit each) */
     int hover;                            /* module last sent a motion, -1 none */
     int bar_press, bar_py;
     int chrome_press;                     /* a press consumed by chrome: eat its release */
@@ -940,7 +941,7 @@ static void hover_to(canlin_shell *sh, shell_out *so, int k, const canlin_ui_inp
 static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
 {
     shell_out *so = &sh->out[oi];
-    int x = in->x, y = in->y, i, p;
+    int x = in->x, y = in->y, i, p, k;
 
     if (in->type == CANLIN_UI_IN_SCROLL) {
         if (so->sw_open)
@@ -952,14 +953,22 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
         int pos = (so->orient == CANLIN_SHELL_ROW ? x : y - so->bar_h) - so->drag_off;
         move_divider(sh, so, so->drag, pos);
         sync_views(sh);
-        if (in->type == CANLIN_UI_IN_BUTTON && !in->down)
+        if (in->type == CANLIN_UI_IN_BUTTON && !in->down &&
+            in->button == CANLIN_UI_BUTTON_PRIMARY)
             so->drag = -1;
         return CANLIN_SHELL_R_CHROME;
     }
     if (so->cap >= 0) {
         int k = so->cap, r = post(sh, k, in);
-        if (in->type == CANLIN_UI_IN_BUTTON && !in->down)
-            so->cap = -1;
+        /* Held until every button pressed into the view is released (canlin#32). */
+        if (in->type == CANLIN_UI_IN_BUTTON) {
+            if (in->down)
+                so->cap_btns |= 1u << in->button;
+            else
+                so->cap_btns &= ~(1u << in->button);
+            if (so->cap_btns == 0)
+                so->cap = -1;
+        }
         return r;
     }
     if (so->chrome_press) {
@@ -969,7 +978,8 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
             so->bar_press = 0;
             switcher_set(sh, so, 1);
         }
-        if (in->type == CANLIN_UI_IN_BUTTON && !in->down)
+        if (in->type == CANLIN_UI_IN_BUTTON && !in->down &&
+            in->button == CANLIN_UI_BUTTON_PRIMARY)
             so->chrome_press = so->bar_press = 0;
         return CANLIN_SHELL_R_CHROME;
     }
@@ -988,6 +998,23 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
     /* A button edge without capture. A release here belongs to nobody. */
     if (!in->down)
         return CANLIN_SHELL_R_DROPPED;
+    if (in->button != CANLIN_UI_BUTTON_PRIMARY) {
+        /* Secondary/middle: chrome has no binding for them (consumed, nothing happens);
+         * over a running view they focus and capture like a primary press. */
+        p = so->sw_open ? -1 : pane_at(so, x, y);
+        i = p >= 0 ? so->slot[so->vslot[p]] : -1;
+        if (i < 0 || mod_state(sh, i) != CANLIN_MODULE_RUNNING || inside(&so->bar, x, y))
+            return CANLIN_SHELL_R_CHROME;
+        if (so->mode == CANLIN_SHELL_TILED)
+            for (k = 0; k < so->vn - 1; k++)
+                if (inside(&so->div[k], x, y))
+                    return CANLIN_SHELL_R_CHROME;
+        set_focus(sh, oi, so->vslot[p]);
+        hover_to(sh, so, i, in);
+        so->cap = i;
+        so->cap_btns = 1u << in->button;
+        return post(sh, i, in);
+    }
     so->chrome_press = 1;
     if (so->sw_open) {
         for (i = 0; i < so->sw_rows; i++)
@@ -1033,6 +1060,7 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
     so->chrome_press = 0;
     hover_to(sh, so, i, in);
     so->cap = i;
+    so->cap_btns = 1u << CANLIN_UI_BUTTON_PRIMARY;
     return post(sh, i, in);
 }
 
@@ -1062,6 +1090,8 @@ int canlin_shell_input(canlin_shell *sh, canlin_ui_output *o, const canlin_ui_in
     case CANLIN_UI_IN_MOTION:
     case CANLIN_UI_IN_BUTTON:
     case CANLIN_UI_IN_SCROLL:
+        if (!canlin_ui_input_valid(in))
+            return CANLIN_SHELL_EINVAL; /* e.g. a button outside canlin_ui_button */
         return pointer_input(sh, (int)(so - sh->out), in);
     default:
         return CANLIN_SHELL_EINVAL;

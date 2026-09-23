@@ -157,7 +157,11 @@ const char *canlin_module_errmsg(const canlin_module *m);
  * Without a view the module is headless: M.draw still runs and receives a `ui` object
  * whose every method raises. The view is owned by the module, created on the first
  * canlin_module_set_ui and freed with the module, after its Lua state; its widget state
- * is reset for each new generation. */
+ * is reset for each new generation. When a finished frame asks for a time-driven redraw
+ * (canlin_ui_view_wake, e.g. graph long-press feedback) the module keeps one core-owned
+ * one-shot timer of its generation armed for it: its expiry requests a draw and is never
+ * delivered to M.event, canlin.cancel refuses its handle, and it takes one slot of the
+ * module's CANLIN_EV_MOD_MAX_TIMERS while armed (refused: the feedback waits for input). */
 struct canlin_ui;
 struct canlin_ui_output;
 struct canlin_ui_view;
