@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T05:49:05Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T05:25:20Z
+id: 45
+priority: medium
+started: 2026-09-23T05:25:45Z
+status: review
+tags:
+- ui
+- input
+title: 'On-screen keyboard for touch-without-keyboard outputs (rest of #26)'
+updated: 2026-09-23T05:49:05Z
+---
+
+QWERTZ with umlauts, shift, backspace, enter, space, hide; 2.5 em keys; input-class setter on canlin_ui_output (canlin_ui_output_set_input). From canlin#26.
+
+Merged (2052ee9). Host + ASan/UBSan green; i686 musl build of all suites green (native 32-bit run, no xmm in disassembly); QEMU pentium2 not run.
