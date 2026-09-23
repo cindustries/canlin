@@ -57,6 +57,15 @@ at `content_block_stop`) and their arguments parse as one complete JSON object. 
 call is **acted on only after `done` with `ok = true`**; if the stream fails after a tool
 event, the assistant discards that call (decided 2026-09-23, canlin#38).
 
+**Length stop with an unfinished tool call** (decided 2026-09-23, owner): when the
+provider ends on its length stop (`openai-chat` `finish_reason = "length"`,
+`anthropic-messages` `stop_reason = "max_tokens"`) while a tool call is still
+incomplete, that call is dropped, never delivered. The stream still succeeds with
+`stop = "length"`; the text delivered so far stays, and `result.dropped_tools` counts the
+dropped calls so the assistant can say the answer was cut off. Complete tool calls
+delivered before the length stop are delivered as usual. Anything else incomplete at the
+end (EOF, error, other stop reasons) stays a failure.
+
 ## 3. Presets
 
 Shipped as data in the binary (a C table now; a `providers.bee` pack once libbee is
@@ -77,7 +86,12 @@ presets without a release.
 
 v1 list: openai, anthropic, groq, mistral, deepseek, openrouter, xai, cerebras, minimax,
 moonshot (both `anthropic-messages`), minimax-openai, moonshot-openai (their
-`openai-chat` endpoints), ollama, lmstudio, vllm, llamacpp. Exact URLs and default models are copied
+`openai-chat` endpoints), ollama, lmstudio, lmstudio-anthropic, vllm, llamacpp.
+`lmstudio-anthropic` (decided 2026-09-23, owner) is LM Studio's Anthropic mode on
+loopback: `anthropic-messages`, `x-api-key`, key `optional`, and without a user key the preset
+sends the fixed dummy key `lmstudio` (as Langertha does) because the server requires a
+non-empty header. The dummy is preset data, not a credential; a key the user sets
+replaces it. Exact URLs and default models are copied
 from the corresponding Langertha engines at implementation time and recorded with the
 Langertha version they came from; they are data and can be updated without code.
 
@@ -109,7 +123,7 @@ Events for the request handle (core API §5.2):
 | `"llm"` | `{handle, kind = "text", text}` — a UTF-8 fragment (validated, D5) |
 | `"llm"` | `{handle, kind = "tool", id, name, args}` — one complete tool call, `args` a JSON string |
 | `"llm"` | `{handle, kind = "usage", input, output}` — if the provider reports it |
-| `"done"` | `{handle, ok = true, result = {stop = "end"\|"tool"\|"length"}}` or `{handle, ok = false, code, message}` (the generic shape of core API §5.2) |
+| `"done"` | `{handle, ok = true, result = {stop = "end"\|"tool"\|"length", dropped_tools = n}}` (`dropped_tools` only with `length`, §2.3) or `{handle, ok = false, code, message}` (the generic shape of core API §5.2) |
 
 `tools` names core-provided tools; their JSON schemas come from the core (for `set_view`
 the UI spec §7 schema), so a module cannot describe arbitrary tools to the provider in
