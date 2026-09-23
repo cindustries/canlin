@@ -1,7 +1,7 @@
 # CanLin — accounts, instances and configuration storage
 
-Status: draft; the owner answered §8 questions 1, 3 and 4 on 2026-09-23 (see §2), with remaining
-questions in §8. Nothing here is decided until those are answered. It extends the
+Status: draft. The owner answered §8 questions 1, 3 and 4 on 2026-09-23 (see §2 and §4);
+questions 2 and 5 are open. It extends the
 standalone-first model of the [system design](2026-09-22-canlin-system-design.md) §1 and
 the provider setup of the [LLM providers design](2026-09-23-canlin-llm-providers-design.md).
 
@@ -14,7 +14,7 @@ kind of account this instance gets:
 |---|---|---|
 | `getty` | **local** | everything stays on this device; LLM setup shows the standard presets and asks for an API key |
 | `getty@example.de` | **service** | the instance looks for a CanLin service of `example.de`, logs in there; the service can send LLM presets (or a gateway), modules, sync — "the whole connect rest" |
-| `davs://getty@u123.your-storagebox.de/canlin` (or `sftp://`, `ftps://`, `ftp://`) | **storage** | a plain file storage the user already has (e.g. a Hetzner Storage Box) becomes the home of this instance's configuration; no CanLin server needed |
+| `davs://getty@u123.your-storagebox.de/canlin` (or `ftps://`, later `sftp://`) | **storage** | a plain file storage the user already has (e.g. a Hetzner Storage Box) becomes the home of this instance's configuration; no CanLin server needed |
 
 In every kind the LLM part works the same: if the service provides presets or a
 gateway, they are offered; otherwise the standard presets of the providers spec are
