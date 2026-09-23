@@ -1,7 +1,7 @@
 # CanLin — native HTTP/1.1 + TLS transport
 
-Status: draft for canlin#41 (2026-09-23). It fills the "native" row of the
-[LLM providers design](2026-09-23-canlin-llm-providers-design.md) §8 and is the transport
+Status: implemented for canlin#41 (2026-09-23); §3, §5–§8 updated to the
+implementation. It fills the "native" row of the [LLM providers design](2026-09-23-canlin-llm-providers-design.md) §8 and is the transport
 the `davs://` storage of the [accounts design](2026-09-23-canlin-accounts-design.md) §4
 reuses. It obeys the [event runtime design](2026-09-22-canlin-event-runtime-design.md)
 §3, §5 and §6. The browser Fetch/Streams adapter is a separate ticket.
@@ -47,9 +47,11 @@ void canlin_http_step(canlin_http *h, canlin_ev_time now);
   are live.
 - Callback order per stream: `status`, `header*`, `body*`, then exactly one of
   `end`/`error`. After `close()` returns, no callback for that stream.
-- Read backpressure: `step` reads only while the consumer accepts; the LLM core's
-  refused-post retry (`canlin_llm_pump`) maps to "stop reading this stream this turn",
-  never to buffering beyond `CANLIN_NET_RX_MAX`.
+- Read backpressure: `step` reads only while the consumer accepts (a nonzero return
+  from the `canlin_http` body callback pauses the stream), never buffering beyond
+  `CANLIN_NET_RX_MAX`. The llm.h `body` callback returns `void`, so the LLM adapter
+  always accepts, bounded by `CANLIN_NET_TURN_BYTES` per step; making it return a
+  pause signal is a follow-up.
 - The fake clock of `canlin_ev` drives all transport timeouts in tests.
 
 ## 4. DNS
@@ -76,13 +78,19 @@ are tried in `getaddrinfo` order, one connect at a time, each with
   `mbedtls_ssl_set_hostname`), validity dates. There is no "ignore certificate" switch.
   Plain `http://` is only for loopback/local profiles (providers spec §5).
 - Trust store: a PEM bundle path from platform configuration, default
-  `/etc/ssl/certs/ca-certificates.crt`; canlin-os ships that file. Loaded once, lazily,
-  before the first TLS handshake. A missing/unparseable bundle fails every TLS request
-  with `tls-trust`, not silently with verification off.
+  `/etc/ssl/certs/ca-certificates.crt`; canlin-os ships that file. Loaded lazily before
+  the first TLS handshake and kept once loaded; a failed load is retried on the next
+  connection. A bundle where some certificates do not parse is used with the ones that
+  do; a missing bundle or one with no usable certificate fails every TLS request with
+  `tls-trust`, not silently with verification off.
 - Entropy: `getrandom()`/`/dev/urandom` via mbedtls' platform entropy.
-- **Wall clock:** a P2 with a dead CMOS battery has a wrong date. A certificate failing
-  only on validity dates is reported as `tls-clock` ("Systemzeit prüfen") so the UI can
-  say so, distinct from `tls-verify`.
+- **Wall clock:** a P2 with a dead CMOS battery has a wrong date. CanLin checks the
+  validity dates itself against the configured wall clock (`MBEDTLS_HAVE_TIME_DATE`
+  off, injectable in tests). A chain failing only on dates (leaf or CA) is reported as
+  `tls-clock` ("Systemzeit prüfen"), distinct from `tls-verify`.
+- `MBEDTLS_HAVE_ASM` is off: host and target run identical C. The server side
+  (`MBEDTLS_SSL_SRV_C`) is compiled in for the loopback tests; runtime images should
+  leave it out once a runtime binary exists.
 - Record buffers: `MBEDTLS_SSL_IN_CONTENT_LEN` 16 KiB (servers may send full records),
   `MBEDTLS_SSL_OUT_CONTENT_LEN` 4 KiB.
 
@@ -104,6 +112,8 @@ Response parser (incremental, any split, bounded):
   else read to close. Both headers present, conflicting `Content-Length`, or a
   `Content-Encoding` other than `identity` is a protocol error.
 - EOF before the framing says the body is complete is an error (`eof`), never `end`.
+  A close-delimited body over TLS that ends with a TCP FIN but no `close_notify` is
+  `eof` too (possible truncation).
 - Response body bytes are not bounded in total by the transport (streams can be long);
   the consumer's limits apply (LLM §7), and the idle timeout covers stalls.
 
@@ -112,13 +122,18 @@ POST receiving them fails — no silent method change), `307/308` for GET and PO
 the same body. The target must be `https`, or loopback `http` when the original was
 loopback `http`; downgrades fail. Each hop re-evaluates the credential binding: a
 cross-origin hop drops the credential (already tested with the fixture transport).
+`Location` may be absolute, scheme-relative (`//host/…`) or absolute-path (`/…`);
+other relative forms fail with `redirect`. A 3xx without `Location` is delivered as an
+ordinary response. The transport enforces the downgrade rule only on redirects; which
+first URLs may be plain `http` is the caller's rule (providers spec §5).
 
 ## 7. Errors
 
 `error(msg)` carries a short code prefix plus text without secrets or bodies:
 `dns`, `connect`, `timeout`, `tls-trust`, `tls-verify`, `tls-clock`, `tls`, `protocol`,
-`eof`, `redirect`, `limit`, `cancelled`. The LLM connection test (providers §6) maps
-these to its user-facing categories.
+`eof`, `redirect`, `limit`. Messages never contain the URL or host. There is no
+`cancelled` callback: after `close()` nothing is delivered. The LLM connection test
+(providers §6) maps these to its user-facing categories.
 
 ## 8. Limits
 
@@ -137,6 +152,14 @@ New `include/canlin/net_limits.h`, initial values:
 | `CANLIN_NET_REDIRECTS_MAX` | 3 |
 | `CANLIN_NET_RX_MAX` | 32 KiB buffered undelivered body per stream |
 | `CANLIN_NET_TURN_BYTES` | 16 KiB read per stream per step |
+| `CANLIN_NET_IDLE_TIMEOUT_MS` | 60 000 without a byte |
+| `CANLIN_NET_INTERIM_MAX` | 8 `1xx` responses |
+| `CANLIN_NET_ADDRS_MAX` | 8 addresses tried |
+| `CANLIN_NET_URL_MAX` / `HOST_MAX` | 2048 / 255 bytes |
+| `CANLIN_NET_REQUEST_HEAD_MAX` | 16 KiB |
+| `CANLIN_NET_REQ_HEADERS_MAX` | 32 caller headers |
+| `CANLIN_NET_CHUNK_HEX_MAX` | 8 hex digits |
+| `CANLIN_NET_MSG_MAX` | 128 bytes error text |
 
 Memory per TLS stream ≈ 16 + 4 KiB records + mbedtls session state + `RX_MAX`; four
 streams stay well under 1 MiB.
