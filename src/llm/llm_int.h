@@ -84,8 +84,10 @@ int llm_emit_text(llm_req *r, const char *s, size_t n);
 int llm_emit_tool(llm_req *r, const char *id, size_t idn, const char *name, size_t namen,
                   const char *args, size_t argsn);
 int llm_emit_usage(llm_req *r, int64_t input, int64_t output);
-/* Terminal outcomes. stop: "end" | "tool" | "length". code: core API §3.1 string. */
-void llm_succeed(llm_req *r, const char *stop);
+/* Terminal outcomes. stop: "end" | "tool" | "length". dropped_tools: unfinished tool
+ * calls dropped at the length stop (spec §2.3); reported only with "length", must be 0
+ * otherwise. code: core API §3.1 string. */
+void llm_succeed(llm_req *r, const char *stop, unsigned dropped_tools);
 void llm_fail(llm_req *r, const char *code, const char *msg);
 int llm_is_terminal(const llm_req *r);
 

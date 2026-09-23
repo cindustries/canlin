@@ -15,6 +15,11 @@
  *                      (set_view to the assistant view, with the response's gen/turn and
  *                      the call id), its result recorded. Not ok: every held call is
  *                      discarded unexecuted, and the outcome says so (partial, discarded).
+ *   finish_length(...) instead of finish: done ok = true with stop = "length" (LLM
+ *                      providers §2.3, §4, decided 2026-09-23). A success: the held
+ *                      (complete) calls are dispatched as with finish ok; the outcome
+ *                      records that the answer was cut off (truncated) and how many
+ *                      unfinished calls the provider adapter dropped (dropped_tools).
  * Events after finish (late tool, second finish) are refused as ESTALE and change
  * nothing, so a call is acted on at most once per response. A bound hit while holding
  * (count, size) fails the response at once ("full"): no subset of a response is applied.
@@ -62,6 +67,10 @@ typedef struct canlin_ar_outcome {
     unsigned calls;                 /* tool calls received */
     unsigned dispatched;            /* of them handed to their tool (complete only) */
     unsigned discarded;             /* of them dropped unexecuted (failed/cancelled) */
+    /* complete at the length stop: the answer was cut off (the conversation says so) */
+    int truncated;
+    unsigned dropped;               /* length stop: unfinished calls dropped by the adapter,
+                                       never received here (the result's dropped_tools) */
     char code[16];                  /* failed: core API §3.1 code; else "" */
     char message[CANLIN_LLM_MSG_MAX]; /* failed: diagnostic (never parsed); else "" */
 } canlin_ar_outcome;
@@ -92,6 +101,11 @@ int canlin_assistant_response_tool(canlin_assistant_response *r, const char *id,
 int canlin_assistant_response_finish(canlin_assistant_response *r,
                                      canlin_assistant_view *av, int ok, const char *code,
                                      const char *message);
+/* The response's `done` with ok = true and result.stop = "length": the same as a finish
+ * with ok != 0 (held calls dispatched), plus truncated = 1 and dropped = dropped_tools in
+ * the outcome. Dropped calls were never received: no result, nothing to send back. */
+int canlin_assistant_response_finish_length(canlin_assistant_response *r,
+                                            canlin_assistant_view *av, unsigned dropped_tools);
 /* The conversation cancelled the request: like a failed finish with state CANCELLED.
  * ESTALE unless open (cancel after done changes nothing: cancel is not rollback). */
 int canlin_assistant_response_cancel(canlin_assistant_response *r);

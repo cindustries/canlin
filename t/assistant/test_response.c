@@ -48,6 +48,7 @@ typedef struct harness {
 } harness;
 
 static harness *cur; /* the gate the test functions forward to */
+static int use_anthropic; /* h_init: profile on the anthropic preset instead of openai */
 
 static void log_fn(void *ud, const char *msg, size_t len)
 {
@@ -101,9 +102,19 @@ static int l_gate_done(lua_State *L)
     return 1;
 }
 
+/* canlin.gate_length(dropped_tools): done ok with result.stop = "length" */
+static int l_gate_length(lua_State *L)
+{
+    lua_pushinteger(L, canlin_assistant_response_finish_length(
+                           cur->gate, cur->av, (unsigned)luaL_checkinteger(L, 1)));
+    return 1;
+}
+
 static int install(lua_State *L, canlin_module *m, void *ud)
 {
     canlin_llm_install(L, m, ud);
+    lua_pushcfunction(L, l_gate_length);
+    lua_setfield(L, -2, "gate_length");
     lua_pushcfunction(L, l_gate_text);
     lua_setfield(L, -2, "gate_text");
     lua_pushcfunction(L, l_gate_tool);
@@ -128,7 +139,9 @@ static const char mod_src[] =
     "    end\n"
     "  elseif name == 'done' then\n"
     "    if p.ok then print('done ok', p.result.stop) else print('done fail', p.code) end\n"
-    "    print('gate_done', canlin.gate_done(p.ok, p.code, p.message))\n"
+    "    if p.ok and p.result.stop == 'length' then\n"
+    "      print('gate_length', canlin.gate_length(p.result.dropped_tools))\n"
+    "    else print('gate_done', canlin.gate_done(p.ok, p.code, p.message)) end\n"
     "  end\n"
     "end\n"
     "return M\n";
@@ -155,8 +168,8 @@ static void h_init(harness *h)
     }
     memset(&pc, 0, sizeof pc);
     pc.id = "p";
-    pc.preset = "openai";
-    pc.base_url = "https://llm.example/v1";
+    pc.preset = use_anthropic ? "anthropic" : "openai";
+    pc.base_url = use_anthropic ? "https://llm.example" : "https://llm.example/v1";
     pc.model = "m-1";
     CHECK(canlin_llm_profile_create(h->llm, &pc) == CANLIN_LLM_OK);
     CHECK(canlin_llm_profile_set_key(h->llm, "p", "sk-dummy", 8) == CANLIN_LLM_OK);
@@ -318,6 +331,95 @@ static void test_complete_acts_once(void)
     h_done(&h);
 }
 
+/* ---- length stop with an unfinished tool call (LLM providers §2.3, canlin#59) ---- */
+
+/* openai-chat: complete call_A, then call_B cut off by finish_reason "length". */
+static const char oa_length[] =
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Moment.\"}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_A\","
+    "\"type\":\"function\",\"function\":{\"name\":\"set_view\",\"arguments\":"
+    "\"{\\\"widgets\\\":[{\\\"type\\\":\\\"heading\\\",\\\"text\\\":\\\"Hi\\\"}]}\"}}]}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_B\","
+    "\"type\":\"function\",\"function\":{\"name\":\"set_view\",\"arguments\":"
+    "\"{\\\"widgets\\\":[{\\\"type\"}}]}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+    "data: [DONE]\n\n";
+
+/* anthropic-messages: the same, call_B's block stopped with incomplete input. */
+#define AEV(name, json) "event: " name "\ndata: " json "\n\n"
+static const char am_length[] =
+    AEV("message_start", "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\","
+        "\"usage\":{\"input_tokens\":7,\"output_tokens\":1}}}")
+    AEV("content_block_start", "{\"type\":\"content_block_start\",\"index\":0,"
+        "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}")
+    AEV("content_block_delta", "{\"type\":\"content_block_delta\",\"index\":0,"
+        "\"delta\":{\"type\":\"text_delta\",\"text\":\"Moment.\"}}")
+    AEV("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}")
+    AEV("content_block_start", "{\"type\":\"content_block_start\",\"index\":1,"
+        "\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_A\",\"name\":\"set_view\",\"input\":{}}}")
+    AEV("content_block_delta", "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":"
+        "{\"type\":\"input_json_delta\",\"partial_json\":"
+        "\"{\\\"widgets\\\":[{\\\"type\\\":\\\"heading\\\",\\\"text\\\":\\\"Hi\\\"}]}\"}}")
+    AEV("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}")
+    AEV("content_block_start", "{\"type\":\"content_block_start\",\"index\":2,"
+        "\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_B\",\"name\":\"set_view\",\"input\":{}}}")
+    AEV("content_block_delta", "{\"type\":\"content_block_delta\",\"index\":2,\"delta\":"
+        "{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"widgets\\\":[\"}}")
+    AEV("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":2}")
+    AEV("message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},"
+        "\"usage\":{\"output_tokens\":9}}")
+    AEV("message_stop", "{\"type\":\"message_stop\"}");
+
+/* The complete call acts after done ok; the dropped one is counted, never received. */
+static void check_length(harness *h, const char *what)
+{
+    const canlin_ar_outcome *o = canlin_assistant_response_outcome(h->gate);
+    const canlin_ar_call *c = canlin_assistant_response_call(h->gate, 0);
+    if (!has(h, "gate_length\t0"))
+        fprintf(stderr, "%s: log:\n%s\n", what, h->log);
+    CHECK(has(h, "tool\tcall_A\tset_view"));
+    CHECK(!has(h, "call_B"));
+    CHECK(has(h, "done ok\tlength"));
+    CHECK(has(h, "gate_length\t0"));
+    CHECK(o->state == CANLIN_AR_COMPLETE && o->partial == 0);
+    CHECK(o->truncated == 1 && o->dropped == 1);
+    CHECK(o->calls == 1 && o->dispatched == 1 && o->discarded == 0);
+    CHECK(o->text_bytes == 7);
+    CHECK(canlin_assistant_response_ncalls(h->gate) == 1);
+    CHECK(c && c->dispatched && c->res.status == CANLIN_AV_OK && c->res.revision == 1);
+    CHECK(canlin_assistant_view_revision(h->av) == 1);
+    CHECK(canlin_assistant_view_model(h->av) != NULL);
+    /* exactly once */
+    CHECK(canlin_assistant_response_finish_length(h->gate, h->av, 1) == CANLIN_AV_ESTALE);
+    CHECK(canlin_assistant_response_finish(h->gate, h->av, 1, NULL, NULL) == CANLIN_AV_ESTALE);
+    CHECK(canlin_assistant_view_revision(h->av) == 1);
+}
+
+static void test_length_drops_unfinished(void)
+{
+    static harness h;
+    size_t k;
+    for (k = 1; k <= 64 && !failures; k += 7) {
+        use_anthropic = 0;
+        run_stream(&h, oa_length, CANLIN_LLM_FX_NONE, 0, k);
+        check_length(&h, "openai-chat length");
+        h_done(&h);
+        use_anthropic = 1;
+        run_stream(&h, am_length, CANLIN_LLM_FX_NONE, 0, k);
+        check_length(&h, "anthropic-messages length");
+        h_done(&h);
+    }
+    use_anthropic = 0;
+    /* the length stop that never reached [DONE] is still a failure: nothing acts */
+    run_stream(&h, oa_length, CANLIN_LLM_FX_EOF_AT, strlen(oa_length) - 8, 9);
+    CHECK(has(&h, "tool\tcall_A\tset_view") && has(&h, "done fail\tunavailable"));
+    CHECK(canlin_assistant_response_outcome(h.gate)->state == CANLIN_AR_FAILED);
+    CHECK(canlin_assistant_response_outcome(h.gate)->discarded == 1);
+    CHECK(canlin_assistant_response_outcome(h.gate)->truncated == 0);
+    CHECK(canlin_assistant_view_revision(h.av) == 0);
+    h_done(&h);
+}
+
 /* ---- the gate alone ---- */
 
 static void test_gate_unit(void)
@@ -400,6 +502,34 @@ static void test_gate_unit(void)
     CHECK(canlin_assistant_response_finish(g, av, 1, NULL, NULL) == CANLIN_AV_ESTALE);
     CHECK(canlin_assistant_view_revision(av) == 1);
 
+    /* length stop: held calls act like done ok, truncated and dropped recorded; a
+     * normal finish resets both */
+    canlin_assistant_view_set_scope(av, 7, 3);
+    CHECK(canlin_assistant_response_begin(g, 7, 3) == CANLIN_AV_OK);
+    CHECK(o->truncated == 0 && o->dropped == 0);
+    CHECK(canlin_assistant_response_tool(g, "a", 1, "set_view", 8, ARGS, strlen(ARGS)) ==
+          CANLIN_AV_OK);
+    CHECK(canlin_assistant_response_finish_length(g, NULL, 2) == CANLIN_AV_EARG); /* view */
+    CHECK(o->state == CANLIN_AR_OPEN && o->truncated == 0);
+    CHECK(canlin_assistant_response_finish_length(g, av, 2) == CANLIN_AV_OK);
+    CHECK(o->state == CANLIN_AR_COMPLETE && o->truncated == 1 && o->dropped == 2);
+    CHECK(o->dispatched == 1 && o->discarded == 0 && o->partial == 0);
+    CHECK(canlin_assistant_view_revision(av) == 2);
+    CHECK(canlin_assistant_response_finish_length(g, av, 1) == CANLIN_AV_ESTALE);
+    CHECK(o->dropped == 2);
+    /* nothing held, nothing dropped: still a truncated success */
+    CHECK(canlin_assistant_response_begin(g, 7, 3) == CANLIN_AV_OK);
+    CHECK(canlin_assistant_response_finish_length(g, NULL, 0) == CANLIN_AV_OK);
+    CHECK(o->state == CANLIN_AR_COMPLETE && o->truncated == 1 && o->dropped == 0);
+    CHECK(canlin_assistant_response_begin(g, 7, 3) == CANLIN_AV_OK);
+    CHECK(o->truncated == 0 && o->dropped == 0);
+    /* cancelled: a later length finish acts on nothing */
+    CHECK(canlin_assistant_response_tool(g, "a", 1, "set_view", 8, ARGS, strlen(ARGS)) ==
+          CANLIN_AV_OK);
+    CHECK(canlin_assistant_response_cancel(g) == CANLIN_AV_OK);
+    CHECK(canlin_assistant_response_finish_length(g, av, 1) == CANLIN_AV_ESTALE);
+    CHECK(o->truncated == 0 && canlin_assistant_view_revision(av) == 2);
+
     /* bad arguments */
     CHECK(canlin_assistant_response_begin(g, 7, 2) == CANLIN_AV_OK);
     CHECK(canlin_assistant_response_tool(g, NULL, 0, "set_view", 8, "{}", 2) == CANLIN_AV_EARG);
@@ -417,6 +547,7 @@ int main(void)
     test_eof_before_done();
     test_error_after_tool();
     test_transport_error_after_tool();
+    test_length_drops_unfinished();
     printf("assistant response: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

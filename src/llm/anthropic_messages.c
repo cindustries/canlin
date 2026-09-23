@@ -14,6 +14,13 @@
  * block is delivered at its content_block_stop, only when its accumulated input_json_delta
  * fragments parse as one complete JSON object. Success needs message_stop after a
  * message_delta with stop_reason; everything else ends as a failure.
+ *
+ * Length stop (spec §2.3, decided 2026-09-23): a tool_use block whose input is not one
+ * complete JSON object at its content_block_stop is held back as unfinished. It is dropped
+ * and counted in the result's dropped_tools only when the next thing is the message_delta
+ * with stop_reason "max_tokens"; anything else after it (another block, another stop
+ * reason, EOF) fails the stream as before. A tool_use block still open at the max_tokens
+ * message_delta is dropped the same way. Tool calls completed before are delivered.
  */
 #include "llm_int.h"
 #include "canlin/json.h"
@@ -281,6 +288,8 @@ typedef struct am {
     char tname[CANLIN_LLM_TOOL_NAME_MAX];
     size_t tnamen;
     int tinput_empty; /* content_block_start carried "input": {} (or none) */
+    int unfinished;   /* a stopped tool_use block with incomplete input, held back */
+    unsigned dropped; /* unfinished tool calls dropped at the max_tokens stop */
     char *args;
     size_t argsn, argscap;
 } am;
@@ -535,8 +544,17 @@ static int append_args(am *o, const char *p, size_t n)
     return 0;
 }
 
+static void unfinished_fail(am *o)
+{
+    fail_proto(o, "tool call arguments are not one complete JSON object");
+}
+
 static void block_start(am *o)
 {
+    if (o->unfinished) { /* only the length stop may follow an unfinished tool call */
+        unfinished_fail(o);
+        return;
+    }
     if (o->open != BK_NONE) {
         fail_proto(o, "content_block_start while a block is open");
         return;
@@ -644,7 +662,7 @@ static void block_stop(am *o)
     }
     if (!llm_json_object_valid(o->jbuf, sizeof o->jbuf, args ? args : "", argsn,
                                CANLIN_LLM_TOOL_ARGS_MAX)) {
-        fail_proto(o, "tool call arguments are not one complete JSON object");
+        o->unfinished = 1; /* dropped at a max_tokens stop, else a failure */
         return;
     }
     if (llm_emit_tool(o->r, o->tid, o->tidn, o->tname, o->tnamen, args, argsn) != 0) {
@@ -656,14 +674,27 @@ static void block_stop(am *o)
 
 static void message_delta(am *o)
 {
-    int st;
+    int st = ST_NONE;
     if (!o->started) {
         fail_proto(o, "message_delta before message_start");
         return;
     }
+    if (o->stop.set) {
+        if (span_is(o, &o->stop, "end_turn") || span_is(o, &o->stop, "stop_sequence"))
+            st = ST_END;
+        else if (span_is(o, &o->stop, "tool_use"))
+            st = ST_TOOL;
+        else if (span_is(o, &o->stop, "max_tokens"))
+            st = ST_LENGTH;
+    }
     if (o->open != BK_NONE) {
-        fail_proto(o, "message_delta while a content block is open");
-        return;
+        /* only a tool call cut off by the length stop may still be open (spec §2.3) */
+        if (!(o->open == BK_TOOL && st == ST_LENGTH && !o->stopped)) {
+            fail_proto(o, "message_delta while a content block is open");
+            return;
+        }
+        o->open = BK_NONE;
+        o->unfinished = 1;
     }
     if (o->has_in) {
         o->usage_in = o->in_tok;
@@ -679,13 +710,7 @@ static void message_delta(am *o)
         fail_proto(o, "second stop_reason");
         return;
     }
-    if (span_is(o, &o->stop, "end_turn") || span_is(o, &o->stop, "stop_sequence"))
-        st = ST_END;
-    else if (span_is(o, &o->stop, "tool_use"))
-        st = ST_TOOL;
-    else if (span_is(o, &o->stop, "max_tokens"))
-        st = ST_LENGTH;
-    else {
+    if (st == ST_NONE) {
         char msg[CANLIN_LLM_MSG_MAX];
         snprintf(msg, sizeof msg, "provider stopped: %.*s",
                  (int)(o->stop.len > 32 ? 32 : o->stop.len), o->arena + o->stop.off);
@@ -693,11 +718,19 @@ static void message_delta(am *o)
         llm_fail(o->r, "unavailable", msg);
         return;
     }
+    if (o->unfinished) {
+        if (st != ST_LENGTH) {
+            unfinished_fail(o);
+            return;
+        }
+        o->unfinished = 0;
+        o->dropped++;
+    }
     if (st == ST_TOOL && o->tools_done == 0) {
         fail_proto(o, "stop_reason tool_use without a tool call");
         return;
     }
-    if (st != ST_TOOL && o->tools_done) {
+    if (st == ST_END && o->tools_done) {
         fail_proto(o, "tool_use block without stop_reason tool_use");
         return;
     }
@@ -780,9 +813,11 @@ static void on_data(am *o, const char *name, size_t namelen, const char *data, s
         else if (!o->stopped)
             fail_proto(o, "message_stop without stop_reason");
         else
-            llm_succeed(o->r, o->stopped == ST_TOOL     ? "tool"
-                              : o->stopped == ST_LENGTH ? "length"
-                                                        : "end");
+            llm_succeed(o->r,
+                        o->stopped == ST_TOOL     ? "tool"
+                        : o->stopped == ST_LENGTH ? "length"
+                                                  : "end",
+                        o->stopped == ST_LENGTH ? o->dropped : 0);
         return;
     }
     if (span_is(o, &o->type, "message_delta")) {
@@ -883,6 +918,10 @@ static void am_eof(void *st)
         return;
     if (rc != CANLIN_SSE_OK) {
         sse_fail(o, rc);
+        return;
+    }
+    if (o->unfinished) {
+        unfinished_fail(o);
         return;
     }
     fail_proto(o, o->stopped ? "stream ended before message_stop"

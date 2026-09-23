@@ -6,7 +6,9 @@
  * usage, error) are collected first and applied only once the whole document parsed,
  * so nothing from a malformed chunk reaches the module. Tool calls are assembled from
  * index-based deltas and delivered only at finish_reason "tool_calls", complete and with
- * arguments that parse as one JSON object. Success needs finish_reason then [DONE].
+ * arguments that parse as one JSON object. At finish_reason "length" the complete calls
+ * are delivered as well; an unfinished last call is dropped and counted in the result's
+ * dropped_tools (spec §2.3, decided 2026-09-23). Success needs finish_reason then [DONE].
  * With stream_options.include_usage (preset flag) the provider sends one more chunk
  * between finish_reason and [DONE]: "choices": [] and the usage object; it carries no
  * content, so it is accepted after finish_reason and only emits usage.
@@ -174,6 +176,7 @@ typedef struct oa {
     /* per response */
     int finished;      /* finish_reason seen */
     int done;          /* [DONE] or terminal */
+    unsigned dropped;  /* length stop: unfinished tool call dropped (spec §2.3) */
     tslot slot[CANLIN_LLM_TOOL_CALLS_MAX];
 } oa;
 
@@ -418,24 +421,37 @@ static int merge_delta(oa *o, const tdelta *td)
     return 0;
 }
 
-static void emit_tools(oa *o)
+/* Deliver the assembled calls in index order, each only when it has a name and its
+ * arguments parse as one complete JSON object. At the length stop (spec §2.3) the last
+ * call may be unfinished: it is dropped, never delivered, and counted; every earlier call
+ * must be complete. Returns the number dropped (0 or 1), or -1 after failing the request. */
+static int emit_tools(oa *o, int length)
 {
-    size_t i, n = 0;
+    size_t i, n = 0, last = 0;
+    int dropped = 0;
+    for (i = 0; i < CANLIN_LLM_TOOL_CALLS_MAX; i++)
+        if (o->slot[i].used)
+            last = i;
     for (i = 0; i < CANLIN_LLM_TOOL_CALLS_MAX; i++) {
         tslot *s = &o->slot[i];
         char gen[24];
         const char *id = s->id;
         size_t idn = s->idn;
+        const char *why = NULL;
         if (!s->used)
             continue;
-        if (s->namen == 0 || !llm_utf8_valid(s->name, s->namen)) {
-            fail_proto(o, "tool call without a name");
-            return;
-        }
-        if (!llm_json_object_valid(o->jbuf, sizeof o->jbuf, s->args, s->argsn,
-                                   CANLIN_LLM_TOOL_ARGS_MAX)) {
-            fail_proto(o, "tool call arguments are not one complete JSON object");
-            return;
+        if (s->namen == 0 || !llm_utf8_valid(s->name, s->namen))
+            why = "tool call without a name";
+        else if (!llm_json_object_valid(o->jbuf, sizeof o->jbuf, s->args, s->argsn,
+                                        CANLIN_LLM_TOOL_ARGS_MAX))
+            why = "tool call arguments are not one complete JSON object";
+        if (why) {
+            if (length && i == last) {
+                dropped = 1; /* cut off by the length stop */
+                continue;
+            }
+            fail_proto(o, why);
+            return -1;
         }
         if (idn == 0) { /* some local servers omit ids: synthesise a stable one */
             idn = (size_t)snprintf(gen, sizeof gen, "call_%u", (unsigned)i);
@@ -443,11 +459,14 @@ static void emit_tools(oa *o)
         }
         if (llm_emit_tool(o->r, id, idn, s->name, s->namen, s->args ? s->args : "",
                           s->argsn) != 0)
-            return;
+            return -1;
         n++;
     }
-    if (n == 0)
+    if (n == 0 && !length) {
         fail_proto(o, "finish_reason tool_calls without a tool call");
+        return -1;
+    }
+    return dropped;
 }
 
 static int any_tool(const oa *o)
@@ -541,11 +560,15 @@ static void on_data(oa *o, const char *data, size_t n)
     if (o->finish.set) {
         o->finished = 1;
         if (span_is(o, &o->finish, "tool_calls")) {
-            emit_tools(o);
+            emit_tools(o, 0);
+        } else if (span_is(o, &o->finish, "length")) {
+            /* complete calls are delivered, an unfinished last one dropped (spec §2.3) */
+            int d = any_tool(o) ? emit_tools(o, 1) : 0;
+            if (d > 0)
+                o->dropped = (unsigned)d;
         } else if (any_tool(o)) {
             fail_proto(o, "tool call deltas without finish_reason tool_calls");
         } else if (span_is(o, &o->finish, "stop")) {
-        } else if (span_is(o, &o->finish, "length")) {
         } else {
             char msg[CANLIN_LLM_MSG_MAX];
             snprintf(msg, sizeof msg, "provider stopped: %.*s",
@@ -581,7 +604,8 @@ static int on_event(void *ud, const canlin_sse_event *ev)
         if (!o->finished)
             fail_proto(o, "[DONE] without finish_reason");
         else
-            llm_succeed(o->r, o->finished == 2 ? "tool" : o->finished == 3 ? "length" : "end");
+            llm_succeed(o->r, o->finished == 2 ? "tool" : o->finished == 3 ? "length" : "end",
+                        o->finished == 3 ? o->dropped : 0);
         return 1;
     }
     on_data(o, ev->data, ev->data_len);

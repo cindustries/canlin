@@ -25,9 +25,11 @@
  * version path). Groq/OpenRouter/OllamaOpenAI require the user to choose a model there
  * ("" here), except ollama which takes Ollama.pm's default. anthropic, minimax and
  * moonshot use their Anthropic-compatible engines (Anthropic.pm, MiniMaxAnthropic.pm,
- * MoonshotAnthropic.pm) and the anthropic-messages dialect (canlin#39). LM Studio's
- * Anthropic mode (LMStudioAnthropic.pm) has no preset of its own: the v1 list has one
- * lmstudio entry (openai-chat); a custom anthropic-messages profile reaches it.
+ * MoonshotAnthropic.pm) and the anthropic-messages dialect (canlin#39).
+ * lmstudio-anthropic is LM Studio's Anthropic mode (LMStudioAnthropic.pm: url
+ * http://localhost:1234, default_model 'default', api_key_required 0, and the api key
+ * defaults to 'lmstudio' because the server needs a non-empty x-api-key): the dummy_key
+ * below, sent only when the user set no key (canlin#59).
  * minimax-openai and moonshot-openai are the same providers' OpenAI-compatible
  * endpoints (MiniMax.pm, Moonshot.pm; canlin#51).
  * stream_usage (stream_options.include_usage) is set only where the provider documents
@@ -35,42 +37,45 @@
  * until a connection test on that endpoint shows it is accepted. */
 static const canlin_llm_preset presets[] = {
     {"openai", "OpenAI", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.openai.com/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-5.6-terra", 1, 1, 0, 1},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-5.6-terra", 1, 1, 0, 1, NULL},
     {"anthropic", "Anthropic", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
      "https://api.anthropic.com", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_REQUIRED,
-     "claude-sonnet-5", 1, 1, 0, 0},
+     "claude-sonnet-5", 1, 1, 0, 0, NULL},
     {"groq", "Groq", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.groq.com/openai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0, 0, NULL},
     {"mistral", "Mistral", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.mistral.ai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "mistral-small-latest", 1, 1, 0, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "mistral-small-latest", 1, 1, 0, 0, NULL},
     {"deepseek", "DeepSeek", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.deepseek.com",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "deepseek-flash", 1, 1, 0, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "deepseek-flash", 1, 1, 0, 0, NULL},
     {"openrouter", "OpenRouter", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://openrouter.ai/api/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "", 1, 1, 0, 0, NULL},
     {"xai", "xAI", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.x.ai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "grok-4.6", 1, 1, 0, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "grok-4.6", 1, 1, 0, 0, NULL},
     {"cerebras", "Cerebras", CANLIN_LLM_DIALECT_OPENAI_CHAT, "https://api.cerebras.ai/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-oss-120b", 1, 1, 0, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED, "gpt-oss-120b", 1, 1, 0, 0, NULL},
     {"minimax", "MiniMax", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
      "https://api.minimax.io/anthropic", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_REQUIRED,
-     "MiniMax-M3", 1, 1, 0, 0},
+     "MiniMax-M3", 1, 1, 0, 0, NULL},
     {"moonshot", "Moonshot", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
      "https://api.moonshot.ai/anthropic", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_REQUIRED,
-     "kimi-k3", 1, 1, 0, 0},
+     "kimi-k3", 1, 1, 0, 0, NULL},
     {"minimax-openai", "MiniMax (OpenAI API)", CANLIN_LLM_DIALECT_OPENAI_CHAT,
      "https://api.minimax.io/v1", CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED,
-     "MiniMax-M3", 1, 1, 0, 0},
+     "MiniMax-M3", 1, 1, 0, 0, NULL},
     {"moonshot-openai", "Moonshot (OpenAI API)", CANLIN_LLM_DIALECT_OPENAI_CHAT,
      "https://api.moonshot.ai/v1", CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_REQUIRED,
-     "kimi-k3", 1, 1, 0, 0},
+     "kimi-k3", 1, 1, 0, 0, NULL},
     {"ollama", "Ollama", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:11434/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "llama3.3", 1, 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "llama3.3", 1, 1, 1, 0, NULL},
     {"lmstudio", "LM Studio", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:1234/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0, NULL},
+    {"lmstudio-anthropic", "LM Studio (Anthropic API)", CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES,
+     "http://localhost:1234", CANLIN_LLM_AUTH_X_API_KEY, CANLIN_LLM_KEY_OPTIONAL, "default", 1,
+     1, 1, 0, "lmstudio"},
     {"vllm", "vLLM", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:8000/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0, NULL},
     {"llamacpp", "llama.cpp", CANLIN_LLM_DIALECT_OPENAI_CHAT, "http://localhost:8080/v1",
-     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0},
+     CANLIN_LLM_AUTH_BEARER, CANLIN_LLM_KEY_OPTIONAL, "default", 1, 1, 1, 0, NULL},
 };
 
 #define NPRESETS (sizeof presets / sizeof presets[0])
@@ -247,6 +252,7 @@ typedef struct profile {
     canlin_llm_key_need keyneed;
     int local, tools;
     int stream_usage; /* preset flag (openai-chat include_usage) */
+    const char *dummy_key; /* preset placeholder when no key is set (static data) */
     /* session credential (spec §5): bound to origin + auth at set time */
     char *key;
     size_t keylen;
@@ -275,6 +281,7 @@ struct llm_req {
     /* outcome */
     int terminal, ok;
     const char *stop;
+    unsigned dropped; /* stop "length": unfinished tool calls dropped (spec §2.3) */
     const char *code;
     char msg[CANLIN_LLM_MSG_MAX];
     /* pending events, in order; pending text is materialised before any later event */
@@ -395,6 +402,7 @@ static int prof_fill(canlin_llm *llm, profile *p, const canlin_llm_profile_confi
         p->local = cfg->local != 0;
         p->tools = cfg->tools != 0;
         p->stream_usage = 0; /* preset flag only: never guessed for an endpoint */
+        p->dummy_key = NULL;
         base = cfg->base_url;
         model = cfg->model;
         title = cfg->title ? cfg->title : cfg->id;
@@ -408,6 +416,7 @@ static int prof_fill(canlin_llm *llm, profile *p, const canlin_llm_profile_confi
         p->local = pre->local;
         p->tools = pre->tools;
         p->stream_usage = pre->stream_usage;
+        p->dummy_key = pre->dummy_key;
         base = cfg->base_url ? cfg->base_url : pre->base_url;
         model = cfg->model ? cfg->model : pre->default_model;
         title = cfg->title ? cfg->title : pre->title;
@@ -712,12 +721,13 @@ void llm_fail(llm_req *r, const char *code, const char *msg)
     set_terminal(r);
 }
 
-void llm_succeed(llm_req *r, const char *stop)
+void llm_succeed(llm_req *r, const char *stop, unsigned dropped_tools)
 {
     if (r->terminal)
         return;
     r->ok = 1;
     r->stop = stop;
+    r->dropped = dropped_tools;
     set_terminal(r);
 }
 
@@ -790,7 +800,7 @@ int llm_emit_usage(llm_req *r, int64_t input, int64_t output)
 typedef struct lres {
     canlin_module_result r;
     canlin_value v;
-    canlin_value_pair p[1];
+    canlin_value_pair p[2];
     char msg[CANLIN_LLM_MSG_MAX];
 } lres;
 
@@ -874,6 +884,10 @@ static int req_pump(llm_req *r)
         res->v.pairs = res->p;
         res->v.n = 1;
         setkv_str(&res->p[0], "stop", r->stop, strlen(r->stop));
+        if (strcmp(r->stop, "length") == 0) { /* spec §4: dropped_tools only with length */
+            setkv_int(&res->p[1], "dropped_tools", (int64_t)r->dropped);
+            res->v.n = 2;
+        }
         res->r.value = &res->v;
     } else {
         memcpy(res->msg, r->msg, sizeof res->msg);
@@ -1306,13 +1320,21 @@ static int l_request(lua_State *L)
     hr.nheaders = nh;
     hr.body = r->body.buf;
     hr.body_len = r->body.len;
-    if (p->key && p->auth != CANLIN_LLM_AUTH_NONE) {
-        /* Bound at set time; profile_update drops a key whose binding changed. */
-        r->auth.origin = p->key_origin;
+    if (p->auth != CANLIN_LLM_AUTH_NONE && (p->key || p->dummy_key)) {
         r->auth.header = p->auth == CANLIN_LLM_AUTH_BEARER ? "Authorization" : "x-api-key";
         r->auth.prefix = p->auth == CANLIN_LLM_AUTH_BEARER ? "Bearer " : "";
-        r->auth.secret = p->key;
-        r->auth.secret_len = p->keylen;
+        if (p->key) {
+            /* Bound at set time; profile_update drops a key whose binding changed. */
+            r->auth.origin = p->key_origin;
+            r->auth.secret = p->key;
+            r->auth.secret_len = p->keylen;
+        } else {
+            /* The preset's placeholder (spec §3): not a credential, but it takes the same
+             * path, bound to the profile's origin, so a redirect elsewhere drops it too. */
+            r->auth.origin = p->origin;
+            r->auth.secret = p->dummy_key;
+            r->auth.secret_len = strlen(p->dummy_key);
+        }
         hr.auth = &r->auth;
     }
 

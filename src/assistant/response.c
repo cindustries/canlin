@@ -173,6 +173,17 @@ int canlin_assistant_response_finish(canlin_assistant_response *r,
     return CANLIN_AV_OK;
 }
 
+int canlin_assistant_response_finish_length(canlin_assistant_response *r,
+                                            canlin_assistant_view *av, unsigned dropped_tools)
+{
+    int rc = canlin_assistant_response_finish(r, av, 1, NULL, NULL);
+    if (rc == CANLIN_AV_OK) {
+        r->out.truncated = 1;
+        r->out.dropped = dropped_tools;
+    }
+    return rc;
+}
+
 int canlin_assistant_response_cancel(canlin_assistant_response *r)
 {
     if (r == NULL)

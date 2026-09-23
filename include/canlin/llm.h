@@ -67,6 +67,11 @@ typedef struct canlin_llm_preset {
     /* openai-chat only: send "stream_options":{"include_usage":true}. Set only for
      * endpoints documented to accept it, never inferred; custom profiles never send it. */
     int stream_usage;
+    /* Fixed placeholder key sent with the preset's auth scheme when the user has set no
+     * key (lmstudio-anthropic: "lmstudio", the local server needs a non-empty x-api-key).
+     * Preset data, not a credential: it goes through the same origin binding as a key, a
+     * user key replaces it, and has_key does not count it. NULL = none. */
+    const char *dummy_key;
 } canlin_llm_preset;
 
 size_t canlin_llm_preset_count(void);

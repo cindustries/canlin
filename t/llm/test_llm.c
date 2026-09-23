@@ -176,7 +176,10 @@ static const char mod_tpl[] =
     "  if name == 'done' then\n"
     "    if #T <= 512 then print('T=' .. T) end\n"
     "    print('textlen', #T)\n"
-    "    if p.ok then print('done ok', p.result.stop) else print('done fail', p.code, p.message) end\n"
+    "    if p.ok and p.result.dropped_tools ~= nil then\n"
+    "      print('done ok', p.result.stop, p.result.dropped_tools)\n"
+    "    elseif p.ok then print('done ok', p.result.stop)\n"
+    "    else print('done fail', p.code, p.message) end\n"
     "    T = ''\n"
     "  end\n"
     "end\n"
@@ -270,7 +273,7 @@ static void check_text_ok(harness *h)
     CHECK(has(&h->log, "req ok"));
     CHECK(has(&h->log, text_expect));
     CHECK(has(&h->log, "usage\t7\t3"));
-    CHECK(has(&h->log, "done ok\tend"));
+    CHECK(has(&h->log, "done ok\tend\n")); /* no dropped_tools outside length (spec §4) */
     CHECK(count(&h->log, "done ") == 1);
     CHECK(!has(&h->log, "BAD"));
 }
@@ -321,7 +324,7 @@ static void test_text_random_large(void)
         run_one(&h, body, 97, seed * 7919u, req_simple);
         snprintf(line, sizeof line, "textlen\t%u", (unsigned)want);
         CHECK(has(&h.log, line));
-        CHECK(has(&h.log, "done ok\tlength"));
+        CHECK(has(&h.log, "done ok\tlength\t0")); /* dropped_tools only with length */
         CHECK(!has(&h.log, "BAD"));
         h_done(&h);
     }
@@ -380,7 +383,7 @@ static void test_two_parallel_tools(void)
     b = strstr(h.log.buf, "tool\tb\tset_view\t{\"x\":1}");
     t = strstr(h.log.buf, "frag\t7");
     CHECK(a && b && t && t < a && a < b); /* text first, then tools in index order */
-    CHECK(has(&h.log, "done ok\ttool"));
+    CHECK(has(&h.log, "done ok\ttool\n"));
     h_done(&h);
 }
 
@@ -445,6 +448,125 @@ static void test_no_partial_tool(void)
     CHECK(!has(&h.log, "tool\t"));
     CHECK(has(&h.log, "done fail\tunavailable"));
     h_done(&h);
+}
+
+/* ---- length stop with an unfinished tool call (spec §2.3, decided 2026-09-23) ---- */
+
+static void run_one_am(harness *h, const char *body, size_t chunk, unsigned seed,
+                       const char *setup);
+
+/* Run body in chunks of every size 1..n and of random sizes; check(h) each time. */
+static void every_split(const char *body, int am, const char *setup, void (*check)(harness *))
+{
+    size_t n = strlen(body), k;
+    harness h;
+    for (k = 1; k <= n; k++) {
+        if (am)
+            run_one_am(&h, body, k, 0, setup);
+        else
+            run_one(&h, body, k, 0, setup);
+        check(&h);
+        h_done(&h);
+        if (failures)
+            return;
+    }
+    for (k = 1; k <= 16; k++) {
+        if (am)
+            run_one_am(&h, body, 29, (unsigned)k * 7919u, setup);
+        else
+            run_one(&h, body, 29, (unsigned)k * 7919u, setup);
+        check(&h);
+        h_done(&h);
+    }
+}
+
+/* Text, call a complete (arguments split over deltas), call b cut off mid-arguments. */
+static const char oa_len_mixed[] =
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Moment.\"}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":["
+    "{\"index\":0,\"id\":\"a\",\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"wid\"}}]}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":["
+    "{\"index\":0,\"function\":{\"arguments\":\"gets\\\":[]}\"}}]}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":["
+    "{\"index\":1,\"id\":\"b\",\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"widgets\\\":[{\"}}]}}]}\n\n"
+    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+    "data: [DONE]\n\n";
+
+static void check_len_mixed(harness *h)
+{
+    const char *t = strstr(h->log.buf, "frag\t7"), *a = strstr(h->log.buf, "tool\ta\tset_view\t{\"widgets\":[]}");
+    if (!has(&h->log, "done ok\tlength\t1"))
+        fprintf(stderr, "log:\n%s\n", h->log.buf);
+    CHECK(has(&h->log, "T=Moment."));
+    CHECK(t && a && t < a);                  /* the complete call is delivered as usual */
+    CHECK(count(&h->log, "tool\t") == 1);    /* the unfinished one never is */
+    CHECK(!has(&h->log, "tool\tb"));
+    CHECK(has(&h->log, "done ok\tlength\t1"));
+    CHECK(count(&h->log, "done ") == 1);
+    CHECK(!has(&h->log, "BAD"));
+}
+
+static void check_len_only_unfinished(harness *h)
+{
+    CHECK(!has(&h->log, "tool\t"));
+    CHECK(has(&h->log, "T=abc"));
+    CHECK(has(&h->log, "done ok\tlength\t1"));
+    CHECK(count(&h->log, "done ") == 1);
+}
+
+static void check_len_complete(harness *h)
+{
+    CHECK(has(&h->log, "tool\ta\tset_view\t{}"));
+    CHECK(has(&h->log, "done ok\tlength\t0"));
+    CHECK(count(&h->log, "done ") == 1);
+}
+
+static void test_length_tools(void)
+{
+    /* mixed: complete call delivered, unfinished last call dropped and counted */
+    every_split(oa_len_mixed, 0, req_tools, check_len_mixed);
+    /* only an unfinished call (its arguments never started): dropped, text stays */
+    every_split("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"abc\"}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\","
+                "\"function\":{\"name\":\"set_view\"}}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+                "data: [DONE]\n\n",
+                0, req_tools, check_len_only_unfinished);
+    /* a call cut off before its name arrived is unfinished too */
+    every_split("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"abc\"}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+                "data: [DONE]\n\n",
+                0, req_tools, check_len_only_unfinished);
+    /* all calls complete at the length stop: delivered, nothing dropped */
+    every_split("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\","
+                "\"function\":{\"name\":\"set_view\",\"arguments\":\"{}\"}}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+                "data: [DONE]\n\n",
+                0, req_tools, check_len_complete);
+    /* only the last call may be unfinished: an earlier incomplete one is a failure */
+    expect_fail("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":["
+                "{\"index\":0,\"id\":\"a\",\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"a\"}},"
+                "{\"index\":1,\"id\":\"b\",\"function\":{\"name\":\"set_view\",\"arguments\":\"{}\"}}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+                "data: [DONE]\n\n",
+                req_tools, "done fail\tunavailable\topenai-chat protocol error: tool call arguments are not one complete JSON object");
+    /* an unfinished call with any other stop, or at EOF, stays a failure */
+    expect_fail("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\","
+                "\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"a\"}}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                "data: [DONE]\n\n",
+                req_tools, "done fail\tunavailable\topenai-chat protocol error: tool call deltas without finish_reason tool_calls");
+    expect_fail("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\","
+                "\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"a\"}}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+                "data: [DONE]\n\n",
+                req_tools, "done fail\tunavailable\topenai-chat protocol error: tool call arguments are not one complete JSON object");
+    /* length stop but the stream breaks before [DONE]: a failure, delivered calls included */
+    expect_fail("data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"a\","
+                "\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"a\"}}]}}]}\n\n"
+                "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+                req_tools, "done fail\tunavailable\topenai-chat protocol error: stream ended before [DONE]");
 }
 
 static void test_http_status(void)
@@ -1224,7 +1346,7 @@ static void test_am_parallel_tools(void)
     b = strstr(h.log.buf, "tool\tb\tset_view\t{\"x\":1}");
     c = strstr(h.log.buf, "tool\tc\tset_view\t{}");
     CHECK(a && b && c && t && t < a && a < b && b < c); /* stream order */
-    CHECK(has(&h.log, "done ok\ttool"));
+    CHECK(has(&h.log, "done ok\ttool\n"));
     h_done(&h);
 }
 
@@ -1235,7 +1357,7 @@ static void test_am_length(void)
                    AM_DELTA("max_tokens") AM_MSTOP,
                4, 0, req_simple);
     CHECK(has(&h.log, "T=abc"));
-    CHECK(has(&h.log, "done ok\tlength"));
+    CHECK(has(&h.log, "done ok\tlength\t0"));
     h_done(&h);
     /* stop_sequence ends the turn normally; a later usage-only message_delta is fine */
     run_one_am(&h, AM_START AM_TEXT_START(0) AM_TEXT(0, "abc") AM_STOP_BLOCK(0)
@@ -1246,6 +1368,60 @@ static void test_am_length(void)
     CHECK(has(&h.log, "done ok\tend"));
     CHECK(has(&h.log, "usage\t7\t4"));
     h_done(&h);
+}
+
+/* Length stop with an unfinished tool call (spec §2.3, decided 2026-09-23). */
+static const char am_len_mixed[] =
+    AM_START
+    AM_TEXT_START(0) AM_TEXT(0, "Moment.") AM_STOP_BLOCK(0)
+    AM_TOOL_START(1, "a") AM_JSON(1, "{\\\"wid") AM_JSON(1, "gets\\\":[]}") AM_STOP_BLOCK(1)
+    AM_TOOL_START(2, "b") AM_JSON(2, "{\\\"widgets\\\":[{") AM_STOP_BLOCK(2)
+    AM_DELTA("max_tokens") AM_MSTOP;
+
+static void test_am_length_tools(void)
+{
+    /* mixed: complete call delivered at its block stop, the unfinished one dropped */
+    every_split(am_len_mixed, 1, req_tools, check_len_mixed);
+    /* an unfinished tool block still open at the max_tokens message_delta */
+    every_split(AM_START AM_TEXT_START(0) AM_TEXT(0, "abc") AM_STOP_BLOCK(0)
+                AM_TOOL_START(1, "a") AM_JSON(1, "{\\\"wid")
+                AM_DELTA("max_tokens") AM_MSTOP,
+                1, req_tools, check_len_only_unfinished);
+    /* unfinished with no input at all, then a ping and a usage-only message_delta */
+    every_split(AM_START AM_TEXT_START(0) AM_TEXT(0, "abc") AM_STOP_BLOCK(0)
+                AEV("content_block_start", "{\"type\":\"content_block_start\",\"index\":1,"
+                    "\"content_block\":{\"type\":\"tool_use\",\"id\":\"a\",\"name\":\"set_view\","
+                    "\"input\":{\"x\":1}}}")
+                AM_STOP_BLOCK(1) AEV("ping", "{\"type\":\"ping\"}")
+                AEV("message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":null},"
+                                     "\"usage\":{\"output_tokens\":4}}")
+                AM_DELTA("max_tokens") AM_MSTOP,
+                1, req_tools, check_len_only_unfinished);
+    /* all calls complete at max_tokens: delivered, nothing dropped (was a failure before
+     * canlin#59: "tool_use block without stop_reason tool_use") */
+    every_split(AM_START AM_TOOL_START(0, "a") AM_STOP_BLOCK(0) AM_DELTA("max_tokens") AM_MSTOP,
+                1, req_tools, check_len_complete);
+    /* an unfinished call followed by anything but the max_tokens stop is a failure */
+    expect_fail_am(AM_START AM_TOOL_START(0, "a") AM_JSON(0, "{\\\"a") AM_STOP_BLOCK(0)
+                   AM_DELTA("end_turn") AM_MSTOP,
+                   req_tools, "anthropic-messages protocol error: tool call arguments are not one complete JSON object");
+    expect_fail_am(AM_START AM_TOOL_START(0, "a") AM_JSON(0, "{\\\"a") AM_STOP_BLOCK(0)
+                   AM_TEXT_START(1) AM_TEXT(1, "x") AM_STOP_BLOCK(1) AM_DELTA("max_tokens") AM_MSTOP,
+                   req_tools, "anthropic-messages protocol error: tool call arguments are not one complete JSON object");
+    expect_fail_am(AM_START AM_TOOL_START(0, "a") AM_JSON(0, "{\\\"a") AM_STOP_BLOCK(0),
+                   req_tools, "anthropic-messages protocol error: tool call arguments are not one complete JSON object");
+    expect_fail_am(AM_START AM_TOOL_START(0, "a") AM_JSON(0, "{\\\"a") AM_STOP_BLOCK(0)
+                   AM_DELTA("refusal") AM_MSTOP,
+                   req_tools, "done fail\tunavailable\tprovider stopped: refusal");
+    /* max_tokens but no message_stop: still a failure */
+    expect_fail_am(AM_START AM_TOOL_START(0, "a") AM_JSON(0, "{\\\"a") AM_STOP_BLOCK(0)
+                   AM_DELTA("max_tokens"),
+                   req_tools, "anthropic-messages protocol error: stream ended before message_stop");
+    /* an open tool block at another stop, or an open text block at max_tokens, fails */
+    expect_fail_am(AM_START AM_TOOL_START(0, "a") AM_JSON(0, "{\\\"a") AM_DELTA("end_turn") AM_MSTOP,
+                   req_tools, "anthropic-messages protocol error: message_delta while a content block is open");
+    expect_fail_am(AM_START AM_TEXT_START(0) AM_TEXT(0, "x") AM_DELTA("max_tokens") AM_MSTOP,
+                   req_tools, "anthropic-messages protocol error: message_delta while a content block is open");
 }
 
 static void test_am_failures(void)
@@ -1616,7 +1792,8 @@ static void test_am_credentials(void)
     pc.id = "mk";
     pc.preset = "moonshot";
     CHECK(canlin_llm_profile_create(h.llm, &pc) == CANLIN_LLM_OK);
-    /* LM Studio's Anthropic mode: a custom local profile (no preset of its own) */
+    /* a custom local anthropic-messages profile with an explicit key (the
+     * lmstudio-anthropic preset and its dummy key: test_lmstudio_anthropic) */
     memset(&pc, 0, sizeof pc);
     pc.id = "lms";
     pc.preset = "custom";
@@ -1645,6 +1822,103 @@ static void test_am_credentials(void)
     h_done(&h);
 }
 
+/* lmstudio-anthropic (canlin#59, spec §3; Langertha LMStudioAnthropic.pm): without a
+ * user key the preset's dummy "lmstudio" goes as x-api-key, bound to the profile origin;
+ * a user key replaces it; a cross-origin redirect drops it like a credential. */
+static void run_lms(harness *h, int key, const char *redirect)
+{
+    canlin_llm_fixture_response r;
+    canlin_llm_profile_config pc;
+    h_init(h, 0);
+    memset(&pc, 0, sizeof pc);
+    pc.id = "p";
+    pc.preset = "lmstudio-anthropic"; /* plain http to loopback: a local preset */
+    CHECK(canlin_llm_profile_create(h->llm, &pc) == CANLIN_LLM_OK);
+    CHECK(canlin_llm_profile_has_key(h->llm, "p") == 0); /* the dummy is not a key */
+    if (key == 1)
+        CHECK(canlin_llm_profile_set_key(h->llm, "p", KEY, strlen(KEY)) == CANLIN_LLM_OK);
+    if (key == 2) { /* set, then cleared: back to the dummy */
+        CHECK(canlin_llm_profile_set_key(h->llm, "p", KEY, strlen(KEY)) == CANLIN_LLM_OK);
+        CHECK(canlin_llm_profile_clear_key(h->llm, "p") == CANLIN_LLM_OK);
+    }
+    memset(&r, 0, sizeof r);
+    r.status = 200;
+    r.body = am_text_stream;
+    r.body_len = strlen(am_text_stream);
+    r.redirect_to = redirect;
+    CHECK(canlin_llm_fixture_push(h->fx, &r) == CANLIN_LLM_OK);
+    h_load(h, 0, req_simple, 1);
+    h_run(h);
+    CHECK(has(&h->log, "done ok\tend"));
+}
+
+static void test_lmstudio_anthropic(void)
+{
+    const canlin_llm_preset *pre = canlin_llm_preset_find("lmstudio-anthropic");
+    const canlin_llm_fixture_record *a, *b;
+    harness h;
+    size_t i;
+
+    CHECK(pre != NULL);
+    if (pre == NULL)
+        return;
+    CHECK(pre->dialect == CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES);
+    CHECK(strcmp(pre->base_url, "http://localhost:1234") == 0);
+    CHECK(pre->auth == CANLIN_LLM_AUTH_X_API_KEY && pre->key == CANLIN_LLM_KEY_OPTIONAL);
+    CHECK(pre->local == 1 && pre->stream_usage == 0 && pre->tools == 1);
+    CHECK(strcmp(pre->default_model, "default") == 0);
+    CHECK(pre->dummy_key && strcmp(pre->dummy_key, "lmstudio") == 0);
+    for (i = 0; i < canlin_llm_preset_count(); i++) /* no other preset has a dummy */
+        if (canlin_llm_preset_at(i) != pre)
+            CHECK(canlin_llm_preset_at(i)->dummy_key == NULL);
+
+    /* no user key: the dummy is sent to the preset's origin */
+    run_lms(&h, 0, NULL);
+    CHECK(canlin_llm_fixture_records(h.fx) == 1);
+    a = canlin_llm_fixture_record_at(h.fx, 0);
+    CHECK(a && strcmp(a->url, "http://localhost:1234/v1/messages") == 0);
+    CHECK(a && strstr(a->body, "\"model\":\"default\""));
+    CHECK(a && strstr(a->headers, "x-api-key: lmstudio\n"));
+    CHECK(a && count(&(logbuf){a->headers, 0}, "x-api-key") == 1);
+    CHECK(a && strstr(a->headers, "anthropic-version: 2023-06-01\n"));
+    h_done(&h);
+
+    /* a user key replaces the dummy */
+    run_lms(&h, 1, NULL);
+    a = canlin_llm_fixture_record_at(h.fx, 0);
+    CHECK(a && strstr(a->headers, "x-api-key: " KEY "\n"));
+    CHECK(a && !strstr(a->headers, "lmstudio"));
+    CHECK(a && count(&(logbuf){a->headers, 0}, "x-api-key") == 1);
+    h_done(&h);
+
+    /* the key cleared again: back to the dummy */
+    run_lms(&h, 2, NULL);
+    a = canlin_llm_fixture_record_at(h.fx, 0);
+    CHECK(a && strstr(a->headers, "x-api-key: lmstudio\n"));
+    CHECK(a && !strstr(a->headers, KEY));
+    h_done(&h);
+
+    /* cross-origin redirect (another port is another origin): the dummy is not sent on */
+    run_lms(&h, 0, "http://localhost:1235/v1/messages");
+    CHECK(canlin_llm_fixture_records(h.fx) == 2);
+    a = canlin_llm_fixture_record_at(h.fx, 0);
+    b = canlin_llm_fixture_record_at(h.fx, 1);
+    CHECK(a && strstr(a->headers, "x-api-key: lmstudio\n"));
+    CHECK(b && strcmp(b->url, "http://localhost:1235/v1/messages") == 0);
+    CHECK(b && !strstr(b->headers, "x-api-key"));
+    CHECK(b && !strstr(b->headers, "lmstudio"));
+    h_done(&h);
+    run_lms(&h, 0, "https://evil.example/v1/messages");
+    b = canlin_llm_fixture_record_at(h.fx, 1);
+    CHECK(b && !strstr(b->headers, "x-api-key") && !strstr(b->headers, "lmstudio"));
+    h_done(&h);
+    /* same-origin redirect keeps it */
+    run_lms(&h, 0, "http://localhost:1234/v1/messages?x=1");
+    b = canlin_llm_fixture_record_at(h.fx, 1);
+    CHECK(b && strstr(b->headers, "x-api-key: lmstudio\n"));
+    h_done(&h);
+}
+
 int main(void)
 {
     test_origin();
@@ -1655,6 +1929,7 @@ int main(void)
     test_two_parallel_tools();
     test_failures();
     test_no_partial_tool();
+    test_length_tools();
     test_http_status();
     test_oversize();
     test_cancel_late();
@@ -1670,12 +1945,14 @@ int main(void)
     test_am_tool_many_deltas();
     test_am_parallel_tools();
     test_am_length();
+    test_am_length_tools();
     test_am_failures();
     test_am_no_partial_tool();
     test_am_http_status();
     test_am_oversize();
     test_am_cancel_late();
     test_am_credentials();
+    test_lmstudio_anthropic();
     printf("llm: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
