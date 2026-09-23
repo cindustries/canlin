@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T03:41:19Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T02:17:19Z
+id: 14
+priority: medium
+started: 2026-09-23T03:36:53Z
+status: review
+tags:
+- sandbox
+- cleanup
+title: Align sandbox_limits.h with core API spec §7
+updated: 2026-09-23T03:41:19Z
+---
+
+Move CANLIN_SB_BUDGET_DRAW from module_limits.h into sandbox_limits.h; set MEM_DEFAULT 16 MiB, BUDGET_DEFAULT 2,000,000 (today still provisional 8 MiB / 10M). From canlin#9.
+
+Merged (e4ed879, 8c1bd36). Host + ASan/UBSan green. i686 skipped.
