@@ -1851,7 +1851,8 @@ static const char tab_src[] =
     "function M.draw(ui)\n"
     "  local nn = ui:field('Name', name)\n"
     "  if nn ~= name then name = nn; print('name=' .. name) end\n"
-    "  notes = ui:area('Notes', notes)\n"
+    "  local na = ui:area('Notes', notes)\n"
+    "  if na ~= notes then notes = na; print('notes=' .. notes) end\n"
     "  if ui:button('Go') then print('clicked') end\n"
     "  local o = ui:toggle('On', on)\n"
     "  if o ~= on then on = o; print('on=' .. tostring(on)) end\n"
@@ -1951,6 +1952,8 @@ static void test_tab_order(void)
             CHECK(focus_at(&h) == CANLIN_UI_W_SECTION);
         }
     }
+    /* The Tab that moved the focus into the area was not typed into it (canlin#45). */
+    CHECK(!has(&h, "notes="));
     /* The graph keeps Tab: node cycling, focus stays; Esc hands Tab back. */
     CHECK(!has(&h, "E select"));
     tab(&h, 0);

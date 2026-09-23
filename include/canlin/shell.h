@@ -66,7 +66,9 @@ void canlin_shell_free(canlin_shell *sh);
 
 /* ---- outputs ---- */
 
-/* Input classes of an output (flags); touch enables the swipe from the bar. */
+/* Input classes of an output (flags); touch enables the swipe from the bar.
+ * canlin_shell_add_output hands them to the output (canlin_ui_output_set_input, same
+ * values): TOUCH without KEYBOARD gives focused fields the on-screen keyboard. */
 enum {
     CANLIN_SHELL_IN_POINTER = 1,
     CANLIN_SHELL_IN_TOUCH = 2,
@@ -74,7 +76,8 @@ enum {
 };
 
 /* o outlives the shell or is removed first. Default: user mode AUTO, tiling of two
- * panes in a row, split evenly. */
+ * panes in a row, split evenly. Sets o's input class from `input` (EINVAL while a view
+ * on o is inside its frame). */
 int canlin_shell_add_output(canlin_shell *sh, canlin_ui_output *o, unsigned input);
 
 typedef enum canlin_shell_mode {

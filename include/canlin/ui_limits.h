@@ -82,6 +82,10 @@
 #define CANLIN_UI_LONG_PRESS_MS         500u    /* press held this long, released in place */
 #define CANLIN_UI_DOUBLE_TAP_MS         400u    /* second tap on the same node */
 
+/* Not in the §8 table: on-screen keyboard (canlin#45), chosen here (provisional). */
+#define CANLIN_UI_KBD_KEY_EM            2.5f    /* key side when the view is wide enough */
+#define CANLIN_UI_KBD_KEY_MIN_EM        1.5f    /* smallest key height (and square side) */
+
 /* §6.2: text/background contrast below this ratio logs a warning (WCAG AA). */
 #define CANLIN_THEME_MIN_CONTRAST       4.5f
 

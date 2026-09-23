@@ -563,6 +563,14 @@ int canlin_shell_add_output(canlin_shell *sh, canlin_ui_output *o, unsigned inpu
         return CANLIN_SHELL_EINVAL;
     if (sh->nout == CANLIN_SHELL_OUTPUTS_MAX)
         return CANLIN_SHELL_EFULL;
+    {
+        /* The views learn the input class from the output (on-screen keyboard, canlin#45). */
+        unsigned ui_in = ((input & CANLIN_SHELL_IN_POINTER) ? CANLIN_UI_INPUT_POINTER : 0u) |
+                         ((input & CANLIN_SHELL_IN_TOUCH) ? CANLIN_UI_INPUT_TOUCH : 0u) |
+                         ((input & CANLIN_SHELL_IN_KEYBOARD) ? CANLIN_UI_INPUT_KEYBOARD : 0u);
+        if (canlin_ui_output_set_input(o, ui_in) != CANLIN_UI_OK)
+            return CANLIN_SHELL_EINVAL; /* a view on o is inside its frame */
+    }
     so = &sh->out[sh->nout];
     memset(so, 0, sizeof *so);
     so->o = o;

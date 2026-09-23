@@ -882,6 +882,21 @@ static void test_dirty_regions(void)
     h_done();
 }
 
+/* canlin#45: the shell hands its output input class to the views' output, which decides
+ * the on-screen keyboard (touch without keyboard). */
+static void test_input_class(void)
+{
+    h_init(800, 600, 100, 1, CANLIN_SHELL_IN_TOUCH);
+    CHECK(canlin_ui_output_input(H.out) == CANLIN_UI_INPUT_TOUCH);
+    h_done();
+    h_init(800, 600, 100, 1, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
+    CHECK(canlin_ui_output_input(H.out) == (CANLIN_UI_INPUT_POINTER | CANLIN_UI_INPUT_KEYBOARD));
+    h_done();
+    h_init(800, 600, 100, 1, CANLIN_SHELL_IN_TOUCH | CANLIN_SHELL_IN_KEYBOARD);
+    CHECK(canlin_ui_output_input(H.out) == (CANLIN_UI_INPUT_TOUCH | CANLIN_UI_INPUT_KEYBOARD));
+    h_done();
+}
+
 int main(void)
 {
     test_mode_thresholds();
@@ -896,6 +911,7 @@ int main(void)
     test_model_frame();
     test_idle_clock();
     test_dirty_regions();
+    test_input_class();
     if (failures) {
         fprintf(stderr, "shell: %d of %d checks failed\n", failures, checks);
         return 1;
