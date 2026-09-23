@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-23T02:13:06Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-22T19:40:35Z
+id: 12
+priority: low
+started: 2026-09-23T02:02:26Z
+status: review
+tags:
+- tests
+title: 'Test harness: per-test timeout; pcall re-raise regression test'
+updated: 2026-09-23T02:13:06Z
+---
+
+Two sandbox mutants hang instead of failing; make test needs a timeout. Re-raise in pcall wrapper survives mutation.
+
+Harness part merged ce72342 (TEST_TIMEOUT). Sandbox test part pending in #7/#8 lane.
+
+Merged 502f0eb (7fce52f). Host + ASan/UBSan green, 316 sandbox checks, third_party untouched. i686 skipped. Cost factors provisional, need P2 calibration.
