@@ -582,7 +582,7 @@ int canlin_render_font_default_sizes(canlin_render_font *f, const float *px, int
     nk_font_atlas_init_default(&f->atlas);
     nk_font_atlas_begin(&f->atlas);
     for (i = 0; i < n; i++) {
-        /* Built-in DejaVu Sans subset, 1:1 in the atlas (no oversampling: text() blits
+        /* Built-in Inter subset, 1:1 in the atlas (no oversampling: text() blits
          * nearest-neighbour, so the atlas must already hold the anti-aliased coverage
          * at the drawn size). Missing codepoints fall back to the U+25A1 box. The blob
          * is static and read-only; the atlas never owns or frees it. */

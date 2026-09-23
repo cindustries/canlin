@@ -467,8 +467,15 @@ static void test_wrap_ellipsis(void)
     CHECK(strncmp(joined, "alpha beta gamma", 16) == 0);
     CHECK(strstr(joined, "lambda Supercal") != NULL);
 
+    /* The long label is cut to a non-empty prefix that, with the U+2026, fits the
+     * column (widths from the font, not a byte count tied to one typeface). */
     b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
-    CHECK(b && b->ellipsized && b->len > 0 && b->len < 20);
+    CHECK(b && b->ellipsized && b->len > 0 && b->len < 54); /* 54: the label's length */
+    if (b && b->len < 54)
+        CHECK(f->width(f->userdata, f->height,
+                       "A very long button label that cannot fit into the view",
+                       (int)b->len) + f->width(f->userdata, f->height, "\xE2\x80\xA6", 3) <=
+              160.0f);
     b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 1);
     CHECK(b && !b->ellipsized && b->len == 2);
     h_done(&h);
@@ -1412,7 +1419,7 @@ static void test_toggle_geometry(void)
             CHECK(lx0 < lx1);
             gaps[k] = lx0 - (bx + bs);
             /* canlin#22: the lower bound allows the label's first glyph to start left of
-             * its pen origin (negative left bearing; DejaVu 'T' has x0 = -1 px), taken
+             * its pen origin (a negative left bearing on 'T', font-dependent), taken
              * from the baked font instead of assuming ProggyClean's x0 = 0. */
             {
                 canlin_render_font tf;
@@ -1458,6 +1465,26 @@ static const char section_src[] =
     "  ui:choice('Pick', {'aa', 'bb'}, 1)\n"
     "end\n"
     "return M\n";
+
+/* Bounding box of pixels differing from background bg inside [x0, x1) x [y0, y1); 0 if
+ * none. */
+static int ink_bbox(int w, canlin_theme_rgb bg, int x0, int y0, int x1, int y1, int *bx0,
+                    int *by0, int *bx1, int *by1)
+{
+    int x, y, n = 0;
+    *bx0 = *by0 = 1 << 30;
+    *bx1 = *by1 = -1;
+    for (y = y0; y < y1; y++)
+        for (x = x0; x < x1; x++)
+            if (!pix(w, x, y, bg)) {
+                n++;
+                *bx0 = x < *bx0 ? x : *bx0;
+                *by0 = y < *by0 ? y : *by0;
+                *bx1 = x > *bx1 ? x : *bx1;
+                *by1 = y > *by1 ? y : *by1;
+            }
+    return n;
+}
 
 /* Bounding box of pixels of colour c inside [x0, x1) x [y0, y1); 0 if none. */
 static int bbox(int w, canlin_theme_rgb c, int x0, int y0, int x1, int y1, int *bx0, int *by0,
@@ -1522,9 +1549,11 @@ static void test_section_header_look(void)
                 int rgt = bbox(w, tx, ax1, ay0, ax1 + 1, ay1 + 1, &tx0, &ty0, &tx1, &ty1);
                 CHECK(lft > rgt && lft >= (ay1 - ay0) - 1);
             }
-            /* title left-aligned: starts within the second em, not centred */
-            CHECK(bbox(w, tx, r->x + e, r->y, r->x + r->w, r->y + r->h, &tx0, &ty0, &tx1, &ty1) >
-                  0);
+            /* title left-aligned: starts within the second em, not centred. Its ink is
+             * every non-background pixel clear of the bottom separator (a quarter em
+             * holds it): anti-aliased stems need not reach full text colour at 16 px. */
+            CHECK(ink_bbox(w, bg, r->x + e, r->y, r->x + r->w, r->y + r->h - e / 4, &tx0,
+                           &ty0, &tx1, &ty1) > 0);
             CHECK(tx0 >= r->x + e && tx0 < r->x + 2 * e);
         }
         /* choice unchanged: surface box, its arrow in the right part, not the left em */
