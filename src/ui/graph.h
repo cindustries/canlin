@@ -50,6 +50,8 @@ typedef struct canlin_ui_graph_env {
     uint64_t id;                      /* the graph's identity */
     uint64_t *focus;                  /* the view's keyboard focus identity */
     uint64_t btn_t;                   /* timestamp of this frame's button edge */
+    uint64_t now;                     /* owner's monotonic time of this frame */
+    int keys;                         /* focused graph takes Tab/Del (not after Esc) */
 } canlin_ui_graph_env;
 
 typedef struct canlin_ui_graph canlin_ui_graph;
@@ -76,6 +78,9 @@ void canlin_ui_graph_state_cancel(canlin_ui_graph_state *states);
  * Every Nuklear call happens before the first Lua allocation. */
 void canlin_ui_graph_run(struct lua_State *L, canlin_ui_graph *g, int fit,
                          canlin_ui_graph_env *e);
+
+/* Defined in ui.c: the open frame needs a redraw at monotonic ms `at` without input. */
+void canlin_ui_graph_wake(canlin_ui_view *v, uint64_t at);
 
 /* Defined in ui.c: appends a CANLIN_UI_W_GRAPH layout record entry (screen px). */
 void canlin_ui_graph_record(canlin_ui_view *v, int part, struct nk_rect r, uint32_t off,

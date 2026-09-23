@@ -813,6 +813,90 @@ static int nk_left_down(harness *h)
     return ctx->input.mouse.buttons[NK_BUTTON_LEFT].down;
 }
 
+static void button_edge(harness *h, int button, int x, int y, int down, int want)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.button = button;
+    in.x = x;
+    in.y = y;
+    in.down = down;
+    CHECK(canlin_module_post_input(h->m, &in) == want);
+}
+
+static int nk_btn_down(harness *h, int b)
+{
+    struct nk_context *ctx = canlin_ui_view_nk(canlin_module_view(h->m));
+    return ctx->input.mouse.buttons[b].down;
+}
+
+/* canlin#32: secondary and middle buttons travel the same path as primary (validation,
+ * scheduler posting, view), ordinary widgets ignore them, and an overflow releases every
+ * held button. */
+static void test_secondary_button(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    canlin_ui_input in;
+    int bx, by, n = 0;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (!b) {
+        h_done(&h);
+        return;
+    }
+    bx = b->x + b->w / 2;
+    by = b->y + b->h / 2;
+    /* Out-of-range buttons are malformed. */
+    button_edge(&h, 3, bx, by, 1, CANLIN_MODULE_EINVAL);
+    button_edge(&h, -1, bx, by, 1, CANLIN_MODULE_EINVAL);
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.button = 3;
+    CHECK(!canlin_ui_input_valid(&in));
+    in.type = CANLIN_UI_IN_MOTION; /* ignored for other types */
+    CHECK(canlin_ui_input_valid(&in));
+    /* Secondary and middle clicks on a button do not activate it. */
+    input(&h, CANLIN_UI_IN_MOTION, bx, by, 0);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 1, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(nk_btn_down(&h, NK_BUTTON_RIGHT) && !nk_btn_down(&h, NK_BUTTON_LEFT));
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 0, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_MIDDLE, bx, by, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_MIDDLE, bx, by, 0, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(!has(&h, "clicked"));
+    CHECK(!nk_btn_down(&h, NK_BUTTON_RIGHT) && !nk_btn_down(&h, NK_BUTTON_MIDDLE));
+    /* Primary still works; a secondary release in between does not end its press. */
+    button_edge(&h, CANLIN_UI_BUTTON_PRIMARY, bx, by, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, bx, by, 0, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(nk_btn_down(&h, NK_BUTTON_LEFT) && !nk_btn_down(&h, NK_BUTTON_RIGHT));
+    button_edge(&h, CANLIN_UI_BUTTON_PRIMARY, bx, by, 0, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(count(&h, "clicked") == 1);
+
+    /* Overflow with primary and secondary held: the reset releases both. */
+    button_edge(&h, CANLIN_UI_BUTTON_PRIMARY, 290, 290, 1, CANLIN_MODULE_OK);
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, 290, 290, 1, CANLIN_MODULE_OK);
+    h_drain(&h);
+    CHECK(nk_btn_down(&h, NK_BUTTON_LEFT) && nk_btn_down(&h, NK_BUTTON_RIGHT));
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_TEXT;
+    in.cp = 'a';
+    while (canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK && n < 1000)
+        n++;
+    button_edge(&h, CANLIN_UI_BUTTON_SECONDARY, 290, 290, 0, CANLIN_MODULE_EFULL);
+    h_drain(&h);
+    CHECK(!nk_btn_down(&h, NK_BUTTON_LEFT) && !nk_btn_down(&h, NK_BUTTON_RIGHT));
+    CHECK(count(&h, "clicked") == 1);
+    h_done(&h);
+}
+
 /* motion A -> press -> motion B stays three items in that order; motions coalesce only
  * with an adjacent motion, to the latest position. */
 static void test_input_order(void)
@@ -1759,6 +1843,211 @@ static void test_font_cache_module(void)
     h_done(&h);
 }
 
+static const char tab_src[] =
+    "local M = {}\n"
+    "local name, notes, on, idx = '', '', false, 1\n"
+    "local g = { nodes = { { id = 'n1', x = 1, y = 1 }, { id = 'n2', x = 14, y = 1 } },\n"
+    "            edges = {} }\n"
+    "function M.draw(ui)\n"
+    "  local nn = ui:field('Name', name)\n"
+    "  if nn ~= name then name = nn; print('name=' .. name) end\n"
+    "  notes = ui:area('Notes', notes)\n"
+    "  if ui:button('Go') then print('clicked') end\n"
+    "  local o = ui:toggle('On', on)\n"
+    "  if o ~= on then on = o; print('on=' .. tostring(on)) end\n"
+    "  local i = ui:choice('Pick', { 'a', 'b', 'c' }, idx)\n"
+    "  if i ~= idx then idx = i; print('idx=' .. idx) end\n"
+    "  ui:section('Sec', function() ui:text('inside') end)\n"
+    "  for _, e in ipairs(ui:graph(g, { id = 'g', height = 8 })) do\n"
+    "    print('E ' .. e.kind .. ' ' .. tostring(e.node))\n"
+    "    if e.kind == 'select' then g.selected = e.node end\n"
+    "  end\n"
+    "end\n"
+    "return M\n";
+
+/* Kind of the widget carrying the focus mark, 0 if none (and at most one mark). */
+static int focus_at(harness *h)
+{
+    size_t n, i;
+    int kind = 0, marks = 0;
+    const canlin_ui_rect *r = rec(h, &n);
+    for (i = 0; i < n; i++)
+        if (r[i].part == CANLIN_UI_P_FOCUS) {
+            kind = r[i].kind;
+            marks++;
+        }
+    CHECK(marks <= 1);
+    return kind;
+}
+
+static void tab(harness *h, int back)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_KEY;
+    if (back) {
+        in.key = CANLIN_UI_KEY_SHIFT;
+        in.down = 1;
+        CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    }
+    key(h, CANLIN_UI_KEY_TAB);
+    if (back) {
+        in.key = CANLIN_UI_KEY_SHIFT;
+        in.down = 0;
+        CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    }
+    h_drain(h);
+}
+
+/* canlin#26: Tab / Shift-Tab walk the focusable widgets in draw order with a visible mark;
+ * Enter/Space activate; a focused graph keeps Tab until Esc. */
+static void test_tab_order(void)
+{
+    static const int order[] = {CANLIN_UI_W_FIELD,  CANLIN_UI_W_AREA,   CANLIN_UI_W_BUTTON,
+                                CANLIN_UI_W_TOGGLE, CANLIN_UI_W_CHOICE, CANLIN_UI_W_SECTION,
+                                CANLIN_UI_W_GRAPH};
+    harness h;
+    const canlin_ui_rect *m, *b;
+    size_t i;
+    h_init(&h, NULL, 1.0f, tab_src, 400, 900);
+    h_drain(&h);
+    CHECK(focus_at(&h) == 0);
+    for (i = 0; i < sizeof order / sizeof order[0]; i++) {
+        tab(&h, 0);
+        CHECK(focus_at(&h) == order[i]);
+        if (order[i] == CANLIN_UI_W_FIELD) {
+            type_text(&h, "x y"); /* a space in a field is text, not activation */
+            h_drain(&h);
+            CHECK(has(&h, "name=x y\n") && !has(&h, "clicked"));
+        } else if (order[i] == CANLIN_UI_W_BUTTON) {
+            m = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_FOCUS, 0);
+            b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+            CHECK(m && b && m->x == b->x && m->y == b->y && m->w == b->w && m->h == b->h);
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(count(&h, "clicked") == 1);
+            type_text(&h, " ");
+            h_drain(&h);
+            CHECK(count(&h, "clicked") == 2);
+        } else if (order[i] == CANLIN_UI_W_TOGGLE) {
+            type_text(&h, " ");
+            h_drain(&h);
+            CHECK(has(&h, "on=true\n"));
+        } else if (order[i] == CANLIN_UI_W_CHOICE) {
+            key(&h, CANLIN_UI_KEY_DOWN);
+            h_drain(&h);
+            CHECK(has(&h, "idx=2\n"));
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(find(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_OPTION, 2) != NULL);
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(find(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_OPTION, 0) == NULL);
+        } else if (order[i] == CANLIN_UI_W_SECTION) {
+            CHECK(find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 0) != NULL);
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 0) == NULL); /* collapsed */
+            CHECK(focus_at(&h) == CANLIN_UI_W_SECTION);
+        }
+    }
+    /* The graph keeps Tab: node cycling, focus stays; Esc hands Tab back. */
+    CHECK(!has(&h, "E select"));
+    tab(&h, 0);
+    CHECK(has(&h, "E select n1\n") && focus_at(&h) == CANLIN_UI_W_GRAPH);
+    tab(&h, 0);
+    CHECK(has(&h, "E select n2\n") && focus_at(&h) == CANLIN_UI_W_GRAPH);
+    key(&h, CANLIN_UI_KEY_ESCAPE);
+    h_drain(&h);
+    key(&h, CANLIN_UI_KEY_DELETE); /* after Esc the graph takes no Del either */
+    h_drain(&h);
+    CHECK(!has(&h, "E delete"));
+    tab(&h, 0);
+    CHECK(focus_at(&h) == CANLIN_UI_W_FIELD); /* wraps */
+    CHECK(count(&h, "E select") == 2);
+    /* Shift-Tab goes back, wrapping to the graph, which then takes Tab again. */
+    tab(&h, 1);
+    CHECK(focus_at(&h) == CANLIN_UI_W_GRAPH && count(&h, "E select") == 2);
+    tab(&h, 1);
+    CHECK(count(&h, "E select") == 3 && focus_at(&h) == CANLIN_UI_W_GRAPH);
+    /* A pointer press clears the mark; on a plain widget the focus goes with it. */
+    key(&h, CANLIN_UI_KEY_ESCAPE);
+    h_drain(&h);
+    tab(&h, 0);
+    tab(&h, 0);
+    tab(&h, 0);
+    CHECK(focus_at(&h) == CANLIN_UI_W_BUTTON);
+    input(&h, CANLIN_UI_IN_BUTTON, 395, 5, 1);
+    input(&h, CANLIN_UI_IN_BUTTON, 395, 5, 0);
+    h_drain(&h);
+    CHECK(focus_at(&h) == 0);
+    key(&h, CANLIN_UI_KEY_ENTER);
+    h_drain(&h);
+    CHECK(count(&h, "clicked") == 2);
+    /* Escape is a valid key; a key past it is not. */
+    {
+        canlin_ui_input in;
+        memset(&in, 0, sizeof in);
+        in.type = CANLIN_UI_IN_KEY;
+        in.key = CANLIN_UI_KEY_LAST + 1;
+        in.down = 1;
+        CHECK(!canlin_ui_input_valid(&in));
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_EINVAL);
+    }
+    h_done(&h);
+}
+
+/* canlin#30: a draw skipped with EFONT is retried by itself once a slot is unpinned: four
+ * pinned sizes (the module at 100 % plus three views), the module moves to 200 % and is
+ * skipped; freeing one view wakes it, with no set_ui, invalidate or input from outside. */
+static void test_font_cache_wake(void)
+{
+    static const int scales[3] = {75, 125, 150};
+    harness h;
+    canlin_ui_output *o[3];
+    canlin_ui_view *v[3];
+    canlin_ui_output_desc d;
+    unsigned draws;
+    int i, err;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    for (i = 0; i < 3; i++) {
+        d.id = "pin";
+        d.w = d.h = 300;
+        d.dpi = 1.0f;
+        d.scale = scales[i];
+        o[i] = canlin_ui_output_new(&d, &err);
+        v[i] = canlin_ui_view_new(h.ui, o[i], &err);
+        CHECK(v[i] != NULL);
+    }
+    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    h_drain(&h);
+    CHECK(has(&h, "draw: skipped: every font size slot is pinned"));
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 16.0f);
+    draws = h.draws;
+    h_drain(&h);
+    CHECK(h.draws == draws); /* waiting, not spinning */
+    /* A view that is only re-used (no slot unpinned) wakes nobody. */
+    v[1] = (canlin_ui_view_free(v[1]), canlin_ui_view_new(h.ui, o[1], &err));
+    CHECK(v[1] != NULL);
+    h_drain(&h);
+    CHECK(h.draws == draws + 1); /* woken once by the free, skipped again: re-pinned */
+    CHECK(count(&h, "draw: skipped") == 2);
+    draws = h.draws;
+    canlin_ui_view_free(v[0]); /* 75 % unpinned: the only external action */
+    h_drain(&h);
+    CHECK(h.draws == draws + 1);
+    CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 32.0f);
+    CHECK(!canlin_ui_view_dirty(canlin_module_view(h.m)));
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) != NULL);
+    CHECK(count(&h, "draw: skipped") == 2);
+    for (i = 1; i < 3; i++)
+        canlin_ui_view_free(v[i]);
+    for (i = 0; i < 3; i++)
+        CHECK(canlin_ui_output_free(o[i]) == CANLIN_UI_OK);
+    h_done(&h);
+}
+
 /* Lua has no path to scale, DPI or the output: the whole canlin.* surface is an
  * allowlist here (a new entry must be reviewed against §2.1), and the ui object carries
  * no metric accessors and cannot be written. */
@@ -1809,6 +2098,7 @@ int main(void)
     test_input_overflow();
     test_input_order();
     test_input_overflow_latch();
+    test_secondary_button();
     test_input_stale_generation();
     test_input_no_lua();
     test_scroll();
@@ -1825,6 +2115,8 @@ int main(void)
     test_two_outputs();
     test_font_cache();
     test_font_cache_module();
+    test_font_cache_wake();
+    test_tab_order();
     test_lua_no_scale();
     if (failures) {
         fprintf(stderr, "ui: %d of %d checks failed\n", failures, checks);
