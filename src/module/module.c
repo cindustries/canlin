@@ -740,11 +740,14 @@ canlin_ui_view *canlin_module_view(canlin_module *m)
 int canlin_module_input(canlin_module *m, const canlin_ui_input *in)
 {
     int rc;
-    if (m == NULL || m->view == NULL)
+    canlin_ui_input e;
+    if (m == NULL || m->view == NULL || in == NULL)
         return CANLIN_MODULE_EINVAL;
     if (m->in_call)
         return CANLIN_MODULE_EBUSY;
-    rc = canlin_ui_view_input(m->view, in);
+    e = *in;
+    e.t = canlin_ev_now(m->ev); /* the scheduler's monotonic clock (fake in tests) */
+    rc = canlin_ui_view_input(m->view, &e);
     if (rc == CANLIN_UI_EINVAL)
         return CANLIN_MODULE_EINVAL;
     /* Queued or overflowed (the overflow release still needs a frame): redraw. */

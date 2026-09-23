@@ -127,6 +127,8 @@ typedef struct canlin_ui_input {
     int key;
     uint32_t cp;
     int dy;
+    uint64_t t;  /* monotonic ms of the event; canlin_module_input stamps the scheduler
+                  * clock. Only differences matter (graph long-press/double-click). */
 } canlin_ui_input;
 
 enum {
@@ -197,14 +199,18 @@ void canlin_ui_view_render(canlin_ui_view *v, canlin_render *r);
 typedef enum canlin_ui_kind {
     CANLIN_UI_W_HEADING = 1, CANLIN_UI_W_TEXT, CANLIN_UI_W_BUBBLE, CANLIN_UI_W_FIELD,
     CANLIN_UI_W_AREA, CANLIN_UI_W_BUTTON, CANLIN_UI_W_TOGGLE, CANLIN_UI_W_CHOICE,
-    CANLIN_UI_W_METER, CANLIN_UI_W_SEPARATOR, CANLIN_UI_W_COLUMNS, CANLIN_UI_W_SECTION
+    CANLIN_UI_W_METER, CANLIN_UI_W_SEPARATOR, CANLIN_UI_W_COLUMNS, CANLIN_UI_W_SECTION,
+    CANLIN_UI_W_GRAPH
 } canlin_ui_kind;
 
 typedef enum canlin_ui_part {
     CANLIN_UI_P_BOX = 1,  /* the widget's interactive or visual box */
     CANLIN_UI_P_LABEL,    /* single-line label (ellipsized if too long) */
     CANLIN_UI_P_LINE,     /* one wrapped text line */
-    CANLIN_UI_P_OPTION    /* one option row of an expanded choice */
+    CANLIN_UI_P_OPTION,   /* one option row of an expanded choice */
+    CANLIN_UI_P_NODE,     /* graph: a visible node panel; off = node index (from 0) */
+    CANLIN_UI_P_PORT      /* graph: a visible port touch target; off = node index,
+                           * len = port index, inputs first then outputs */
 } canlin_ui_part;
 
 typedef struct canlin_ui_rect {

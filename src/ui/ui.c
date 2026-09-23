@@ -21,6 +21,8 @@
 #include "lua.h"
 #include "lauxlib.h"
 
+#include "graph.h"
+
 enum { F_BODY = 0, F_H1 = 1, F_H2 = 2, F_COUNT = 3 };
 
 typedef struct font_entry {
@@ -94,6 +96,9 @@ struct canlin_ui_view {
 
     char buf[CANLIN_UI_MAX_TEXT + 1];      /* edit scratch */
     char lbl[CANLIN_UI_MAX_LABEL + 8];     /* ellipsized label */
+
+    canlin_ui_graph_state gstate[CANLIN_UI_GRAPH_STATES]; /* ui:graph pan/drag state */
+    uint64_t btn_t;                        /* timestamp of the last applied button edge */
 };
 
 /* ---- shared ui and font cache ---- */
@@ -536,6 +541,7 @@ void canlin_ui_view_reset(canlin_ui_view *v)
     v->focus = 0;
     v->nrec = 0;
     v->rec_over = 0;
+    memset(v->gstate, 0, sizeof v->gstate);
 }
 
 struct nk_context *canlin_ui_view_nk(canlin_ui_view *v)
@@ -648,6 +654,7 @@ static void apply_input(canlin_ui_view *v)
             v->last_x = e->x;
             v->last_y = e->y;
             v->btn_down = e->down != 0;
+            v->btn_t = e->t;
             group = G_BUTTON;
             break;
         case CANLIN_UI_IN_KEY:
@@ -808,6 +815,7 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
     nk_layout_space_end(ctx);
     nk_end(ctx);
     slots_evict(v);
+    canlin_ui_graph_state_evict(v->gstate, v->frame);
     {
         /* Focus of a field that was not drawn this frame is gone. */
         size_t mask = CANLIN_UI_STATE_SLOTS - 1, i = (size_t)(v->focus ^ (v->focus >> 32)) & mask;
@@ -1544,10 +1552,67 @@ static int l_icon(lua_State *L)
     return luaL_error(L, "ui:icon: unsupported (no image decoding yet)");
 }
 
+/* The one place graph.c gets display metrics (the view's per-output em) and view
+ * geometry from. */
+static void graph_env(canlin_ui_view *v, canlin_ui_graph_env *e)
+{
+    e->view = v;
+    e->nk = &v->nk;
+    e->theme = &v->ui->theme;
+    e->font = font_of(v, F_BODY);
+    e->em = em_of(v);
+    e->vis = nk_rect((float)v->x, (float)v->y, (float)v->w, (float)v->h);
+    e->focus = &v->focus;
+    e->btn_t = v->btn_t;
+}
+
+void canlin_ui_graph_record(canlin_ui_view *v, int part, struct nk_rect r, uint32_t off,
+                            uint32_t len)
+{
+    canlin_ui_rect *d;
+    if (v->nrec >= CANLIN_UI_RECORD_MAX) {
+        v->rec_over = 1;
+        return;
+    }
+    d = &v->rec[v->nrec++];
+    memset(d, 0, sizeof *d);
+    d->kind = CANLIN_UI_W_GRAPH;
+    d->part = (unsigned char)part;
+    d->widget = (unsigned short)(v->widgets ? v->widgets - 1 : 0);
+    d->x = (int)r.x;
+    d->y = (int)r.y;
+    d->w = (int)r.w;
+    d->h = (int)r.h;
+    d->off = off;
+    d->len = len;
+}
+
+/* ui:graph(g [, opts]) — spec §5; validation, state and drawing live in graph.c. */
 static int l_graph(lua_State *L)
 {
-    check_ui(L);
-    return luaL_error(L, "ui:graph: not implemented");
+    canlin_ui_view *v = check_ui(L);
+    canlin_ui_graph *g;
+    canlin_ui_graph_env e;
+    slot *st;
+    float hem;
+    int fit;
+    count_widget(L, v);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    /* identity() may run opts metamethods; the parse below reads raw and runs no Lua, so
+     * the parsed string pointers stay anchored in g until the edits are pushed. */
+    st = identity(L, v, 3, "\0graph", 6); /* own label namespace in practice */
+    graph_env(v, &e);
+    e.id = st->id;
+    e.st = canlin_ui_graph_state_get(v->gstate, st->id, v->frame);
+    if (e.st == NULL)
+        luaL_error(L, "ui:graph: more than %d graphs in one draw",
+                   (int)CANLIN_UI_GRAPH_MAX_PER_DRAW);
+    g = canlin_ui_graph_parse(L, 2, 3, &hem, &fit); /* raises; userdata stays on stack */
+    e.box = place(v, CANLIN_UI_W_GRAPH, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, hem * e.em, 1,
+                  0, 0, 0);
+    canlin_ui_graph_run(L, g, fit, &e);
+    advance(v, hem * e.em);
+    return 1;
 }
 
 /* Runs the function at idx; restores the column state and re-raises on error. */

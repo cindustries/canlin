@@ -670,7 +670,7 @@ static void test_errors(void)
     expect_draw_error("ui.foo = 1", "read-only");
     expect_draw_error("print(getmetatable(ui))", "false");
     /* not yet */
-    expect_draw_error("ui:graph({nodes = {}, edges = {}})", "not implemented");
+    expect_draw_error("ui:graph({nodes = 5})", "nodes must be an array"); /* canlin#19 */
     expect_draw_error("ui:icon('x')", "unsupported");
 }
 

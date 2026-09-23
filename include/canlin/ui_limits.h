@@ -66,6 +66,22 @@
  * previous and the current frame can each hold MAX_WIDGETS identities; load <= 50%). */
 #define CANLIN_UI_STATE_SLOTS           2048u
 
+/* Not in the §8 table: graph editor (UI spec §5), chosen here (provisional). */
+#define CANLIN_UI_GRAPH_MAX_PER_DRAW    8u      /* ui:graph calls per draw */
+#define CANLIN_UI_GRAPH_MAX_BODY        4u      /* body rows per node (§5.3) */
+#define CANLIN_UI_GRAPH_MAX_COORD       4096.0f /* |x|, |y| of a node and of the pan, em */
+#define CANLIN_UI_GRAPH_HEIGHT_EM       24.0f   /* default opts.height */
+#define CANLIN_UI_GRAPH_HEIGHT_MIN_EM   5.0f
+#define CANLIN_UI_GRAPH_HEIGHT_MAX_EM   200.0f
+#define CANLIN_UI_GRAPH_NODE_W_EM       12.0f   /* node panel width */
+#define CANLIN_UI_GRAPH_TITLE_EM        2.0f    /* title row height */
+#define CANLIN_UI_GRAPH_BODY_EM         1.5f    /* body row height */
+#define CANLIN_UI_GRAPH_SLOP_EM         0.5f    /* movement below this is a tap */
+#define CANLIN_UI_GRAPH_EDGE_HIT_EM     0.5f    /* tap distance that selects an edge */
+/* Pointer timing, ms between input timestamps (canlin_ui_input.t). */
+#define CANLIN_UI_LONG_PRESS_MS         500u    /* press held this long, released in place */
+#define CANLIN_UI_DOUBLE_TAP_MS         400u    /* second tap on the same node */
+
 /* §6.2: text/background contrast below this ratio logs a warning (WCAG AA). */
 #define CANLIN_THEME_MIN_CONTRAST       4.5f
 
