@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T05:49:08Z
+id: 54
+priority: high
+status: backlog
+tags:
+- llm
+- settings
+title: Connection test and trusted settings surface for LLM profiles and keys
+updated: 2026-09-23T05:49:08Z
+---
+
+LLM providers spec §6. From canlin#38.
