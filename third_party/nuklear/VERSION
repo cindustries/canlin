@@ -1,0 +1,27 @@
+Nuklear (Immediate-Mode-UI)
+source: https://github.com/Immediate-Mode-UI/Nuklear
+commit: 9f7750296f176e506c2b24ff55bc24495e2db750 (2026-09-20)
+verified: 2026-09-23, files byte-identical to that commit
+
+sha256 of each vendored file (paths as in upstream):
+30a33586aeee98f71db083a6c1546295a4279fd8f214cfab36eec703eb98ebfd  nuklear.h
+b7c67c24445f3d5c16b6cd7aea2924d23209a416742a619d61bd38b05cbf64f9  LICENSE
+1af4afee49ea6d6e220873fb5fe69185dbfab3534b1cfda3cba1f49d19765eb4  demo/rawfb/nuklear_rawfb.h
+a09861d59cca062e64278a5a47a1d1939b8b68598f02cfe5b06dc57852a75ae3  demo/common/node_editor.c
+
+Contents:
+- nuklear.h: the single-header library. It embeds stb_truetype v1.26 and
+  stb_rect_pack v1.01 (both public domain / MIT, used through
+  NK_INCLUDE_FONT_BAKING) and ProggyClean.ttf by Tristan Grimmer (MIT, used through
+  NK_INCLUDE_DEFAULT_FONT). No separate stb copy is vendored.
+- LICENSE: Nuklear's dual license, MIT (c) 2017 Micha Mettke or public domain.
+- demo/rawfb/nuklear_rawfb.h: reference only, never compiled. MIT (c) 2016-2017
+  Patrick Rudolph (its own header notice). src/render adapts it as owned code.
+- demo/common/node_editor.c: reference only, never compiled. "public domain".
+  Reference for the graph editor (UI spec §5.3).
+
+Note: stb_truetype states "NO SECURITY GUARANTEE -- DO NOT USE THIS ON UNTRUSTED
+FONT FILES". Theme TTF blobs must not be baked until that policy is decided.
+
+Read-only. Configure via NK_* defines only; any fix is a
+patch file plus ticket. Check: `sha256sum -c` over the list above from this dir.

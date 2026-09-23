@@ -1,0 +1,26 @@
+# Vendored Nuklear (third_party/nuklear, read-only) and the software rasterizer
+# (src/render, canlin#17). nuklear.h is reached only through include/canlin/nk.h;
+# -isystem keeps our warning set off its header part in our own TUs.
+NK_CPPFLAGS := -isystem third_party/nuklear
+NK_HDR := include/canlin/nk.h third_party/nuklear/nuklear.h
+NK_OBJ := $(BUILD)/src/render/nk_impl.o
+
+RENDER_HDR := include/canlin/render.h include/canlin/render_limits.h \
+	include/canlin/ui_limits.h $(NK_HDR)
+RENDER_OBJ := $(BUILD)/src/render/render.o
+LIBOBJ += $(NK_OBJ) $(RENDER_OBJ)
+
+# Vendored code is not held to our warning set ('override': also with CFLAGS on the
+# command line), like mk/lua.mk.
+$(NK_OBJ): override CFLAGS += -w -Wno-error
+$(NK_OBJ): $(NK_HDR)
+
+RENDER_TEST := $(BUILD)/t/render/test_render
+TESTS += $(RENDER_TEST)
+
+$(RENDER_OBJ) $(NK_OBJ) $(BUILD)/t/render/test_render.o: override CPPFLAGS += $(NK_CPPFLAGS)
+$(RENDER_OBJ) $(BUILD)/t/render/test_render.o: $(RENDER_HDR)
+
+$(RENDER_TEST): $(BUILD)/t/render/test_render.o $(RENDER_OBJ) $(NK_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm
