@@ -164,10 +164,13 @@ The keys of system design §10, with value formats fixed:
 |---|---|---|
 | `theme#color#<role>` | `"#RRGGBB"` string | roles: background, surface, text, muted, accent, danger, success |
 | `theme#font#body`, `theme#font#heading` | TTF blob | ≤ `CANLIN_THEME_FONT_MAX` bytes |
-| `theme#font#size` | integer px at DPI 1.0 | 10–40 |
+| `theme#font#size` | decimal string, px at DPI 1.0 | 10–40 |
 | `theme#logo` | PNG blob | ≤ `CANLIN_THEME_LOGO_MAX` bytes and ≤ 1024×1024 decoded |
 | `theme#spacing` | decimal string | 0.25–4.0 (em multiplier) |
 | `theme#radius` | decimal string | 0.0–2.0 em |
+
+All scalar values are ASCII text in the pack (like `spacing` and `radius`), so the
+key/value source hands bytes to the theme without type conversion.
 
 Graph colours are derived, not extra keys: node panel = `surface`, edges and grid =
 `muted`, selection and dragging = `accent`, incompatible port = `danger`.
@@ -183,15 +186,26 @@ logs one line naming the key. Sizes are checked before decoding or allocation. A
 never fails startup.
 
 The resolved theme maps onto Nuklear's style table (`struct nk_style`) in one owned
-function; widgets read only the resolved theme. Text/background contrast below 4.5:1
-is logged as a warning, not refused.
+function; widgets read only the resolved theme. Contrast of `text` against both
+`background` and `surface` below 4.5:1 is logged as a warning, not refused.
+
+Resolved font and logo blobs point into the source's memory (libbee mmap/CDB), so a
+key/value source must outlive the theme resolved from it. Strokes are drawn inside
+their rectangle, `[x, x+w)`, so a bordered widget never paints outside its layout box.
 
 ### 6.3 Fonts
 
 stb_truetype via Nuklear's font baking. Bodies and headings are baked once per theme
 load at base size × DPI; heading levels use scale factors of the heading font. The
-built-in theme carries one small Latin font subset; full Unicode coverage needs a theme
-font. Missing glyphs render as a replacement box, never crash.
+built-in theme carries one small Latin font subset (v1 placeholder: Nuklear's
+ProggyClean); full Unicode coverage needs a theme font. Missing glyphs render as
+Nuklear's fallback glyph in v1 and never crash; a proper replacement box comes with
+the built-in font.
+
+**Untrusted fonts:** stb_truetype states it is not safe on untrusted font files, and a
+`theme.bee` can come from a server. Theme TTF blobs are size- and magic-checked but not
+baked until an untrusted-font policy exists (isolation, fuzzing or a hardened
+rasterizer, canlin#21). Until then the built-in font is used.
 
 ## 7. GUI tool schema (assistant-owned view)
 
