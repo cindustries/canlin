@@ -11,7 +11,7 @@
  * input widgets (field, area, toggle, choice, graph) and buttons, optional elsewhere:
  *   heading   text, level? (1-3, default 1)
  *   text      text, style? ("normal"|"muted"|"danger"|"success")
- *   bubble    role ("user"|"assistant"|"system"), text
+ *   bubble    role ("user"|"assistant"; "system" is reserved and rejected), text
  *   field     id, label, value? (str), placeholder?, max? (bytes, 0..MAX_TEXT)
  *   area      id, label, value? (str), rows? (2-20)
  *   toggle    id, label, value? (bool)
@@ -28,9 +28,11 @@
  *   button    id, label, action ("submit")
  *   icon      name (built-in assistant icons only; the list is empty in v1)
  * Strings: text/value up to CANLIN_UI_MAX_TEXT, everything else up to CANLIN_UI_MAX_LABEL
- * bytes; no control character (C0, DEL, C1) in any string (UI spec §7). Containers nest
- * at most CANLIN_UI_MAX_DEPTH deep; at most CANLIN_UI_TOOL_MAX_WIDGETS widgets in total
- * (containers included, graph nodes counted separately against the graph limits).
+ * bytes; no control character (C0, DEL, C1) in any string (UI spec §7), except that
+ * multi-line content (text and bubble text, area value) may hold '\n' and '\t'.
+ * Containers nest at most CANLIN_UI_MAX_DEPTH deep; at most CANLIN_UI_TOOL_MAX_WIDGETS
+ * widgets in total (containers included, graph nodes counted separately against the
+ * graph limits).
  *
  * Tool-call identity (LLM/UI §5): the conversation layer sets the scope (module
  * generation, turn). A call carries (gen, turn, call id). A call outside the current
@@ -131,7 +133,7 @@ struct canlin_av_widget {
     canlin_av_str name;            /* icon */
     int level;                     /* heading 1-3 */
     int style;                     /* text: 0 normal, 1 muted, 2 danger, 3 success */
-    int role;                      /* bubble: 0 user, 1 assistant, 2 system */
+    int role;                      /* bubble: 0 user, 1 assistant */
     int rows;                      /* area 2-20 (default 4) */
     int on;                        /* toggle initial value */
     int open;                      /* section initially open */
