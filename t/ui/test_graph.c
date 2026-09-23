@@ -1,8 +1,8 @@
 /* Graph editor contract tests (UI spec §5, §8, §10): real sandbox and scheduler with a
  * fake clock, the built-in theme and font, offscreen. Input is injected through
- * canlin_module_input, which stamps each event with the scheduler clock; long-press and
- * double-tap timing therefore follow canlin_ev_fake_clock_advance. Positions come from
- * the layout record (CANLIN_UI_P_NODE / CANLIN_UI_P_PORT). Exits 0 on success. */
+ * canlin_module_post_input, which stamps each edge with the scheduler clock at post
+ * time; long-press and double-tap timing therefore follow canlin_ev_fake_clock_advance.
+ * Positions come from the layout record (CANLIN_UI_P_NODE / CANLIN_UI_P_PORT). Exits 0 on success. */
 #include "canlin/module.h"
 #include "canlin/ui.h"
 
@@ -167,7 +167,7 @@ static void input(harness *h, canlin_ui_input_type type, int x, int y, int down)
     in.x = x;
     in.y = y;
     in.down = down;
-    CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
 }
 
 static void key(harness *h, int k)
@@ -177,9 +177,9 @@ static void key(harness *h, int k)
     in.type = CANLIN_UI_IN_KEY;
     in.key = k;
     in.down = 1;
-    CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
     in.down = 0;
-    CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
     h_drain(h);
 }
 
@@ -904,6 +904,106 @@ static void test_render(void)
     h_done(&h);
 }
 
+/* ---- input through the scheduler (canlin#27) ---- */
+
+/* Fills the scheduler queue with text edges, then posts a release that is refused:
+ * CANLIN_EV_CTL_INPUT_OVERFLOW is raised. */
+static void saturate_then_release(harness *h, int x, int y)
+{
+    canlin_ui_input in;
+    unsigned n = 0;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_TEXT;
+    in.cp = 'q';
+    while (canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK && n < 1000)
+        n++;
+    CHECK(n > 0 && n <= CANLIN_EV_MOD_MAX_ITEMS);
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.x = x;
+    in.y = y;
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_EFULL);
+}
+
+/* An overflow during a node drag or a pan cancels the gesture: no edit, the preview and
+ * the pan return to where they started; the next gesture works. */
+static void test_overflow_cancels_drag(void)
+{
+    harness h;
+    const canlin_ui_rect *a;
+    int ax, ay;
+
+    base(&h, "nil");
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a && a->x == 40 && a->y == 40);
+    ax = a ? cx(a) : 0;
+    ay = a ? a->y + 16 : 0;
+    press(&h, ax, ay);
+    input(&h, CANLIN_UI_IN_MOTION, ax + 40, ay + 20, 0);
+    h_drain(&h);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a && a->x == 80 && a->y == 60); /* drag preview */
+    saturate_then_release(&h, ax + 40, ay + 20);
+    h_drain(&h);
+    CHECK(edits(&h) == 0);
+    CHECK(!has(&h, "MUTATED"));
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a && a->x == 40 && a->y == 40); /* preview dropped */
+    /* A late release edge after the gap does not revive the gesture. */
+    release(&h, ax + 40, ay + 20);
+    CHECK(edits(&h) == 0);
+
+    /* Pan on empty canvas, cancelled: the pan snaps back. */
+    gap(&h);
+    press(&h, 488, 328);
+    input(&h, CANLIN_UI_IN_MOTION, 520, 344, 0);
+    h_drain(&h);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a && a->x == 72 && a->y == 56);
+    saturate_then_release(&h, 520, 344);
+    h_drain(&h);
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a && a->x == 40 && a->y == 40);
+    CHECK(edits(&h) == 0);
+
+    /* Input after the gap works normally. */
+    gap(&h);
+    tap_title(&h, 1);
+    CHECK(has(&h, "E select B\n") && edits(&h) == 1);
+    h_done(&h);
+}
+
+/* Edges carry the time they were posted, not delivered: press and release posted
+ * CANLIN_UI_LONG_PRESS_MS apart but delivered in one drain at one clock value are a long
+ * press, and a quick tap delivered long after it happened stays a tap. */
+static void test_post_time_stamps(void)
+{
+    harness h;
+    const canlin_ui_rect *a;
+    int ax, ay;
+
+    base(&h, "nil");
+    a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0);
+    CHECK(a != NULL);
+    ax = a ? cx(a) : 0;
+    ay = a ? a->y + 16 : 0;
+    input(&h, CANLIN_UI_IN_MOTION, ax, ay, 0);
+    input(&h, CANLIN_UI_IN_BUTTON, ax, ay, 1);
+    canlin_ev_fake_clock_advance(&h.clock, CANLIN_UI_LONG_PRESS_MS);
+    input(&h, CANLIN_UI_IN_BUTTON, ax, ay, 0);
+    h_drain(&h);
+    CHECK(has(&h, "E open A\n") && edits(&h) == 1);
+
+    gap(&h);
+    clear_log(&h);
+    input(&h, CANLIN_UI_IN_BUTTON, ax, ay, 1);
+    input(&h, CANLIN_UI_IN_BUTTON, ax, ay, 0);
+    canlin_ev_fake_clock_advance(&h.clock, 4 * CANLIN_UI_LONG_PRESS_MS);
+    h_drain(&h);
+    CHECK(has(&h, "E select A\n") && edits(&h) == 1);
+    h_done(&h);
+}
+
 int main(void)
 {
     test_edit_kinds();
@@ -916,6 +1016,8 @@ int main(void)
     test_limits();
     test_e2e();
     test_render();
+    test_overflow_cancels_drag();
+    test_post_time_stamps();
     printf("test_graph: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

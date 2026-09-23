@@ -127,8 +127,9 @@ typedef struct canlin_ui_input {
     int key;
     uint32_t cp;
     int dy;
-    uint64_t t;  /* monotonic ms of the event; canlin_module_input stamps the scheduler
-                  * clock. Only differences matter (graph long-press/double-click). */
+    uint64_t t;  /* monotonic ms of the event; canlin_module_post_input stamps edges with
+                  * the scheduler clock at post time. Only differences matter (graph
+                  * long-press/double-click). */
 } canlin_ui_input;
 
 enum {
@@ -140,12 +141,20 @@ enum {
     CANLIN_UI_EBUSY = -5    /* a frame is open */
 };
 
+/* 1 if in is a well-formed input event (known type, key in range, text a Unicode scalar
+ * value other than 0), else 0. */
+int canlin_ui_input_valid(const canlin_ui_input *in);
+
 /* Queues one input event in order. At most one edge per button and per key is applied
  * per frame; later edges stay queued for the next frame (canlin_ui_view_pending), so a
  * press and release between two draws still produce a press frame. On overflow
- * (CANLIN_UI_INPUT_MAX) the queue is dropped and pressed buttons/keys are released at
- * the next frame (event runtime §6: overflow clears stuck interaction state). */
+ * (CANLIN_UI_INPUT_MAX) the view is reset as by canlin_ui_view_input_reset (event
+ * runtime §5: overflow clears stuck interaction state) and EFULL returned. */
 int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in);
+/* Input was lost (overflow outside or inside the view): drop the queue, release pressed
+ * buttons/keys at the next frame and cancel graph gestures without edits. No-op inside
+ * a frame. */
+void canlin_ui_view_input_reset(canlin_ui_view *v);
 /* Queued events not yet applied: the host requests another draw while this is > 0. */
 size_t canlin_ui_view_pending(const canlin_ui_view *v);
 

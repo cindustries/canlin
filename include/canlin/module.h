@@ -75,6 +75,9 @@ typedef struct canlin_module_result {
  * M.event(name, payload). Events of every other source are consumed by the core (input is
  * routed to UI state, never to M.event; spec §5.2). */
 #define CANLIN_MODULE_SOURCE_EVENT 0x4d4f4445u
+/* canlin_ev_post source of normalised input posted by canlin_module_post_input. Its
+ * items are fed to the module's view on delivery; Lua is never called for them. */
+#define CANLIN_MODULE_SOURCE_INPUT 0x494e5054u
 
 typedef struct canlin_module_event {
     const char *name;           /* NUL-terminated, at most CANLIN_MODULE_NAME_MAX bytes */
@@ -107,7 +110,9 @@ enum {
     CANLIN_MODULE_EEV = -3,    /* scheduler refused a generation (slots full, ids exhausted) */
     CANLIN_MODULE_ELOAD = -4,  /* lua#main failed, faulted or did not return a table */
     CANLIN_MODULE_EINIT = -5,  /* M.init raised or faulted: fatal for the generation */
-    CANLIN_MODULE_EBUSY = -6   /* called while this module is inside a callback */
+    CANLIN_MODULE_EBUSY = -6,  /* called while this module is inside a callback */
+    CANLIN_MODULE_ESTALE = -7, /* no running generation: input dropped */
+    CANLIN_MODULE_EFULL = -8   /* the scheduler refused input: dropped (see post_input) */
 };
 
 /* Start a generation, create its sandbox (cfg: limits and log sink; cfg->require is
@@ -158,10 +163,25 @@ int canlin_module_set_ui(canlin_module *m, struct canlin_ui *ui, struct canlin_u
                          int x, int y, int w, int h);
 /* The module's view (NULL if headless): render it after a draw, inspect its record. */
 struct canlin_ui_view *canlin_module_view(canlin_module *m);
-/* Route one normalised input event to the module's view (never to M.event, core API
- * §5.2) and request a draw. EINVAL for a malformed event or no view; an overflowing queue
- * is reset (ui.h) and still requests the draw that releases held buttons/keys. */
-int canlin_module_input(canlin_module *m, const struct canlin_ui_input *in);
+/* Backend entry for normalised input (event runtime §4–§5, core API §5.2). Posts `in`
+ * to the scheduler for the current generation with source CANLIN_MODULE_SOURCE_INPUT;
+ * on delivery it is fed to the module's view and a draw is requested, Lua is never
+ * called for it. Owner thread; allowed between turns and inside deliveries.
+ *
+ * - MOTION and SCROLL are latest-state: consecutive ones coalesce into one queue item,
+ *   never across an edge (motion A, press, motion B stays in that order). Scroll is sent
+ *   as a cumulative position, so coalescing keeps the summed distance.
+ * - BUTTON, KEY and TEXT are ordered edges, FIFO, stamped with the scheduler clock at
+ *   post time (in->t is ignored): long-press and double-tap measure the user's timing,
+ *   not queueing or one-edge-per-frame delay.
+ * - A refused edge returns EFULL and raises CANLIN_EV_CTL_INPUT_OVERFLOW. All input
+ *   queued before it is stale and dropped on delivery; consuming the latch resets the
+ *   view (canlin_ui_view_input_reset: held buttons/keys released, graph gestures
+ *   cancelled without edits). A refused motion/scroll returns EFULL without the latch.
+ * - Input for a stopped or replaced generation never reaches a later one: ESTALE when
+ *   not RUNNING, and queued items die with their generation.
+ * EINVAL for NULL, no view or a malformed event (canlin_ui_input_valid). */
+int canlin_module_post_input(canlin_module *m, const struct canlin_ui_input *in);
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,12 @@
 #include "lua.h"
 #include "lauxlib.h"
 
+/* One ordered input edge in flight in the scheduler queue. */
+typedef struct in_slot {
+    canlin_ui_input in;
+    unsigned char used;
+} in_slot;
+
 struct canlin_module {
     canlin_ev *ev;
     canlin_sandbox *sb;
@@ -34,6 +40,14 @@ struct canlin_module {
     char version[CANLIN_MODULE_NAME_MAX + 1];
     char errmsg[CANLIN_MODULE_NAME_MAX + 320];
     canlin_ui_view *view; /* owned; outlives every Lua state of this module */
+
+    /* Input routed through the scheduler (post_input -> EVENT -> view). An ordered edge
+     * travels as a payload pointing into inpool; the scheduler releases it after delivery
+     * or retirement, so a slot is never busy longer than its queue item. */
+    in_slot inpool[CANLIN_EV_MOD_MAX_ITEMS];
+    uint32_t in_epoch;      /* bumped when an edge is refused: older queued input is stale */
+    uint32_t scroll_posted; /* cumulative scroll px posted (wraps), a latest-state value */
+    uint32_t scroll_seen;   /* cumulative scroll px handed to the view */
 };
 
 /* ---- values ---- */
@@ -465,6 +479,7 @@ static int start_gen(canlin_module *m, const canlin_module_source *src)
     }
     canlin_sandbox_free(m->sb); /* old generation already retired by the reload */
     canlin_ui_view_reset(m->view); /* widget state belongs to one generation */
+    m->scroll_seen = m->scroll_posted; /* old-generation scroll was retired with it */
     m->sb = sb;
     m->gen = g;
     m->errors = 0;
@@ -597,8 +612,52 @@ static void consume_control(canlin_module *m, unsigned bits)
         fault(m, "control", "fault signalled");
     else if (bits & CANLIN_EV_CTL_STOP)
         end_gen(m, CANLIN_MODULE_STOPPED);
-    /* INPUT_OVERFLOW / CONN_LOST: TODO with the UI flow API and transports; the core
-     * reconciles input state and subsystems send their own stream events (spec §5.2). */
+    else if ((bits & CANLIN_EV_CTL_INPUT_OVERFLOW) && m->view) {
+        /* An input edge was refused (event runtime §5): release what is held and cancel
+         * gestures; the queued input from before the gap is stale (in_epoch) and dropped
+         * on delivery. The release needs a frame. */
+        canlin_ui_view_input_reset(m->view);
+        canlin_ev_invalidate(m->ev, m->gen);
+    }
+    /* CONN_LOST: consumed; transports send their own stream events (spec §5.2). */
+}
+
+/* Scheduler type of an input item: input type in the low byte, epoch above it. */
+#define IN_TYPE(epoch, type) ((((uint32_t)(epoch) & 0xffffffu) << 8) | (uint32_t)(type))
+
+/* An input delivery: feed the view, request a draw. Never enters Lua (spec §5.2). */
+static void deliver_input(canlin_module *m, const canlin_ev_delivery *d)
+{
+    canlin_ui_input e;
+    uint32_t type = d->type & 0xffu;
+
+    if (m->view == NULL || (d->type >> 8) != (m->in_epoch & 0xffffffu)) {
+        /* Before an overflow gap: the reset already covers it. Stale scroll is dropped
+         * too, not carried into the next delta. */
+        if (type == CANLIN_UI_IN_SCROLL)
+            m->scroll_seen = (uint32_t)d->a;
+        return;
+    }
+    memset(&e, 0, sizeof e);
+    if (type == CANLIN_UI_IN_MOTION) {
+        e.type = CANLIN_UI_IN_MOTION;
+        e.x = d->a;
+        e.y = d->b;
+        e.t = canlin_ev_now(m->ev); /* coalesced: no edge time; nothing reads it */
+    } else if (type == CANLIN_UI_IN_SCROLL) {
+        e.type = CANLIN_UI_IN_SCROLL;
+        e.dy = (int)(int32_t)((uint32_t)d->a - m->scroll_seen);
+        m->scroll_seen = (uint32_t)d->a;
+        e.t = canlin_ev_now(m->ev);
+        if (e.dy == 0)
+            return;
+    } else if (d->payload != NULL && d->bytes == sizeof(in_slot)) {
+        e = ((const in_slot *)d->payload)->in; /* stamped at post time */
+    } else {
+        return;
+    }
+    canlin_ui_view_input(m->view, &e); /* EFULL resets the view itself */
+    canlin_ev_invalidate(m->ev, m->gen);
 }
 
 canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_delivery *d)
@@ -629,8 +688,12 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
     case CANLIN_EV_D_EVENT: {
         const canlin_module_event *e = d->payload;
         long nl;
+        if (d->source == CANLIN_MODULE_SOURCE_INPUT) {
+            deliver_input(m, d);
+            return CANLIN_SANDBOX_OK;
+        }
         if (d->source != CANLIN_MODULE_SOURCE_EVENT)
-            return CANLIN_SANDBOX_OK; /* TODO: input routes to UI state (spec §5.2) */
+            return CANLIN_SANDBOX_OK; /* other sources are consumed by the core */
         nl = e ? bounded_len(e->name, CANLIN_MODULE_NAME_MAX) : -1;
         if (nl <= 0 || strcmp(e->name, "timer") == 0 || strcmp(e->name, "done") == 0) {
             mlog(m, "event", "dropped: invalid or reserved event name");
@@ -737,21 +800,72 @@ canlin_ui_view *canlin_module_view(canlin_module *m)
     return m ? m->view : NULL;
 }
 
-int canlin_module_input(canlin_module *m, const canlin_ui_input *in)
+static void in_release(void *payload, size_t bytes)
 {
+    (void)bytes;
+    ((in_slot *)payload)->used = 0;
+}
+
+/* Refused ordered edge: everything queued before it is stale, the view is reset when the
+ * latch is consumed (event runtime §5, core API §5.2). */
+static int input_gap(canlin_module *m)
+{
+    m->in_epoch++;
+    canlin_ev_signal(m->ev, m->gen, CANLIN_EV_CTL_INPUT_OVERFLOW);
+    return CANLIN_MODULE_EFULL;
+}
+
+int canlin_module_post_input(canlin_module *m, const canlin_ui_input *in)
+{
+    uint32_t type;
+    unsigned k;
+    in_slot *slot = NULL;
     int rc;
-    canlin_ui_input e;
-    if (m == NULL || m->view == NULL || in == NULL)
+
+    if (m == NULL || m->view == NULL || !canlin_ui_input_valid(in))
         return CANLIN_MODULE_EINVAL;
-    if (m->in_call)
-        return CANLIN_MODULE_EBUSY;
-    e = *in;
-    e.t = canlin_ev_now(m->ev); /* the scheduler's monotonic clock (fake in tests) */
-    rc = canlin_ui_view_input(m->view, &e);
-    if (rc == CANLIN_UI_EINVAL)
-        return CANLIN_MODULE_EINVAL;
-    /* Queued or overflowed (the overflow release still needs a frame): redraw. */
-    if (m->state == CANLIN_MODULE_RUNNING)
-        canlin_ev_invalidate(m->ev, m->gen);
+    if (m->state != CANLIN_MODULE_RUNNING)
+        return CANLIN_MODULE_ESTALE;
+    type = IN_TYPE(m->in_epoch, in->type);
+
+    if (in->type == CANLIN_UI_IN_MOTION) {
+        rc = canlin_ev_post_latest(m->ev, m->gen, CANLIN_MODULE_SOURCE_INPUT, type,
+                                   (int32_t)in->x, (int32_t)in->y);
+        return rc == CANLIN_EV_OK ? CANLIN_MODULE_OK : CANLIN_MODULE_EFULL;
+    }
+    if (in->type == CANLIN_UI_IN_SCROLL) {
+        /* Scroll deltas become a cumulative position so coalescing loses nothing; the
+         * pending (undelivered) amount stays within +-2^30 px. */
+        int64_t pend = (int64_t)(int32_t)(m->scroll_posted - m->scroll_seen) + in->dy;
+        uint32_t next;
+        if (pend > (1 << 30))
+            pend = 1 << 30;
+        if (pend < -(1 << 30))
+            pend = -(1 << 30);
+        next = m->scroll_seen + (uint32_t)(int32_t)pend;
+        rc = canlin_ev_post_latest(m->ev, m->gen, CANLIN_MODULE_SOURCE_INPUT, type,
+                                   (int32_t)next, 0);
+        if (rc != CANLIN_EV_OK)
+            return CANLIN_MODULE_EFULL; /* not an edge: nothing held depends on it */
+        m->scroll_posted = next;
+        return CANLIN_MODULE_OK;
+    }
+
+    for (k = 0; k < CANLIN_EV_MOD_MAX_ITEMS; k++)
+        if (!m->inpool[k].used) {
+            slot = &m->inpool[k];
+            break;
+        }
+    if (slot == NULL)
+        return input_gap(m);
+    slot->in = *in;
+    slot->in.t = canlin_ev_now(m->ev); /* post time: the user's timing, not the queue's */
+    slot->used = 1;
+    rc = canlin_ev_post(m->ev, m->gen, CANLIN_MODULE_SOURCE_INPUT, type, 0, 0, slot,
+                        sizeof *slot, in_release);
+    if (rc != CANLIN_EV_OK) {
+        slot->used = 0;
+        return input_gap(m);
+    }
     return CANLIN_MODULE_OK;
 }

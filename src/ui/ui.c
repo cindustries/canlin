@@ -551,29 +551,39 @@ struct nk_context *canlin_ui_view_nk(canlin_ui_view *v)
 
 /* ---- input ---- */
 
-int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in)
+int canlin_ui_input_valid(const canlin_ui_input *in)
 {
-    if (v == NULL || in == NULL)
-        return CANLIN_UI_EINVAL;
+    if (in == NULL)
+        return 0;
     switch (in->type) {
     case CANLIN_UI_IN_MOTION:
     case CANLIN_UI_IN_BUTTON:
     case CANLIN_UI_IN_SCROLL:
-        break;
+        return 1;
     case CANLIN_UI_IN_KEY:
-        if (in->key < CANLIN_UI_KEY_BACKSPACE || in->key > CANLIN_UI_KEY_CTRL)
-            return CANLIN_UI_EINVAL;
-        break;
+        return in->key >= CANLIN_UI_KEY_BACKSPACE && in->key <= CANLIN_UI_KEY_CTRL;
     case CANLIN_UI_IN_TEXT:
-        if (in->cp > 0x10ffff || (in->cp >= 0xd800 && in->cp <= 0xdfff) || in->cp == 0)
-            return CANLIN_UI_EINVAL;
-        break;
+        return !(in->cp > 0x10ffff || (in->cp >= 0xd800 && in->cp <= 0xdfff) || in->cp == 0);
     default:
-        return CANLIN_UI_EINVAL;
+        return 0;
     }
+}
+
+void canlin_ui_view_input_reset(canlin_ui_view *v)
+{
+    if (v == NULL || v->in_frame)
+        return;
+    v->qhead = v->qn = 0;
+    v->overflow = 1; /* the next frame releases what is held */
+    canlin_ui_graph_state_cancel(v->gstate);
+}
+
+int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in)
+{
+    if (v == NULL || !canlin_ui_input_valid(in))
+        return CANLIN_UI_EINVAL;
     if (v->qn == CANLIN_UI_INPUT_MAX) {
-        v->qhead = v->qn = 0;
-        v->overflow = 1;
+        canlin_ui_view_input_reset(v);
         return CANLIN_UI_EFULL;
     }
     v->q[(v->qhead + v->qn) % CANLIN_UI_INPUT_MAX] = *in;
