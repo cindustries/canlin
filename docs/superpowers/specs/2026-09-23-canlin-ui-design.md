@@ -91,13 +91,13 @@ draw position. A module without a view still gets `draw(ui)`, but every method r
 | `ui:field(label, value [, opts])` | new value | single line; `opts.placeholder`, `opts.max` bytes |
 | `ui:area(label, value [, opts])` | new value | multi-line; `opts.rows` 2–20 |
 | `ui:button(label [, opts])` | `true` once when activated | |
-| `ui:toggle(label, on)` | new boolean | |
+| `ui:toggle(label, on)` | new boolean | 1.25 em framed box, label after one widget gap; whole row is the hit target |
 | `ui:choice(label, options, index)` | new index | options: array of strings; expands inline with touch-height rows |
 | `ui:meter(label, value)` | — | value clamped to 0.0–1.0 |
 | `ui:icon(name)` | — | `icon#<name>` of the module bundle only; raises `unsupported` until the PNG decoder (canlin#23) |
 | `ui:separator()` | — | |
 | `ui:columns(left_fn, right_fn)` | — | see §2; the functions run immediately, in order |
-| `ui:section(title, fn [, opts])` | — | collapsible group, open unless `opts.open == false`; content indented 1 em |
+| `ui:section(title, fn [, opts])` | — | collapsible group, open unless `opts.open == false`; heading-style row with disclosure arrow left (▶/▼), no box, muted bottom rule; content indented 1 em |
 | `ui:graph(graph [, opts])` | array of edits | §5 |
 
 There is no secret/password field for modules: credential entry exists only in trusted
@@ -173,7 +173,9 @@ Hit priority: ports, nodes (topmost first), edges (within 0.5 em), empty canvas.
 The core rejects locally, without producing an edit: connecting output→output or
 input→input, a port to its own node, and an edge that already exists. If both ports
 carry a `type` and the strings differ, the port shows as incompatible during the drag
-and no `connect` edit is produced. Everything else — cycles, fan-in rules, node
+and no `connect` edit is produced. During a drag every port the drop would be rejected
+on is shown incompatible: type clashes, the dragged node's own ports and ports that
+already carry the identical edge. Everything else — cycles, fan-in rules, node
 semantics — is the module's decision.
 
 ### 5.3 Rendering and interaction
@@ -242,7 +244,7 @@ function; widgets read only the resolved theme. Contrast of `text` against both
 
 Resolved font and logo blobs point into the source's memory (libbee mmap/CDB), so a
 key/value source must outlive the theme resolved from it. Strokes are drawn inside
-their rectangle, `[x, x+w)`, so a bordered widget never paints outside its layout box.
+their rectangle, `[x, x+w)`, so a bordered widget never paints outside its layout box. The view background covers its whole rectangle (square corners).
 
 ### 6.3 Fonts
 
