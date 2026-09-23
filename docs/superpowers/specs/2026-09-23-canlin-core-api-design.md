@@ -172,8 +172,19 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
   module event with either name is refused.
 - **First draw:** a successful `init` marks the module dirty. `canlin.*` is usable at
   the top level of `lua#main`, because the generation exists before the chunk runs.
-- **Control latches:** `FAULT` faults and `STOP` stops the module; `INPUT_OVERFLOW`
-  and `CONN_LOST` are consumed without effect until the UI and transport specs use them.
+- **Control latches:** `FAULT` faults and `STOP` stops the module; `CONN_LOST` is
+  consumed without effect until the transport specs use it. `INPUT_OVERFLOW` resets the
+  view's input (below).
+- **Input (canlin#27):** backends call `canlin_module_post_input(m, in)`; nothing feeds a
+  view directly. Motion and scroll are latest-state items (scroll as a running total, so
+  coalescing keeps the distance); button, key and text are ordered items with source
+  `CANLIN_MODULE_SOURCE_INPUT`. Items are stamped with the monotonic time **at post**,
+  so long-press and double-tap do not depend on frame or queue timing. Delivery feeds the
+  view queue and requests a draw; Lua is never entered for input. A refused ordered edge
+  raises `INPUT_OVERFLOW`: the view drops queued input from before the gap (by overflow
+  epoch), releases held buttons/keys and cancels graph gestures without edits. Returns:
+  `CANLIN_MODULE_ESTALE` when the module is not running, `CANLIN_MODULE_EFULL` when the
+  scheduler refused the item.
 - **Stop from inside the module's own callback** is deferred until that callback
   returns; reload from inside it fails with `CANLIN_MODULE_EBUSY`.
 - **Reload failure:** if the new sandbox or generation cannot be created, the old
