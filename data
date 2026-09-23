@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T04:10:25Z
+id: 28
+priority: low
+status: backlog
+tags:
+- ui
+- spec
+title: 'Decide: button trigger on press vs release; frame after draw error'
+updated: 2026-09-23T04:10:25Z
+---
+
+Nuklear default is press; touch prefers release (changes nk.h flag set). After draw raises: partial frame vs last good frame. From canlin#18.
