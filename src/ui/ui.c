@@ -1149,7 +1149,10 @@ static float text_w(const struct nk_user_font *f, const char *s, size_t len)
     return len ? f->width(f->userdata, f->height, s, (int)len) : 0.0f;
 }
 
-/* Single-line label: fits s into avail px, else a prefix plus "..." (v->lbl). Returns the
+/* U+2026 in UTF-8: 3 bytes, like the "..." it replaced (the built-in font has it, canlin#22). */
+#define ELLIPSIS "\xE2\x80\xA6"
+
+/* Single-line label: fits s into avail px, else a prefix plus U+2026 (v->lbl). Returns the
  * shown byte count of s in *shown; out and outlen are what to draw. */
 static int ellipsize(canlin_ui_view *v, const struct nk_user_font *f, const char *s,
                      size_t len, float avail, const char **out, size_t *outlen, size_t *shown)
@@ -1162,7 +1165,7 @@ static int ellipsize(canlin_ui_view *v, const struct nk_user_font *f, const char
         *shown = len;
         return 0;
     }
-    dots = text_w(f, "...", 3);
+    dots = text_w(f, ELLIPSIS, 3);
     while (i < len) {
         size_t n = cp_len(s + i, len - i);
         float cw = text_w(f, s + i, n);
@@ -1172,7 +1175,7 @@ static int ellipsize(canlin_ui_view *v, const struct nk_user_font *f, const char
         i += n;
     }
     memcpy(v->lbl, s, i);
-    memcpy(v->lbl + i, "...", 3);
+    memcpy(v->lbl + i, ELLIPSIS, 3);
     *out = v->lbl;
     *outlen = i + 3;
     *shown = i;

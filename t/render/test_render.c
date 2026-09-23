@@ -288,17 +288,125 @@ static void test_text(void)
     CHECK(count_lit() > 0 && count_lit() < n, "scissor halves the text");
     CHECK(lit_inside(0, 0, 6 + (int)(tw / 2), H), "text clipped by scissor");
 
-    /* U+20AC is outside the baked range: Nuklear's fallback glyph ('?'), no crash.
-     * UI spec §6.3 wants a replacement box; that is a font-level follow-up. */
+    /* U+4E2D is outside the built-in font: the replacement box, no crash (the box shape
+     * itself is checked in test_builtin_font). */
     fresh();
     canlin_render_set_atlas(&R, F.alpha, F.w, F.h);
-    memcpy(u.t.string, "\xE2\x82\xAC", 3);
+    memcpy(u.t.string, "\xE4\xB8\xAD", 3);
     u.t.length = 3;
     canlin_render_command(&R, &u.t.header);
     CHECK(count_lit() > 0, "missing glyph draws the fallback");
     memcpy(u.t.string, "A\xFF", 2);     /* invalid UTF-8 stops, never overreads */
     u.t.length = 2;
     canlin_render_command(&R, &u.t.header);
+}
+
+/* Built-in font (canlin#22, UI spec §6.3) at 16/24/32 px, in its own larger buffer. */
+#define BW 160
+#define BH 64
+static unsigned char bpx[BW * BH * 3];
+
+/* Draws s at (4, 8) with font f, white on black. Returns the lit pixel count, sets the
+ * lit bounding box (inclusive) and, if hist is given, a 256-bin red-channel histogram. */
+static int draw_builtin(const canlin_render_font *f, const char *s, int *bx0, int *by0,
+                        int *bx1, int *by1, int *hist)
+{
+    union { struct nk_command_text t; char raw[sizeof(struct nk_command_text) + 32]; } u;
+    canlin_render r;
+    int x, y, n = 0, len = (int)strlen(s);
+    memset(&u, 0, sizeof u);
+    u.t.header.type = NK_COMMAND_TEXT;
+    u.t.font = &f->font->handle;
+    u.t.foreground.r = u.t.foreground.g = u.t.foreground.b = u.t.foreground.a = 255;
+    u.t.x = 4; u.t.y = 8;
+    u.t.height = f->font->handle.height;
+    u.t.length = len;
+    memcpy(u.t.string, s, (size_t)len);
+    u.t.w = BW; u.t.h = BH;
+    CHECK(canlin_render_init(&r, bpx, BW, BH, BW * 3, NULL, NULL) == 0, "init");
+    canlin_render_clear(&r, BG);
+    canlin_render_set_atlas(&r, f->alpha, f->w, f->h);
+    canlin_render_command(&r, &u.t.header);
+    *bx0 = BW; *by0 = BH; *bx1 = -1; *by1 = -1;
+    if (hist)
+        memset(hist, 0, 256 * sizeof *hist);
+    for (y = 0; y < BH; y++)
+        for (x = 0; x < BW; x++) {
+            unsigned char v = bpx[((size_t)y * BW + (size_t)x) * 3];
+            if (hist)
+                hist[v]++;
+            if (!v)
+                continue;
+            n++;
+            if (x < *bx0) *bx0 = x;
+            if (x > *bx1) *bx1 = x;
+            if (y < *by0) *by0 = y;
+            if (y > *by1) *by1 = y;
+        }
+    return n;
+}
+
+static unsigned char bat(int x, int y)
+{
+    return bpx[((size_t)y * BW + (size_t)x) * 3];
+}
+
+static void test_builtin_font(void)
+{
+    static const float sizes[] = { 16.0f, 24.0f, 32.0f };
+    /* U+00E4 U+00F6 U+00FC U+00DF U+00C4 U+00D6 U+00DC U+20AC U+2026 U+2013 U+25B6 U+0141 */
+    static const char *const have[] = {
+        "\xC3\xA4", "\xC3\xB6", "\xC3\xBC", "\xC3\x9F", "\xC3\x84", "\xC3\x96", "\xC3\x9C",
+        "\xE2\x82\xAC", "\xE2\x80\xA6", "\xE2\x80\x93", "\xE2\x96\xB6", "\xC5\x81" };
+    size_t k, i;
+    for (k = 0; k < sizeof sizes / sizeof sizes[0]; k++) {
+        canlin_render_font f;
+        int hist[256], levels = 0, n, x0, y0, x1, y1, q, b[4], v;
+        const struct nk_font_glyph *fb;
+        if (canlin_render_font_default(&f, sizes[k]) != 0) {
+            CHECK(0, "bake %.0f px", sizes[k]);
+            continue;
+        }
+        /* anti-aliased: glyph edges carry intermediate coverage, not just on/off */
+        n = draw_builtin(&f, "Sag", &x0, &y0, &x1, &y1, hist);
+        for (v = 1; v < 255; v++)
+            levels += hist[v] > 0;
+        CHECK(n > 0 && levels > 2, "%.0f px: %d intermediate coverage levels", sizes[k], levels);
+        /* ink height follows the size ('S' top to 'g' bottom is about 0.95 em) */
+        CHECK(y1 - y0 + 1 >= (int)(0.75f * sizes[k]) && y1 - y0 + 1 <= (int)sizes[k] + 1,
+              "%.0f px: ink height %d", sizes[k], y1 - y0 + 1);
+
+        /* the replacement box is U+25A1, never '?' */
+        fb = nk_font_find_glyph(f.font, 0x25A1);
+        CHECK(fb && f.font->fallback == fb && f.font->fallback_codepoint == 0x25A1,
+              "%.0f px: fallback is U+25A1", sizes[k]);
+        CHECK(nk_font_find_glyph(f.font, 0x4E2D) == fb, "%.0f px: CJK maps to the box", sizes[k]);
+        CHECK(nk_font_find_glyph(f.font, '?') != fb, "%.0f px: '?' is its own glyph", sizes[k]);
+        /* drawn: hollow (centre unlit), all four sides lit, not what '?' draws */
+        n = draw_builtin(&f, "\xE4\xB8\xAD", &b[0], &b[1], &b[2], &b[3], NULL);
+        CHECK(n > 0 && b[2] - b[0] >= 4 && b[3] - b[1] >= 4, "%.0f px: box drawn %dx%d",
+              sizes[k], b[2] - b[0] + 1, b[3] - b[1] + 1);
+        if (n > 0) {
+            int cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+            CHECK(bat(cx, cy) == 0, "%.0f px: box is hollow", sizes[k]);
+            CHECK(bat(b[0], cy) && bat(b[2], cy) && bat(cx, b[1]) && bat(cx, b[3]),
+                  "%.0f px: box has four sides", sizes[k]);
+            q = draw_builtin(&f, "?", &x0, &y0, &x1, &y1, NULL);
+            CHECK(q > 0 && (q != n || x0 != b[0] || x1 != b[2] || y0 != b[1] || y1 != b[3]),
+                  "%.0f px: box differs from '?'", sizes[k]);
+        }
+
+        /* umlauts, sharp s, euro, ellipsis, dash, triangle, Latin Extended-A: own glyphs */
+        for (i = 0; i < sizeof have / sizeof have[0]; i++) {
+            nk_rune cp = 0;
+            nk_utf_decode(have[i], &cp, (int)strlen(have[i]));
+            CHECK(nk_font_find_glyph(f.font, cp) != fb, "%.0f px: U+%04X has a glyph",
+                  sizes[k], (unsigned)cp);
+            CHECK(draw_builtin(&f, have[i], &x0, &y0, &x1, &y1, NULL) > 0,
+                  "%.0f px: U+%04X draws ink", sizes[k], (unsigned)cp);
+        }
+        canlin_render_font_free(&f);
+    }
 }
 
 static void test_atlas_image(void)
@@ -416,6 +524,7 @@ int main(void)
     test_curve();
     test_alpha();
     test_text();
+    test_builtin_font();
     test_atlas_image();
     test_dirty_rows();
     test_nuklear_frame();

@@ -267,7 +267,7 @@ typedef enum canlin_ui_part {
 
 typedef struct canlin_ui_rect {
     unsigned char kind, part;
-    unsigned char ellipsized;  /* LABEL: text was shortened with "..." */
+    unsigned char ellipsized;  /* LABEL: text was shortened with U+2026 */
     unsigned short widget;     /* ordinal of the widget in the draw, from 0 */
     int x, y, w, h;            /* screen px, after rounding and scrolling */
     uint32_t off, len;         /* LINE/LABEL: byte range of the source string shown */

@@ -88,7 +88,8 @@ typedef struct canlin_theme {
     unsigned char from[CANLIN_THEME_KEYS]; /* source index, or CANLIN_THEME_FROM_BUILTIN */
 } canlin_theme;
 
-/* The built-in theme (placeholder colours; ProggyClean as the font, see render.h). */
+/* The built-in theme (placeholder colours; the built-in DejaVu Sans subset as the font,
+ * see render.h). */
 void canlin_theme_builtin(canlin_theme *t);
 
 /* Resolves every key through srcs[0..n) then the built-in theme. n <= 254; extra

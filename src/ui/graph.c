@@ -868,7 +868,10 @@ static float text_w(const struct nk_user_font *f, const char *s, size_t len)
     return len ? f->width(f->userdata, f->height, s, (int)len) : 0.0f;
 }
 
-/* Single-line label ending in "..." when too wide (spec §2); returns the width drawn. */
+/* U+2026 in UTF-8: 3 bytes, like the "..." it replaced (the built-in font has it, canlin#22). */
+#define ELLIPSIS "\xE2\x80\xA6"
+
+/* Single-line label ending in U+2026 when too wide (spec §2); returns the width drawn. */
 static float draw_label(struct nk_command_buffer *out, const struct nk_user_font *f,
                         const char *s, size_t len, float x, float cy, float avail, int right,
                         struct nk_color col)
@@ -879,7 +882,7 @@ static float draw_label(struct nk_command_buffer *out, const struct nk_user_font
         return 0;
     w = text_w(f, s, len);
     if (w > avail) {
-        float dots = text_w(f, "...", 3), acc = 0;
+        float dots = text_w(f, ELLIPSIS, 3), acc = 0;
         size_t i = 0;
         while (i < len) {
             size_t n = cp_len(s + i, len - i);
@@ -890,7 +893,7 @@ static float draw_label(struct nk_command_buffer *out, const struct nk_user_font
             i += n;
         }
         memcpy(buf, s, i);
-        memcpy(buf + i, "...", 3);
+        memcpy(buf + i, ELLIPSIS, 3);
         s = buf;
         len = i + 3;
         w = acc + dots;

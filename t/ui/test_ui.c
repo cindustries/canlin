@@ -1314,7 +1314,20 @@ static void test_toggle_geometry(void)
                     }
             CHECK(lx0 < lx1);
             gaps[k] = lx0 - (bx + bs);
-            CHECK(gaps[k] >= (int)(2.0f * unit) && gaps[k] <= (int)(2.0f * unit + 0.25f * em));
+            /* canlin#22: the lower bound allows the label's first glyph to start left of
+             * its pen origin (negative left bearing; DejaVu 'T' has x0 = -1 px), taken
+             * from the baked font instead of assuming ProggyClean's x0 = 0. */
+            {
+                canlin_render_font tf;
+                int lsb = 0;
+                if (canlin_render_font_default(&tf, em) == 0) {
+                    float x0 = nk_font_find_glyph(tf.font, 'T')->x0;
+                    lsb = x0 < 0.0f ? (int)(x0 - 0.999f) : 0;
+                    canlin_render_font_free(&tf);
+                }
+                CHECK(gaps[k] >= (int)(2.0f * unit) + lsb &&
+                      gaps[k] <= (int)(2.0f * unit + 0.25f * em));
+            }
             /* the hit target covers box and label */
             CHECK(r->x <= bx && r->x + r->w > lx1 && r->y <= by && r->y + r->h >= by + bs);
             /* a click on the label (not the box) toggles; the cursor shows in accent */
