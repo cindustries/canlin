@@ -156,6 +156,27 @@ operator-enabled local override) is decided by the loader, not by this seam.
 `canlin_module_deliver` is the only path into Lua, and it runs only from
 `canlin_ev_turn`, so the no-nesting rule of the event runtime holds by construction.
 
+Recorded from the canlin#9 implementation (`include/canlin/module.h`):
+
+- **Payloads** are a core-owned value tree `canlin_value` (nil, bool, integer, byte
+  string, table with integer or string keys). An operation result is
+  `canlin_module_result {value | code, message}`; a module event is
+  `canlin_module_event {name, value}`. `CANLIN_MARSHAL_*` apply to the result value,
+  not to the `{handle, ok, …}` wrapper; `canlin_value_check` lets a producer check
+  before completing. A failure with an unknown or missing code arrives as `unavailable`.
+- **Reserved event names:** `"timer"` and `"done"` only come from the core; posting a
+  module event with either name is refused.
+- **First draw:** a successful `init` marks the module dirty. `canlin.*` is usable at
+  the top level of `lua#main`, because the generation exists before the chunk runs.
+- **Control latches:** `FAULT` faults and `STOP` stops the module; `INPUT_OVERFLOW`
+  and `CONN_LOST` are consumed without effect until the UI and transport specs use them.
+- **Stop from inside the module's own callback** is deferred until that callback
+  returns; reload from inside it fails with `CANLIN_MODULE_EBUSY`.
+- **Reload failure:** if the new sandbox or generation cannot be created, the old
+  generation keeps running. Once the old one is retired, a failing `lua#main` or `init`
+  leaves the module faulted without a generation — there is no rollback in v1. A staged
+  reload (start new, then retire old) is an open decision (canlin#16).
+
 ## 7. Numeric budgets
 
 Initial values for the v1 slice, sized for the 1 GB P2 floor and to be re-measured on
@@ -171,6 +192,8 @@ raise, a value beyond its maximum.
 | `CANLIN_EV_PROC_MAX_BYTES` | 4 MiB | 16 MiB | |
 | `CANLIN_EV_MOD_MAX_OPS` | 32 | 128 | timers included |
 | `CANLIN_EV_MOD_MAX_TIMERS` | 16 | 64 | |
+| `CANLIN_EV_PROC_MAX_OPS` | 256 | — | half the sum of module op limits |
+| `CANLIN_EV_PROC_MAX_TIMERS` | 128 | — | |
 | `CANLIN_EV_TURN_MAX_DISPATCH` | 16 | — | callbacks per turn |
 | `CANLIN_EV_TURN_MAX_PER_MODULE` | 4 | — | queued items per module per turn |
 | `CANLIN_TIMER_MAX_MS` | 24 h | — | longer waits rearm |
