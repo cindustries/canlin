@@ -162,7 +162,7 @@ The dialects talk to a transport interface: open a streaming POST/GET with heade
 body, receive status, headers and body chunks as scheduler events, close/cancel. Three
 implementations: a **fixture transport** for tests (scripted responses, arbitrary chunk
 splits, faults), the **native** HTTP/1.1 client over nonblocking sockets and mbedtls
-(own spec/ticket: DNS, TLS verification, chunked encoding, redirects), and the
+([HTTP transport design](2026-09-23-canlin-http-transport-design.md), canlin#41), and the
 **browser** Fetch/Streams adapter. Dialects are tested completely against the fixture
 transport before any network exists.
 
