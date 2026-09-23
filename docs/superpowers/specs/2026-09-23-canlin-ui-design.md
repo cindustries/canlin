@@ -55,8 +55,12 @@ keeps display metrics as process-wide or theme-wide state.
   a scaled-up view on a small output falls back to one column instead of clipping.
 - **Changing scale or DPI** (setting changed, SDL window moved to a display with other
   DPI) re-lays out and invalidates every view on that output. Fonts are baked once per
-  distinct pixel size; at most `CANLIN_UI_FONT_SIZES_MAX` sizes are held, least recently
-  used ones are released. No continuous scaling, and no per-module or per-section scale:
+  distinct em pixel size (one atlas per size, holding body and both heading sizes);
+  at most `CANLIN_UI_FONT_SIZES_MAX` sizes are held, least recently used unpinned ones
+  are released. A view pins its size while its last command list may still be
+  rendered. If every slot is pinned and a view needs a new size, that draw is skipped
+  with a log line (`EFONT`), the previous frame stays, Lua is not called and no module
+  error is counted. No continuous scaling, and no per-module or per-section scale:
   modules must look consistent and cannot shrink touch targets below 2.5 em.
 - **v1 drives one output.** The API is shaped for several; running them is follow-up
   canlin#25:
@@ -291,6 +295,8 @@ Initial values, in `include/canlin/ui_limits.h`, to be checked on P2 hardware:
 | `CANLIN_THEME_FONT_MAX` | 2 MiB | per font blob |
 | `CANLIN_THEME_LOGO_MAX` | 256 KiB | |
 | `CANLIN_UI_FONT_SIZES_MAX` | 4 | baked font pixel sizes held at once |
+| `CANLIN_UI_DPI_MIN` / `_MAX` | 0.5 / 4.0 | output DPI factor; outside is rejected |
+| `CANLIN_UI_OUTPUT_ID_MAX` | 63 B | stable output identity |
 
 ## 9. Rendering path
 
