@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T18:19:30Z
+id: 63
+priority: low
+status: backlog
+tags:
+- net
+- p2
+title: 'Runtime images: drop MBEDTLS_SSL_SRV_C; measure P2 handshake + CA bundle parse'
+updated: 2026-09-23T18:19:30Z
+---
+
+HTTP spec §5. Only then consider asm, curves or keep-alive. Also test SNI with an IP-literal host.
