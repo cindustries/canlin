@@ -80,11 +80,16 @@ typedef struct canlin_module_result {
 #define CANLIN_MODULE_SOURCE_INPUT 0x494e5054u
 
 typedef struct canlin_module_event {
-    const char *name;           /* NUL-terminated, at most CANLIN_MODULE_NAME_MAX bytes */
+    /* NUL-terminated, at most CANLIN_MODULE_NAME_MAX bytes. The producer owns the payload
+     * until release and may retract a queued event by setting name to "": it is then
+     * dropped silently without entering Lua (a cancelled stream, LLM providers §4). */
+    const char *name;
     const canlin_value *value;  /* payload; NULL = nil */
 } canlin_module_event;
 
 /* ---- module lifecycle (spec §6) ---- */
+
+typedef struct canlin_module canlin_module;
 
 typedef struct canlin_module_source {
     const char *name;                  /* NUL-terminated, <= CANLIN_MODULE_NAME_MAX */
@@ -93,9 +98,13 @@ typedef struct canlin_module_source {
     size_t main_len;
     canlin_sandbox_require_fn require; /* may be NULL; must outlive the generation */
     void *require_ud;
+    /* Trusted, set only by the loader of the built-in assistant, never from bundle data:
+     * called while `canlin` is installed (the table on top of the stack) to add the
+     * assistant-only API, i.e. canlin_llm_install (LLM providers §4). NULL for every
+     * other module, which then sees no canlin.llm. */
+    int (*assistant)(struct lua_State *L, canlin_module *m, void *ud);
+    void *assistant_ud;
 } canlin_module_source;
-
-typedef struct canlin_module canlin_module;
 
 typedef enum canlin_module_state {
     CANLIN_MODULE_RUNNING = 0,

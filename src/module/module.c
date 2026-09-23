@@ -36,6 +36,8 @@ struct canlin_module {
     void *log_ud;
     canlin_sandbox_require_fn require;
     void *require_ud;
+    int (*assistant)(lua_State *L, canlin_module *m, void *ud); /* trusted: canlin.llm */
+    void *assistant_ud;
     char name[CANLIN_MODULE_NAME_MAX + 1];
     char version[CANLIN_MODULE_NAME_MAX + 1];
     char errmsg[CANLIN_MODULE_NAME_MAX + 320];
@@ -304,6 +306,8 @@ static int install_api(lua_State *L, void *ud)
     lua_createtable(L, 0, 1);
     set_fn(L, m, "now", l_now);
     lua_setfield(L, -2, "sys");
+    if (m->assistant) /* built-in assistant only (LLM providers §4) */
+        m->assistant(L, m, m->assistant_ud);
     lua_setglobal(L, "canlin");
     return 0;
 }
@@ -444,6 +448,8 @@ static int copy_meta(canlin_module *m, const canlin_module_source *src)
     memcpy(m->version, src->version ? src->version : "", (size_t)vl + 1);
     m->require = src->require;
     m->require_ud = src->require_ud;
+    m->assistant = src->assistant;
+    m->assistant_ud = src->assistant_ud;
     return CANLIN_MODULE_OK;
 }
 
@@ -695,7 +701,9 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         if (d->source != CANLIN_MODULE_SOURCE_EVENT)
             return CANLIN_SANDBOX_OK; /* other sources are consumed by the core */
         nl = e ? bounded_len(e->name, CANLIN_MODULE_NAME_MAX) : -1;
-        if (nl <= 0 || strcmp(e->name, "timer") == 0 || strcmp(e->name, "done") == 0) {
+        if (nl == 0)
+            return CANLIN_SANDBOX_OK; /* retracted by its producer (module.h) */
+        if (nl < 0 || strcmp(e->name, "timer") == 0 || strcmp(e->name, "done") == 0) {
             mlog(m, "event", "dropped: invalid or reserved event name");
             return CANLIN_SANDBOX_OK;
         }
