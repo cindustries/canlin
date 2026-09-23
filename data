@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T04:31:19Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T03:36:47Z
+id: 19
+priority: high
+started: 2026-09-23T04:12:32Z
+status: review
+tags:
+- ui
+- graph
+title: 'UI step 3: graph editor widget'
+updated: 2026-09-23T04:31:19Z
+---
+
+UI spec §5, §11.3. Reference: Nuklear demo/common/node_editor.c. No zoom in v1.
+
+Merged 4777e80. 9001 graph checks, host + ASan/UBSan green, 6 mutants caught. i686 skipped; 256 nodes/1024 edges unmeasured on P2. Choices recorded in UI spec §5.2.
