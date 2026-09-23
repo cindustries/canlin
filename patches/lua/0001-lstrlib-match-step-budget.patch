@@ -1,0 +1,121 @@
+CanLin: charge Lua pattern-matching work to the sandbox budget.
+
+Applies to: Lua 5.4.9 src/lstrlib.c (third_party/lua), exact context (-F0).
+Hook: void canlin_lstr_charge(lua_State *L, size_t steps), src/sandbox/sandbox.c.
+See patches/lua/README.
+
+--- a/src/lstrlib.c
++++ b/src/lstrlib.c
+@@ -355,6 +355,18 @@
+ #define CAP_POSITION	(-2)
+
+
++/* CanLin: matching work is reported to the embedding host in chunks of at
++** least CANLIN_LSTR_CHUNK steps. canlin_lstr_charge may raise an error
++** (and then does not return). See patches/lua/README in the CanLin tree. */
++#define CANLIN_LSTR_CHUNK	256
++void canlin_lstr_charge (lua_State *L, size_t steps);
++#define ms_charge(ms,n) \
++  { (ms)->steps += (n); \
++    if (l_unlikely((ms)->steps >= CANLIN_LSTR_CHUNK)) { \
++      size_t st_ = (ms)->steps; (ms)->steps = 0; \
++      canlin_lstr_charge((ms)->L, st_); } }
++
++
+ typedef struct MatchState {
+   const char *src_init;  /* init of source string */
+   const char *src_end;  /* end ('\0') of source string */
+@@ -362,6 +374,7 @@
+   lua_State *L;
+   int matchdepth;  /* control for recursive depth (to avoid C stack overflow) */
+   unsigned char level;  /* total number of captures (finished or unfinished) */
++  size_t steps;  /* CanLin: work not yet charged to the host */
+   struct {
+     const char *init;
+     ptrdiff_t len;
+@@ -493,6 +506,7 @@
+     int e = *(p+1);
+     int cont = 1;
+     while (++s < ms->src_end) {
++      ms_charge(ms, 1);
+       if (*s == e) {
+         if (--cont == 0) return s+1;
+       }
+@@ -506,8 +520,10 @@
+ static const char *max_expand (MatchState *ms, const char *s,
+                                  const char *p, const char *ep) {
+   ptrdiff_t i = 0;  /* counts maximum expand for item */
+-  while (singlematch(ms, s + i, p, ep))
++  while (singlematch(ms, s + i, p, ep)) {
++    ms_charge(ms, 1);
+     i++;
++  }
+   /* keeps trying to match with the maximum repetitions */
+   while (i>=0) {
+     const char *res = match(ms, (s+i), ep+1);
+@@ -521,7 +537,9 @@
+ static const char *min_expand (MatchState *ms, const char *s,
+                                  const char *p, const char *ep) {
+   for (;;) {
+-    const char *res = match(ms, s, ep+1);
++    const char *res;
++    ms_charge(ms, 1);
++    res = match(ms, s, ep+1);
+     if (res != NULL)
+       return res;
+     else if (singlematch(ms, s, p, ep))
+@@ -560,6 +578,7 @@
+   size_t len;
+   l = check_capture(ms, l);
+   len = ms->capture[l].len;
++  ms_charge(ms, len);
+   if ((size_t)(ms->src_end-s) >= len &&
+       memcmp(ms->capture[l].init, s, len) == 0)
+     return s+len;
+@@ -571,6 +590,7 @@
+   if (l_unlikely(ms->matchdepth-- == 0))
+     luaL_error(ms->L, "pattern too complex");
+   init: /* using goto to optimize tail recursion */
++  ms_charge(ms, 1);
+   if (p != ms->p_end) {  /* end of pattern? */
+     switch (*p) {
+       case '(': {  /* start capture */
+@@ -670,8 +690,9 @@
+
+
+
+-static const char *lmemfind (const char *s1, size_t l1,
++static const char *lmemfind (lua_State *L, const char *s1, size_t l1,
+                                const char *s2, size_t l2) {
++  size_t steps = 0;  /* CanLin: bytes compared, not yet charged */
+   if (l2 == 0) return s1;  /* empty strings are everywhere */
+   else if (l2 > l1) return NULL;  /* avoids a negative 'l1' */
+   else {
+@@ -680,6 +701,10 @@
+     l1 = l1-l2;  /* 's2' cannot be found after that */
+     while (l1 > 0 && (init = (const char *)memchr(s1, *s2, l1)) != NULL) {
+       init++;   /* 1st char is already checked */
++      steps += 1 + l2;
++      if (l_unlikely(steps >= CANLIN_LSTR_CHUNK)) {
++        canlin_lstr_charge(L, steps); steps = 0;
++      }
+       if (memcmp(init, s2+1, l2) == 0)
+         return init-1;
+       else {  /* correct 'l1' and 's1' to try again */
+@@ -760,6 +785,7 @@
+   ms->src_init = s;
+   ms->src_end = s + ls;
+   ms->p_end = p + lp;
++  ms->steps = 0;
+ }
+
+
+@@ -781,7 +807,7 @@
+   /* explicit request or no special characters? */
+   if (find && (lua_toboolean(L, 4) || nospecials(p, lp))) {
+     /* do a plain search */
+-    const char *s2 = lmemfind(s + init, ls - init, p, lp);
++    const char *s2 = lmemfind(L, s + init, ls - init, p, lp);
+     if (s2) {
+       lua_pushinteger(L, (s2 - s) + 1);
+       lua_pushinteger(L, (s2 - s) + lp);

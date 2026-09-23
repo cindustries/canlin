@@ -1,0 +1,34 @@
+Patches applied to vendored PUC Lua at build time
+=================================================
+
+third_party/lua stays byte-identical to the upstream release tarball. mk/lua.mk
+copies the affected source into $(BUILD)/patched/lua, applies the patch there
+with `patch -F0` (exact context, no fuzz) and compiles the copy instead of the
+original. If a patch does not apply, the build fails; it never falls back to
+the unpatched file.
+
+Applies to: Lua 5.4.9 (third_party/lua/src). Re-check every patch on each Lua
+upgrade: a clean apply is necessary, not sufficient. New loops over the subject
+or pattern in lstrlib.c must be charged as well, and the sandbox tests in
+t/sandbox (test_patterns) must still fault within budget.
+
+0001-lstrlib-match-step-budget.patch
+    Why: Lua pattern matching (string.find/match/gmatch/gsub) runs entirely in
+    C, where the sandbox count hook never fires; a backtracking pattern such as
+    ('a-'):rep(12) .. 'b' over a 20000-byte subject runs practically forever and
+    would block the owner thread. Ticket canlin#7; the owner decided to keep
+    lstrlib and add a step counter rather than replace the matcher.
+    What: a per-MatchState step counter, incremented on every match() entry and
+    tail-iteration, in max_expand/min_expand, the %b scan, back-reference
+    comparisons (by compared length) and the plain-find candidate loop (by
+    needle length). Every CANLIN_LSTR_CHUNK (256) steps the counter is passed
+    to the host hook
+        void canlin_lstr_charge(lua_State *L, size_t steps);
+    defined in src/sandbox/sandbox.c. It charges the callback budget and raises
+    the sandbox's sticky, uncatchable fault when the budget is exceeded; it
+    ignores Lua states not created by the sandbox. gsub/gmatch loops across the
+    subject are covered because each position enters match().
+    Not covered: work below one chunk per call (bounded by 255 steps and
+    accounted for by the calling VM instructions), luaL_Buffer copies of gsub
+    output (bounded by the memory limit), and nospecials()'s strpbrk scan of the
+    pattern (linear in the pattern length).

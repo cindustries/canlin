@@ -7,6 +7,10 @@
  * table, math, utf8 and a host-resolved require. No os, io, package, debug,
  * coroutine, dofile, loadfile or warn. Chunks load in text mode only.
  *
+ * The per-callback budget counts VM instructions plus charged native work:
+ * pattern matching and size-proportional string/table/load calls (factors in
+ * sandbox_limits.h).
+ *
  * A scope that exceeds its instruction budget or memory limit is FAULTED:
  * Lua code cannot catch the fault (pcall/xpcall/message handlers re-raise it),
  * the state is closed and every later call returns CANLIN_SANDBOX_DEAD
