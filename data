@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-09-23T05:40:24Z
+id: 49
+priority: low
+status: backlog
+tags:
+- shell
+title: 'Shell: show failed reload of a running module'
+updated: 2026-09-23T05:40:24Z
+---
+
+canlin_module_reload_error available. From canlin#16.
