@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-23T04:10:24Z
+id: 25
+priority: medium
+status: backlog
+tags:
+- ui
+- shell
+- platform
+title: Multiple outputs (multi-monitor)
+updated: 2026-09-23T04:10:24Z
+---
+
+UI spec §2.1: shell assigns views to outputs, per-output pointer coords, one focus owner, SDL one window per output; rawfb multi-head needs canlin-os kernel/driver decision first; browser/mobile single output.
