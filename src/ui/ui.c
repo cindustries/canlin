@@ -49,6 +49,11 @@ struct canlin_ui_output {
     canlin_ui_view *views;    /* bound views, linked through onext */
 };
 
+typedef struct focus_ent {
+    uint64_t id;
+    unsigned char kind;       /* canlin_ui_kind */
+} focus_ent;
+
 typedef struct slot {
     uint64_t id;
     uint32_t frame;          /* frame that last used this identity */
@@ -77,7 +82,17 @@ struct canlin_ui_view {
     int overflow;
     unsigned btn_down;        /* bit per canlin_ui_button held */
     int last_x, last_y;
-    unsigned char key_down[CANLIN_UI_KEY_CTRL + 1];
+    unsigned char key_down[CANLIN_UI_KEY_LAST + 1];
+    unsigned kpress;          /* bit per canlin_ui_key pressed in this frame's input */
+    int space_in, press_in;   /* this frame's input: text U+0020, a primary press */
+
+    /* Keyboard focus order (canlin#26): focusable widgets of the open frame and of the
+     * last finished one, in draw order. */
+    focus_ent order[CANLIN_UI_MAX_WIDGETS], order_prev[CANLIN_UI_MAX_WIDGETS];
+    unsigned norder, norder_prev;
+    int focus_kbd;            /* focus came from the keyboard: show the mark */
+    int focus_pass;           /* Esc: the focused graph no longer takes Tab/Del */
+    int tab_used;             /* this frame's Tab moved the focus (not the graph's) */
 
     float scroll;
     int content_h;
@@ -589,6 +604,8 @@ void canlin_ui_view_reset(canlin_ui_view *v)
     v->scroll = 0;
     v->content_h = 0;
     v->focus = 0;
+    v->focus_kbd = v->focus_pass = 0;
+    v->norder_prev = 0;
     v->nrec = 0;
     v->rec_over = 0;
     memset(v->gstate, 0, sizeof v->gstate);
@@ -612,7 +629,7 @@ int canlin_ui_input_valid(const canlin_ui_input *in)
     case CANLIN_UI_IN_BUTTON:
         return in->button >= CANLIN_UI_BUTTON_PRIMARY && in->button <= CANLIN_UI_BUTTON_MIDDLE;
     case CANLIN_UI_IN_KEY:
-        return in->key >= CANLIN_UI_KEY_BACKSPACE && in->key <= CANLIN_UI_KEY_CTRL;
+        return in->key >= CANLIN_UI_KEY_BACKSPACE && in->key <= CANLIN_UI_KEY_LAST;
     case CANLIN_UI_IN_TEXT:
         return !(in->cp > 0x10ffff || (in->cp >= 0xd800 && in->cp <= 0xdfff) || in->cp == 0);
     default:
@@ -688,14 +705,16 @@ static void apply_input(canlin_ui_view *v)
     enum { G_NONE, G_BUTTON, G_KEY, G_TEXT } group = G_NONE;
     int text_bytes = 0, k;
 
+    v->kpress = 0;
+    v->space_in = v->press_in = 0;
     nk_input_begin(ctx);
     if (v->overflow) {
         /* Edges were lost: release what is held so no interaction stays stuck. */
         for (k = CANLIN_UI_BUTTON_PRIMARY; k <= CANLIN_UI_BUTTON_MIDDLE; k++)
             if (v->btn_down & (1u << k))
                 nk_input_button(ctx, nk_button_of(k), v->last_x, v->last_y, 0);
-        for (k = CANLIN_UI_KEY_BACKSPACE; k <= CANLIN_UI_KEY_CTRL; k++)
-            if (v->key_down[k])
+        for (k = CANLIN_UI_KEY_BACKSPACE; k <= CANLIN_UI_KEY_LAST; k++)
+            if (v->key_down[k] && nk_key_of(k) != NK_KEY_NONE)
                 nk_input_key(ctx, nk_key_of(k), 0);
         memset(v->key_down, 0, sizeof v->key_down);
         v->btn_down = 0;
@@ -722,6 +741,8 @@ static void apply_input(canlin_ui_view *v)
             nk_input_button(ctx, nk_button_of(e->button), e->x, e->y, e->down ? 1 : 0);
             v->last_x = e->x;
             v->last_y = e->y;
+            if (e->down && e->button == CANLIN_UI_BUTTON_PRIMARY)
+                v->press_in = 1;
             if (e->down)
                 v->btn_down |= 1u << e->button;
             else
@@ -730,8 +751,11 @@ static void apply_input(canlin_ui_view *v)
             group = G_BUTTON;
             break;
         case CANLIN_UI_IN_KEY:
-            nk_input_key(ctx, nk_key_of(e->key), e->down ? 1 : 0);
+            if (nk_key_of(e->key) != NK_KEY_NONE)
+                nk_input_key(ctx, nk_key_of(e->key), e->down ? 1 : 0);
             v->key_down[e->key] = e->down != 0;
+            if (e->down)
+                v->kpress |= 1u << e->key;
             group = G_KEY;
             break;
         case CANLIN_UI_IN_TEXT:
@@ -739,6 +763,8 @@ static void apply_input(canlin_ui_view *v)
                 goto done; /* Nuklear's per-frame text buffer is full */
             text_bytes += utf8_bytes(e->cp);
             nk_input_unicode(ctx, (nk_rune)e->cp);
+            if (e->cp == ' ')
+                v->space_in = 1;
             group = G_TEXT;
             break;
         }
@@ -747,6 +773,74 @@ static void apply_input(canlin_ui_view *v)
     }
 done:
     nk_input_end(ctx);
+}
+
+/* ---- keyboard focus (canlin#26) ---- */
+
+static int plain_kind(int kind)
+{
+    return kind == CANLIN_UI_W_BUTTON || kind == CANLIN_UI_W_TOGGLE ||
+           kind == CANLIN_UI_W_CHOICE || kind == CANLIN_UI_W_SECTION;
+}
+
+/* Kind of the focused widget in the last finished frame, 0 if not there. */
+static int focus_kind(const canlin_ui_view *v)
+{
+    unsigned i;
+    for (i = 0; v->focus && i < v->norder_prev; i++)
+        if (v->order_prev[i].id == v->focus)
+            return v->order_prev[i].kind;
+    return 0;
+}
+
+/* After this frame's input is applied: pointer press, Esc and Tab / Shift-Tab against the
+ * last finished frame's draw order (the open frame's order is not known before Lua ran;
+ * immediate-mode views draw the same order frame to frame). */
+static void focus_keys(canlin_ui_view *v)
+{
+    int kind = focus_kind(v);
+    unsigned i, n = v->norder_prev, at = n;
+    v->tab_used = 0;
+    if (v->press_in) {
+        v->focus_kbd = v->focus_pass = 0;
+        if (plain_kind(kind)) {
+            v->focus = 0;
+            kind = 0;
+        }
+    }
+    if ((v->kpress & (1u << CANLIN_UI_KEY_ESCAPE)) && kind == CANLIN_UI_W_GRAPH)
+        v->focus_pass = 1;
+    if (!(v->kpress & (1u << CANLIN_UI_KEY_TAB)) || n == 0 ||
+        (kind == CANLIN_UI_W_GRAPH && !v->focus_pass))
+        return; /* a focused graph keeps Tab for its nodes */
+    for (i = 0; kind && i < n; i++)
+        if (v->order_prev[i].id == v->focus)
+            at = i;
+    if (v->key_down[CANLIN_UI_KEY_SHIFT])
+        at = at == n ? n - 1 : (at + n - 1) % n;
+    else
+        at = at == n ? 0 : (at + 1) % n;
+    v->focus = v->order_prev[at].id;
+    v->focus_kbd = 1;
+    v->focus_pass = 0;
+    v->tab_used = 1;
+}
+
+/* A focusable widget drawn in this frame, in draw order. */
+static void focusable(canlin_ui_view *v, uint64_t id, int kind)
+{
+    if (v->norder < CANLIN_UI_MAX_WIDGETS) {
+        v->order[v->norder].id = id;
+        v->order[v->norder].kind = (unsigned char)kind;
+        v->norder++;
+    }
+}
+
+/* Enter or Space activates the focused plain widget id in this frame. */
+static int activated(const canlin_ui_view *v, uint64_t id)
+{
+    return v->focus == id &&
+           ((v->kpress & (1u << CANLIN_UI_KEY_ENTER)) || v->space_in);
 }
 
 /* ---- identity ---- */
@@ -833,6 +927,7 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     font_release(v->ui, old); /* after nk_clear: no command points into its atlas any more */
     v->no_cmds = 0;
     apply_input(v);
+    focus_keys(v);
     maxs = (float)(v->content_h - v->h);
     if (maxs < 0)
         maxs = 0;
@@ -845,6 +940,7 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     v->frame++;
     v->in_frame = 1;
     v->has_wake_next = 0;
+    v->norder = 0;
     v->widgets = 0;
     v->depth = 0;
     v->nrec = 0;
@@ -895,6 +991,8 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
     canlin_ui_graph_state_evict(v->gstate, v->frame);
     v->has_wake = v->has_wake_next;
     v->wake_at = v->wake_next;
+    memcpy(v->order_prev, v->order, v->norder * sizeof v->order[0]);
+    v->norder_prev = v->norder;
     {
         /* Focus of a field that was not drawn this frame is gone. */
         size_t mask = CANLIN_UI_STATE_SLOTS - 1, i = (size_t)(v->focus ^ (v->focus >> 32)) & mask;
@@ -1368,6 +1466,40 @@ static int l_bubble(lua_State *L)
     return 0;
 }
 
+/* Appends a record entry for a screen rect (already whole pixels). */
+static void rec_screen(canlin_ui_view *v, int kind, int part, struct nk_rect r)
+{
+    canlin_ui_rect *d;
+    if (v->nrec >= CANLIN_UI_RECORD_MAX) {
+        v->rec_over = 1;
+        return;
+    }
+    d = &v->rec[v->nrec++];
+    memset(d, 0, sizeof *d);
+    d->kind = (unsigned char)kind;
+    d->part = (unsigned char)part;
+    d->widget = (unsigned short)(v->widgets ? v->widgets - 1 : 0);
+    d->x = (int)r.x;
+    d->y = (int)r.y;
+    d->w = (int)r.w;
+    d->h = (int)r.h;
+}
+
+/* Keyboard focus mark (canlin#26): an accent stroke inside the widget's box, shown while
+ * the focus came from the keyboard. */
+static void focus_mark(canlin_ui_view *v, int kind, struct nk_rect r, uint64_t id)
+{
+    float th, rad;
+    canlin_theme_rgb c;
+    if (v->focus != id || !v->focus_kbd)
+        return;
+    th = floorf(v->em / 8.0f) < 1.0f ? 1.0f : floorf(v->em / 8.0f);
+    rad = v->ui->theme.radius * v->em;
+    c = v->ui->theme.color[CANLIN_THEME_ACCENT];
+    nk_stroke_rect(nk_window_get_canvas(&v->nk), r, rad, th, nk_rgb(c.r, c.g, c.b));
+    rec_screen(v, kind, CANLIN_UI_P_FOCUS, r);
+}
+
 /* One single-line label row above a widget; returns its height. */
 static float label_row(canlin_ui_view *v, int kind, const char *s, size_t len)
 {
@@ -1444,6 +1576,7 @@ static int do_edit(lua_State *L, int multiline)
         lua_pop(L, 1);
     }
     st = identity(L, v, 4, label, llen);
+    focusable(v, st->id, kind);
 
     lh = label_row(v, kind, label, llen);
     v->cy += lh;
@@ -1463,6 +1596,7 @@ static int do_edit(lua_State *L, int multiline)
         v->focus = st->id;
     else if (v->focus == st->id)
         v->focus = 0;
+    focus_mark(v, kind, box, st->id);
     if (ph && len == 0 && !(fl & NK_EDIT_ACTIVE)) {
         const struct nk_style_edit *e = &v->nk.style.edit;
         const struct nk_user_font *f = font_of(v, F_BODY);
@@ -1502,15 +1636,18 @@ static int l_button(lua_State *L)
     const char *label, *out;
     struct nk_rect r;
     int el, hit;
+    slot *st;
     count_widget(L, v);
     label = get_str(L, 2, CANLIN_UI_MAX_LABEL, "label", &llen);
-    identity(L, v, 3, label, llen);
+    st = identity(L, v, 3, label, llen);
+    focusable(v, st->id, CANLIN_UI_W_BUTTON);
     el = ellipsize(v, font_of(v, F_BODY), label, llen, label_avail_button(v, v->cw), &out,
                    &outlen, &shown);
     r = place(v, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, touch_of(v), 1, 0,
               shown, el);
     push(v, r);
-    hit = nk_button_text(&v->nk, out, (int)outlen);
+    hit = nk_button_text(&v->nk, out, (int)outlen) || activated(v, st->id);
+    focus_mark(v, CANLIN_UI_W_BUTTON, r, st->id);
     advance(v, touch_of(v));
     lua_pushboolean(L, hit != 0);
     return 1;
@@ -1524,11 +1661,13 @@ static int l_toggle(lua_State *L)
     const char *label, *out;
     struct nk_rect r;
     int on, el;
+    slot *st;
     count_widget(L, v);
     label = get_str(L, 2, CANLIN_UI_MAX_LABEL, "label", &llen);
     luaL_checktype(L, 3, LUA_TBOOLEAN);
     on = lua_toboolean(L, 3);
-    identity(L, v, 4, label, llen);
+    st = identity(L, v, 4, label, llen);
+    focusable(v, st->id, CANLIN_UI_W_TOGGLE);
     {
         /* Box and gap derive from em and the spacing unit, so they scale together with
          * the label; the whole row (box + gap + label) is the hit target. */
@@ -1552,6 +1691,8 @@ static int l_toggle(lua_State *L)
         cs->border_color = cs->text_normal = cs->text_hover = cs->text_active = none.data.color;
         on = nk_check_text(&v->nk, "", 0, on ? nk_true : nk_false);
         *cs = saved;
+        if (activated(v, st->id))
+            on = !on;
         box = nk_rect(r.x, r.y + floorf((r.h - bs) / 2.0f), bs, bs);
         if (rad > bs / 4.0f)
             rad = floorf(bs / 4.0f);
@@ -1566,6 +1707,7 @@ static int l_toggle(lua_State *L)
         nk_draw_text(cv, nk_rect(box.x + bs + gap, r.y + floorf((r.h - f->height) / 2.0f),
                                  r.w - bs - gap, f->height),
                      out, (int)outlen, f, nk_rgba(0, 0, 0, 0), col(v, CANLIN_THEME_TEXT));
+        focus_mark(v, CANLIN_UI_W_TOGGLE, r, st->id);
     }
     advance(v, touch_of(v));
     lua_pushboolean(L, on != 0);
@@ -1603,6 +1745,7 @@ static int l_choice(lua_State *L)
         lua_pop(L, 1); /* strings stay alive: the options table holds them */
     }
     st = identity(L, v, 5, label, llen);
+    focusable(v, st->id, CANLIN_UI_W_CHOICE);
     touch = touch_of(v);
     newidx = idx;
 
@@ -1614,8 +1757,16 @@ static int l_choice(lua_State *L)
     push(v, r);
     if (nk_button_symbol_text(&v->nk,
                               st->expanded ? NK_SYMBOL_TRIANGLE_UP : NK_SYMBOL_TRIANGLE_DOWN,
-                              out, (int)outlen, NK_TEXT_LEFT))
+                              out, (int)outlen, NK_TEXT_LEFT) ||
+        activated(v, st->id))
         st->expanded = !st->expanded;
+    if (v->focus == st->id) {
+        if ((v->kpress & (1u << CANLIN_UI_KEY_UP)) && newidx > 1)
+            newidx--;
+        if ((v->kpress & (1u << CANLIN_UI_KEY_DOWN)) && (size_t)newidx < n)
+            newidx++;
+    }
+    focus_mark(v, CANLIN_UI_W_CHOICE, r, st->id);
     v->cy += touch;
     if (st->expanded) {
         for (i = 0; i < n; i++) {
@@ -1697,6 +1848,7 @@ static void graph_env(canlin_ui_view *v, canlin_ui_graph_env *e)
     e->focus = &v->focus;
     e->btn_t = v->btn_t;
     e->now = v->now;
+    e->keys = !v->focus_pass && !v->tab_used; /* Esc, or this Tab moved the focus in */
 }
 
 void canlin_ui_graph_record(canlin_ui_view *v, int part, struct nk_rect r, uint32_t off,
@@ -1734,6 +1886,7 @@ static int l_graph(lua_State *L)
     /* identity() may run opts metamethods; the parse below reads raw and runs no Lua, so
      * the parsed string pointers stay anchored in g until the edits are pushed. */
     st = identity(L, v, 3, "\0graph", 6); /* own label namespace in practice */
+    focusable(v, st->id, CANLIN_UI_W_GRAPH);
     graph_env(v, &e);
     e.id = st->id;
     e.st = canlin_ui_graph_state_get(v->gstate, st->id, v->frame);
@@ -1744,6 +1897,7 @@ static int l_graph(lua_State *L)
     e.box = place(v, CANLIN_UI_W_GRAPH, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, hem * e.em, 1,
                   0, 0, 0);
     canlin_ui_graph_run(L, g, fit, &e);
+    focus_mark(v, CANLIN_UI_W_GRAPH, e.box, st->id); /* after run: a press may move it */
     advance(v, hem * e.em);
     return 1;
 }
@@ -1819,6 +1973,7 @@ static int l_section(lua_State *L)
     luaL_checktype(L, 3, LUA_TFUNCTION);
     enter(L, v, "section");
     st = identity(L, v, 4, title, tlen);
+    focusable(v, st->id, CANLIN_UI_W_SECTION);
     if (!st->init) {
         int t = opt_field(L, 4, "open");
         if (t != LUA_TNIL && t != LUA_TBOOLEAN)
@@ -1845,7 +2000,7 @@ static int l_section(lua_State *L)
         bs.normal = bs.hover = bs.active = none;
         bs.border = 0;
         bs.border_color = bs.text_normal = bs.text_hover = bs.text_active = none.data.color;
-        if (nk_button_text_styled(&v->nk, &bs, "", 0))
+        if (nk_button_text_styled(&v->nk, &bs, "", 0) || activated(v, st->id))
             st->open = !st->open;
         ac = col(v, nk_input_is_mouse_hovering_rect(&v->nk.input, r) ? CANLIN_THEME_ACCENT
                                                                       : CANLIN_THEME_TEXT);
@@ -1861,6 +2016,7 @@ static int l_section(lua_State *L)
                                  f->height),
                      out, (int)outlen, f, nk_rgba(0, 0, 0, 0), col(v, CANLIN_THEME_TEXT));
         nk_fill_rect(cv, nk_rect(r.x, r.y + r.h - th, r.w, th), 0, col(v, CANLIN_THEME_MUTED));
+        focus_mark(v, CANLIN_UI_W_SECTION, r, st->id);
     }
     advance(v, touch_of(v));
     if (st->open) {

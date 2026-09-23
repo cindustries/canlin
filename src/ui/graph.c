@@ -29,8 +29,9 @@
  *   secondary press      on empty canvas -> add at that point (spec §5.2 context action),
  *                        at the press edge; nothing on nodes, ports or edges; ignored
  *                        while a primary gesture is held. Middle does nothing.
- *   keys (graph focused by a press inside it): Del -> delete / disconnect the selection,
- *                        Tab / Shift-Tab -> select next / previous node
+ *   keys (graph focused by a press inside it or by the view's Tab order): Del -> delete /
+ *                        disconnect the selection, Tab / Shift-Tab -> select next /
+ *                        previous node; Esc hands Tab back to the view's focus order
  * Long-press is recognised at release (spec §5.2), exactly one open/add edit. While a
  * press on a node, port or empty canvas is held within the slop, the frame asks the
  * view owner for a redraw at press + LONG_PRESS_MS (canlin_ui_graph_wake; the module
@@ -1281,7 +1282,7 @@ void canlin_ui_graph_run(lua_State *L, canlin_ui_graph *g, int fit, canlin_ui_gr
     }
 
     /* Keyboard (spec §5.3), only while this graph has the view's focus. */
-    if (!press && *e->focus == e->id) {
+    if (!press && *e->focus == e->id && e->keys) {
         if (nk_input_is_key_pressed(in, NK_KEY_DEL)) {
             if (g->sel_node >= 0) {
                 gedit *x = add_edit(ed, &ned, E_DELETE);

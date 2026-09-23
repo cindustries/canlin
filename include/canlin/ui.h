@@ -112,8 +112,21 @@ typedef enum canlin_ui_key {
     CANLIN_UI_KEY_HOME,
     CANLIN_UI_KEY_END,
     CANLIN_UI_KEY_SHIFT,
-    CANLIN_UI_KEY_CTRL
+    CANLIN_UI_KEY_CTRL,
+    CANLIN_UI_KEY_ESCAPE    /* leaves the graph's keyboard mode (focus order, below) */
 } canlin_ui_key;
+#define CANLIN_UI_KEY_LAST CANLIN_UI_KEY_ESCAPE
+
+/* Keyboard focus (UI spec §3, canlin#26). One widget of a view has the focus. Focusable,
+ * in draw order: field, area, button, toggle, choice, section header, graph. Tab /
+ * Shift-Tab move it to the next / previous focusable widget of the last finished frame's
+ * draw order (wrapping); the widget then shows an accent focus mark (record part
+ * P_FOCUS) until a pointer press. Enter or Space (text U+0020) activates a focused
+ * button, toggle, section header or choice (expands/collapses); Up/Down step a focused
+ * choice's index. A focused graph keeps Tab / Shift-Tab (node cycling) and Del for
+ * itself; Esc leaves its keyboard mode, and the next Tab moves on from it. A pointer
+ * press clears the focus of button, toggle, choice and section; fields and graphs take
+ * the focus by press as before. Keys reserved by the shell never reach a view. */
 
 /* Pointer buttons of CANLIN_UI_IN_BUTTON (canlin#32). Primary is 0, so a zeroed event is
  * a primary edge. Touch contact is primary; backends map a platform's context gesture to
@@ -244,6 +257,7 @@ typedef enum canlin_ui_part {
     CANLIN_UI_P_NODE,     /* graph: a visible node panel; off = node index (from 0) */
     CANLIN_UI_P_PORT,     /* graph: a visible port touch target; off = node index,
                            * len = port index, inputs first then outputs */
+    CANLIN_UI_P_FOCUS,    /* keyboard focus mark around the focused widget (canlin#26) */
     CANLIN_UI_P_HOLD      /* graph: long-press feedback shown while a press is held past
                            * CANLIN_UI_LONG_PRESS_MS; off = node index, or
                            * CANLIN_UI_HOLD_CANVAS for a hold on empty canvas */

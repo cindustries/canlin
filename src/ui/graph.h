@@ -51,6 +51,7 @@ typedef struct canlin_ui_graph_env {
     uint64_t *focus;                  /* the view's keyboard focus identity */
     uint64_t btn_t;                   /* timestamp of this frame's button edge */
     uint64_t now;                     /* owner's monotonic time of this frame */
+    int keys;                         /* focused graph takes Tab/Del (not after Esc) */
 } canlin_ui_graph_env;
 
 typedef struct canlin_ui_graph canlin_ui_graph;

@@ -1830,6 +1830,160 @@ static void test_font_cache_module(void)
     h_done(&h);
 }
 
+static const char tab_src[] =
+    "local M = {}\n"
+    "local name, notes, on, idx = '', '', false, 1\n"
+    "local g = { nodes = { { id = 'n1', x = 1, y = 1 }, { id = 'n2', x = 14, y = 1 } },\n"
+    "            edges = {} }\n"
+    "function M.draw(ui)\n"
+    "  local nn = ui:field('Name', name)\n"
+    "  if nn ~= name then name = nn; print('name=' .. name) end\n"
+    "  notes = ui:area('Notes', notes)\n"
+    "  if ui:button('Go') then print('clicked') end\n"
+    "  local o = ui:toggle('On', on)\n"
+    "  if o ~= on then on = o; print('on=' .. tostring(on)) end\n"
+    "  local i = ui:choice('Pick', { 'a', 'b', 'c' }, idx)\n"
+    "  if i ~= idx then idx = i; print('idx=' .. idx) end\n"
+    "  ui:section('Sec', function() ui:text('inside') end)\n"
+    "  for _, e in ipairs(ui:graph(g, { id = 'g', height = 8 })) do\n"
+    "    print('E ' .. e.kind .. ' ' .. tostring(e.node))\n"
+    "    if e.kind == 'select' then g.selected = e.node end\n"
+    "  end\n"
+    "end\n"
+    "return M\n";
+
+/* Kind of the widget carrying the focus mark, 0 if none (and at most one mark). */
+static int focus_at(harness *h)
+{
+    size_t n, i;
+    int kind = 0, marks = 0;
+    const canlin_ui_rect *r = rec(h, &n);
+    for (i = 0; i < n; i++)
+        if (r[i].part == CANLIN_UI_P_FOCUS) {
+            kind = r[i].kind;
+            marks++;
+        }
+    CHECK(marks <= 1);
+    return kind;
+}
+
+static void tab(harness *h, int back)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_KEY;
+    if (back) {
+        in.key = CANLIN_UI_KEY_SHIFT;
+        in.down = 1;
+        CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    }
+    key(h, CANLIN_UI_KEY_TAB);
+    if (back) {
+        in.key = CANLIN_UI_KEY_SHIFT;
+        in.down = 0;
+        CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
+    }
+    h_drain(h);
+}
+
+/* canlin#26: Tab / Shift-Tab walk the focusable widgets in draw order with a visible mark;
+ * Enter/Space activate; a focused graph keeps Tab until Esc. */
+static void test_tab_order(void)
+{
+    static const int order[] = {CANLIN_UI_W_FIELD,  CANLIN_UI_W_AREA,   CANLIN_UI_W_BUTTON,
+                                CANLIN_UI_W_TOGGLE, CANLIN_UI_W_CHOICE, CANLIN_UI_W_SECTION,
+                                CANLIN_UI_W_GRAPH};
+    harness h;
+    const canlin_ui_rect *m, *b;
+    size_t i;
+    h_init(&h, NULL, 1.0f, tab_src, 400, 900);
+    h_drain(&h);
+    CHECK(focus_at(&h) == 0);
+    for (i = 0; i < sizeof order / sizeof order[0]; i++) {
+        tab(&h, 0);
+        CHECK(focus_at(&h) == order[i]);
+        if (order[i] == CANLIN_UI_W_FIELD) {
+            type_text(&h, "x y"); /* a space in a field is text, not activation */
+            h_drain(&h);
+            CHECK(has(&h, "name=x y\n") && !has(&h, "clicked"));
+        } else if (order[i] == CANLIN_UI_W_BUTTON) {
+            m = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_FOCUS, 0);
+            b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+            CHECK(m && b && m->x == b->x && m->y == b->y && m->w == b->w && m->h == b->h);
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(count(&h, "clicked") == 1);
+            type_text(&h, " ");
+            h_drain(&h);
+            CHECK(count(&h, "clicked") == 2);
+        } else if (order[i] == CANLIN_UI_W_TOGGLE) {
+            type_text(&h, " ");
+            h_drain(&h);
+            CHECK(has(&h, "on=true\n"));
+        } else if (order[i] == CANLIN_UI_W_CHOICE) {
+            key(&h, CANLIN_UI_KEY_DOWN);
+            h_drain(&h);
+            CHECK(has(&h, "idx=2\n"));
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(find(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_OPTION, 2) != NULL);
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(find(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_OPTION, 0) == NULL);
+        } else if (order[i] == CANLIN_UI_W_SECTION) {
+            CHECK(find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 0) != NULL);
+            key(&h, CANLIN_UI_KEY_ENTER);
+            h_drain(&h);
+            CHECK(find(&h, CANLIN_UI_W_TEXT, CANLIN_UI_P_LINE, 0) == NULL); /* collapsed */
+            CHECK(focus_at(&h) == CANLIN_UI_W_SECTION);
+        }
+    }
+    /* The graph keeps Tab: node cycling, focus stays; Esc hands Tab back. */
+    CHECK(!has(&h, "E select"));
+    tab(&h, 0);
+    CHECK(has(&h, "E select n1\n") && focus_at(&h) == CANLIN_UI_W_GRAPH);
+    tab(&h, 0);
+    CHECK(has(&h, "E select n2\n") && focus_at(&h) == CANLIN_UI_W_GRAPH);
+    key(&h, CANLIN_UI_KEY_ESCAPE);
+    h_drain(&h);
+    key(&h, CANLIN_UI_KEY_DELETE); /* after Esc the graph takes no Del either */
+    h_drain(&h);
+    CHECK(!has(&h, "E delete"));
+    tab(&h, 0);
+    CHECK(focus_at(&h) == CANLIN_UI_W_FIELD); /* wraps */
+    CHECK(count(&h, "E select") == 2);
+    /* Shift-Tab goes back, wrapping to the graph, which then takes Tab again. */
+    tab(&h, 1);
+    CHECK(focus_at(&h) == CANLIN_UI_W_GRAPH && count(&h, "E select") == 2);
+    tab(&h, 1);
+    CHECK(count(&h, "E select") == 3 && focus_at(&h) == CANLIN_UI_W_GRAPH);
+    /* A pointer press clears the mark; on a plain widget the focus goes with it. */
+    key(&h, CANLIN_UI_KEY_ESCAPE);
+    h_drain(&h);
+    tab(&h, 0);
+    tab(&h, 0);
+    tab(&h, 0);
+    CHECK(focus_at(&h) == CANLIN_UI_W_BUTTON);
+    input(&h, CANLIN_UI_IN_BUTTON, 395, 5, 1);
+    input(&h, CANLIN_UI_IN_BUTTON, 395, 5, 0);
+    h_drain(&h);
+    CHECK(focus_at(&h) == 0);
+    key(&h, CANLIN_UI_KEY_ENTER);
+    h_drain(&h);
+    CHECK(count(&h, "clicked") == 2);
+    /* Escape is a valid key; a key past it is not. */
+    {
+        canlin_ui_input in;
+        memset(&in, 0, sizeof in);
+        in.type = CANLIN_UI_IN_KEY;
+        in.key = CANLIN_UI_KEY_LAST + 1;
+        in.down = 1;
+        CHECK(!canlin_ui_input_valid(&in));
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_EINVAL);
+    }
+    h_done(&h);
+}
+
 /* canlin#30: a draw skipped with EFONT is retried by itself once a slot is unpinned: four
  * pinned sizes (the module at 100 % plus three views), the module moves to 200 % and is
  * skipped; freeing one view wakes it, with no set_ui, invalidate or input from outside. */
@@ -1949,6 +2103,7 @@ int main(void)
     test_font_cache();
     test_font_cache_module();
     test_font_cache_wake();
+    test_tab_order();
     test_lua_no_scale();
     if (failures) {
         fprintf(stderr, "ui: %d of %d checks failed\n", failures, checks);
