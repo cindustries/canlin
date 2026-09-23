@@ -61,4 +61,42 @@ const char *canlin_sandbox_errmsg(const canlin_sandbox *sb);
 /* Current Lua heap bytes (0 once dead). */
 size_t canlin_sandbox_mem_used(const canlin_sandbox *sb);
 
+/* ---- module callback API (canlin#9) ----
+ * Contract: docs/superpowers/specs/2026-09-23-canlin-core-api-design.md §4, §6. */
+
+struct lua_State;
+
+/* Host code run inside the sandbox's protected call: installs globals or pushes
+ * callback arguments. Runs under the scope's memory limit; an allocation failure is a
+ * memory fault. It may raise a Lua error. */
+typedef int (*canlin_sandbox_host_fn)(struct lua_State *L, void *ud);
+
+/* Run fn(L, ud) once in protected mode (e.g. to install the canlin table). Same status
+ * and fault rules as canlin_sandbox_run. */
+canlin_sandbox_status canlin_sandbox_host(canlin_sandbox *sb, canlin_sandbox_host_fn fn,
+                                          void *ud);
+
+/* Load src (lua#main) as a text chunk, run it as one budgeted callback and store its
+ * single result as the module table. A result that is not a table is an ERROR and no
+ * module table is stored. */
+canlin_sandbox_status canlin_sandbox_load_main(canlin_sandbox *sb, const char *src,
+                                               size_t len, const char *chunkname);
+
+/* Call field `field` of the stored module table as one budgeted callback. The budget is
+ * reset for this call. push (may be NULL when nargs == 0) must push exactly `nargs`
+ * values, 0 <= nargs <= CANLIN_MARSHAL_MAX_ARGS; it runs under the memory limit.
+ * An absent (nil) field is skipped: Lua is not entered for it, the result is
+ * CANLIN_SANDBOX_OK and *called (if not NULL) is set to 0. A present field that is not a
+ * function is an ERROR. Return values of the callback are discarded.
+ *
+ * budget: 0 = the configured per-callback budget; otherwise the smaller of `budget` and
+ * the configured one (a per-call budget can only lower it, e.g. CANLIN_SB_BUDGET_DRAW). */
+canlin_sandbox_status canlin_sandbox_call_budget(canlin_sandbox *sb, const char *field,
+                                                 uint32_t budget, int nargs,
+                                                 canlin_sandbox_host_fn push, void *ud,
+                                                 int *called);
+/* canlin_sandbox_call_budget with the configured budget and no *called. */
+canlin_sandbox_status canlin_sandbox_call(canlin_sandbox *sb, const char *field, int nargs,
+                                          canlin_sandbox_host_fn push, void *ud);
+
 #endif

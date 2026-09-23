@@ -187,6 +187,9 @@ int canlin_ev_cancel(canlin_ev *ev, canlin_ev_gen gen, canlin_ev_handle h);
 /* One bounded scheduler turn. */
 int canlin_ev_turn(canlin_ev *ev, canlin_ev_turn_result *out);
 
+/* Current monotonic time of the scheduler's clock (clamped, never backwards). */
+canlin_ev_time canlin_ev_now(canlin_ev *ev);
+
 /* slot < 0: process-wide totals. */
 int canlin_ev_get_stats(const canlin_ev *ev, int slot, canlin_ev_stats *out);
 

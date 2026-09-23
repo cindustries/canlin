@@ -728,6 +728,11 @@ int canlin_ev_turn(canlin_ev *ev, canlin_ev_turn_result *out)
     return CANLIN_EV_OK;
 }
 
+canlin_ev_time canlin_ev_now(canlin_ev *ev)
+{
+    return clock_now(ev);
+}
+
 int canlin_ev_get_stats(const canlin_ev *ev, int slot, canlin_ev_stats *out)
 {
     memset(out, 0, sizeof *out);

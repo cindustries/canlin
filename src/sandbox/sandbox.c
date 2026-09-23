@@ -503,3 +503,163 @@ size_t canlin_sandbox_mem_used(const canlin_sandbox *sb)
 {
     return sb->mem_used;
 }
+
+/* ---- module callback API (canlin#9) ---- */
+
+#include "canlin/module_limits.h"
+
+static const char main_key[] = "canlin.sandbox.main"; /* registry: the module table */
+
+typedef struct {
+    canlin_sandbox_host_fn fn;  /* host installer or argument pusher */
+    void *ud;
+    const char *src;            /* load_main */
+    size_t len;
+    const char *chunkname;
+    const char *field;          /* call */
+    int nargs;
+    int called;
+} sb_job;
+
+/* Run fn(L, job) as one budgeted protected callback; shared by host/load_main/call. */
+static canlin_sandbox_status sb_protected(canlin_sandbox *sb, lua_CFunction fn, sb_job *job,
+                                          uint32_t budget)
+{
+    lua_State *L;
+    uint32_t saved;
+    int status;
+
+    if (sb->dead) {
+        set_errmsg(sb, "scope is dead");
+        return CANLIN_SANDBOX_DEAD;
+    }
+    L = sb->L;
+    lua_settop(L, 0);
+    saved = sb->budget;
+    if (budget != 0 && budget < sb->budget)
+        sb->budget = budget;
+    sb->used = 0;
+    arm_hook(L, CANLIN_SB_HOOK_STRIDE); /* also resets the hook counter */
+    lua_pushcfunction(L, fn);           /* light C function and light userdata: */
+    lua_pushlightuserdata(L, job);      /* neither allocates */
+    status = lua_pcall(L, 1, 0, 0);
+    sb->budget = saved;
+    if (status == LUA_ERRMEM && sb->fault == CANLIN_SANDBOX_OK)
+        set_fault(L, sb, CANLIN_SANDBOX_FAULT_MEMORY);
+    if (sb->fault != CANLIN_SANDBOX_OK)
+        return sb_kill(sb, sb->fault); /* hook stays armed at stride 1 */
+    lua_sethook(L, NULL, 0, 0);
+    if (status != LUA_OK) {
+        if (lua_type(L, -1) == LUA_TSTRING)
+            set_errmsg(sb, lua_tostring(L, -1));
+        else
+            snprintf(sb->errmsg, sizeof sb->errmsg, "(error object is a %s value)",
+                     luaL_typename(L, -1));
+        lua_settop(L, 0);
+        return CANLIN_SANDBOX_ERROR;
+    }
+    lua_settop(L, 0);
+    return CANLIN_SANDBOX_OK;
+}
+
+static int job_host(lua_State *L)
+{
+    sb_job *job = lua_touserdata(L, 1);
+    lua_settop(L, 0);
+    job->fn(L, job->ud);
+    return 0;
+}
+
+canlin_sandbox_status canlin_sandbox_host(canlin_sandbox *sb, canlin_sandbox_host_fn fn,
+                                          void *ud)
+{
+    sb_job job;
+    memset(&job, 0, sizeof job);
+    job.fn = fn;
+    job.ud = ud;
+    return sb_protected(sb, job_host, &job, 0);
+}
+
+static int job_load_main(lua_State *L)
+{
+    sb_job *job = lua_touserdata(L, 1);
+    int status;
+    lua_settop(L, 0);
+    status = luaL_loadbufferx(L, job->src, job->len, job->chunkname, "t");
+    check_status(L, status);
+    if (status != LUA_OK)
+        return lua_error(L);
+    lua_call(L, 0, 1);
+    if (!lua_istable(L, -1))
+        return luaL_error(L, "lua#main must return a table, got %s", luaL_typename(L, -1));
+    lua_setfield(L, LUA_REGISTRYINDEX, main_key);
+    return 0;
+}
+
+canlin_sandbox_status canlin_sandbox_load_main(canlin_sandbox *sb, const char *src,
+                                               size_t len, const char *chunkname)
+{
+    sb_job job;
+    memset(&job, 0, sizeof job);
+    job.src = src;
+    job.len = len;
+    job.chunkname = chunkname ? chunkname : "=lua#main";
+    return sb_protected(sb, job_load_main, &job, 0);
+}
+
+static int job_call(lua_State *L)
+{
+    sb_job *job = lua_touserdata(L, 1);
+    int t, base;
+    lua_settop(L, 0);
+    if (lua_getfield(L, LUA_REGISTRYINDEX, main_key) != LUA_TTABLE)
+        return luaL_error(L, "no module table loaded");
+    lua_pushstring(L, job->field);
+    t = lua_rawget(L, 1); /* raw: no metamethod decides whether a callback exists */
+    if (t == LUA_TNIL)
+        return 0;
+    if (t != LUA_TFUNCTION)
+        return luaL_error(L, "M.%s is a %s, not a function", job->field, lua_typename(L, t));
+    job->called = 1;
+    luaL_checkstack(L, job->nargs, "callback arguments");
+    base = lua_gettop(L);
+    if (job->fn)
+        job->fn(L, job->ud);
+    if (lua_gettop(L) != base + job->nargs)
+        return luaL_error(L, "host pushed %d arguments, expected %d", lua_gettop(L) - base,
+                          job->nargs);
+    lua_call(L, job->nargs, 0);
+    return 0;
+}
+
+canlin_sandbox_status canlin_sandbox_call_budget(canlin_sandbox *sb, const char *field,
+                                                 uint32_t budget, int nargs,
+                                                 canlin_sandbox_host_fn push, void *ud,
+                                                 int *called)
+{
+    sb_job job;
+    canlin_sandbox_status st;
+
+    if (called)
+        *called = 0;
+    if (field == NULL || nargs < 0 || nargs > CANLIN_MARSHAL_MAX_ARGS ||
+        (push == NULL && nargs != 0)) {
+        set_errmsg(sb, "canlin_sandbox_call: invalid arguments");
+        return sb->dead ? CANLIN_SANDBOX_DEAD : CANLIN_SANDBOX_ERROR;
+    }
+    memset(&job, 0, sizeof job);
+    job.field = field;
+    job.nargs = nargs;
+    job.fn = push;
+    job.ud = ud;
+    st = sb_protected(sb, job_call, &job, budget);
+    if (called)
+        *called = job.called;
+    return st;
+}
+
+canlin_sandbox_status canlin_sandbox_call(canlin_sandbox *sb, const char *field, int nargs,
+                                          canlin_sandbox_host_fn push, void *ud)
+{
+    return canlin_sandbox_call_budget(sb, field, 0, nargs, push, ud, NULL);
+}
