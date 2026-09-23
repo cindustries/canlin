@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-23T05:49:05Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T05:25:20Z
+id: 46
+priority: low
+started: 2026-09-23T05:25:46Z
+status: review
+tags:
+- ui
+title: Scroll keyboard-focused widget into view; test canlin.cancel refuses core timer
+updated: 2026-09-23T05:49:05Z
+---
+
+From canlin#26/#33.
+
+Merged (2052ee9). Host + ASan/UBSan green; i686 musl build of all suites green (native 32-bit run, no xmm in disassembly); QEMU pentium2 not run.
