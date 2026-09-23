@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T18:19:29Z
+id: 60
+priority: medium
+status: backlog
+tags:
+- llm
+- net
+title: 'LLM transport: body callback returns pause signal (backpressure)'
+updated: 2026-09-23T18:19:29Z
+---
+
+HTTP spec §3: llm.h body cb is void, so the LLM adapter can't pause reading when the scheduler refuses a post. Change the seam, test with a full queue.
