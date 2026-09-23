@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-23T04:49:40Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T04:10:25Z
+id: 27
+priority: high
+started: 2026-09-23T04:49:40Z
+status: review
+tags:
+- ui
+- input
+- events
+title: Route input through canlin_ev into UI views
+updated: 2026-09-23T04:49:40Z
+---
+
+Latest-state motion, ordered edges, INPUT_OVERFLOW -> view input reset. Today canlin_module_input is called directly. From canlin#18.
+
+Merged 8ea901d (67143d7). ui 6879 / graph 9876 checks, host + ASan/UBSan green, 3 mutants caught. i686 skipped. Spec core API §6 updated.
