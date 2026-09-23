@@ -1,7 +1,7 @@
 # CanLin — accounts, instances and configuration storage
 
-Status: draft. The owner answered §8 questions 1, 3 and 4 on 2026-09-23 (see §2 and §4);
-questions 2 and 5 are open. It extends the
+Status: draft. The owner answered §8 questions 1, 2, 3 and 4 on 2026-09-23 (see §2, §4
+and §6.1); question 5 is open. It extends the
 standalone-first model of the [system design](2026-09-22-canlin-system-design.md) §1 and
 the provider setup of the [LLM providers design](2026-09-23-canlin-llm-providers-design.md).
 
@@ -107,6 +107,26 @@ never receives `secrets.bee`.
   unless a sync service is configured.
 - The trusted settings screen (shell spec §3) hosts the account field and the copy action.
 
+### 6.1 Module data in the account
+
+**Decided 2026-09-23 (owner):** module data can travel with the instance configuration,
+but the **module declares** what is cloud-synced and the **user can switch it off** per
+module.
+
+- A module declares its data classes in the bundle: `meta#cloud` lists the stores that
+  may leave the device (e.g. `state`, `db:history`); anything not listed stays local.
+  Default is nothing — a module that declares nothing keeps all its data on the device.
+- The instance configuration records, per module, whether cloud sync is **on** or
+  **paused** by the user. A pause stops uploads for that module's data (downloads for
+  restore only on an explicit user action); it never deletes the remote copy. Removing
+  the remote copy is its own explicit action.
+- The settings surface shows, per module, what it declared and the switch. A module
+  cannot turn its own sync back on; the switch is trusted configuration like a grant
+  (module roles spec §3).
+- In a storage account the declared data is written below the instance directory
+  (`<instance-id>/modules/<name>/…`), same one-writer and atomic-upload rules as §3.3.
+  This is a per-instance backup, not the multi-writer sync of system design §7.
+
 ## 7. First slice
 
 1. Account field with the three kinds recognised and validated; local accounts work.
@@ -121,8 +141,8 @@ never receives `secrets.bee`.
 1. **"Host"** — does the configuration belong to the *device/instance* (as written here),
    or to the *storage/server host* you log in to? (I read "an den Host gebunden, wo er
    sich einloggt" + "3 Instanzen, 3 mal andere Dinge" as per instance.)
-2. **What belongs to the configuration** — settings, profiles, theme, layout, module list
-   for sure; also module data (chat history, SQLite) or only configuration?
+2. ~~**What belongs to the configuration**~~ — answered: module data too, as declared by
+   the module and pausable per module by the user (§6.1).
 3. **Plain `ftp://`** — offer it at all (with warning, no secrets), or only encrypted
    protocols?
 4. **Secrets in storage** — passphrase-encrypted as in §5 acceptable, or never store keys
