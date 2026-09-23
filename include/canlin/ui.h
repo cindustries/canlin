@@ -167,7 +167,9 @@ typedef enum canlin_ui_key {
  * in draw order: field, area, button, toggle, choice, section header, graph. Tab /
  * Shift-Tab move it to the next / previous focusable widget of the last finished frame's
  * draw order (wrapping); the widget then shows an accent focus mark (record part
- * P_FOCUS) until a pointer press. Enter or Space (text U+0020) activates a focused
+ * P_FOCUS) until a pointer press, and the view scrolls in the same frame so the widget's
+ * box (with its label row) is fully visible, by the least amount, keeping the view
+ * padding around it; a box taller than the view shows its top (canlin#46). Enter or Space (text U+0020) activates a focused
  * button, toggle, section header or choice (expands/collapses); Up/Down step a focused
  * choice's index. A focused graph keeps Tab / Shift-Tab (node cycling) and Del for
  * itself; Esc leaves its keyboard mode, and the next Tab moves on from it. A pointer

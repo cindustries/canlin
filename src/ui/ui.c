@@ -1226,7 +1226,9 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     {
         int was = v->kb_shown;
         v->kb_shown = kb_want(v);
-        if (v->kb_shown && (!was || v->kb_typed))
+        /* Tab (also the keyboard's next) moved the focus, the panel appeared, or the panel
+         * typed into the focused widget: keep that widget visible (canlin#45, canlin#46). */
+        if (v->tab_used || (v->kb_shown && (!was || v->kb_typed)))
             scroll_to_focus(v, (float)(v->h - kb_height(v)));
     }
     maxs = (float)(v->content_h - (v->h - kb_height(v)));

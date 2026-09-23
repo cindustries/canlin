@@ -2000,6 +2000,59 @@ static void test_tab_order(void)
     h_done(&h);
 }
 
+/* canlin#46: Tab / Shift-Tab to a widget outside the visible part scrolls the view by
+ * the least amount that shows its whole box with the view padding (8 px here); a widget
+ * already visible does not scroll; a field comes with its label row. */
+static void test_tab_scroll(void)
+{
+    harness h;
+    const canlin_ui_rect *m, *l;
+    int i, sc;
+    h_init(&h, NULL, 1.0f,
+           "local M = {}\n"
+           "local v = ''\n"
+           "function M.draw(ui)\n"
+           "  for i = 1, 12 do ui:button('b' .. i) end\n"
+           "  v = ui:field('Last', v)\n"
+           "end\n"
+           "return M\n",
+           300, 200);
+    h_drain(&h);
+    tab(&h, 0);
+    tab(&h, 0);
+    CHECK(focus_at(&h) == CANLIN_UI_W_BUTTON && canlin_ui_view_scroll(canlin_module_view(h.m)) == 0);
+    for (i = 3; i <= 12; i++) {
+        tab(&h, 0);
+        m = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_FOCUS, 0);
+        CHECK(m && m->y >= 0 && m->y + m->h <= 200);
+        sc = canlin_ui_view_scroll(canlin_module_view(h.m));
+        if (m && sc > 0)
+            CHECK(m->y + m->h == 200 - 8); /* least scroll: bottom edge plus padding */
+    }
+    CHECK(canlin_ui_view_scroll(canlin_module_view(h.m)) > 0);
+    tab(&h, 0); /* the field: box and label visible */
+    m = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_FOCUS, 0);
+    l = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_LABEL, 0);
+    CHECK(m && l && m->y + m->h <= 200 && l->y >= 0);
+    tab(&h, 0); /* wraps to the first button: back to the top */
+    m = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_FOCUS, 0);
+    CHECK(m && m->y == 8 && canlin_ui_view_scroll(canlin_module_view(h.m)) == 0);
+    tab(&h, 1); /* Shift-Tab wraps back to the field at the end */
+    m = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_FOCUS, 0);
+    l = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_LABEL, 0);
+    CHECK(m && l && m->y + m->h == 200 - 8 && l->y >= 0);
+    tab(&h, 1); /* button 12 sits right above: visible, no scroll */
+    sc = canlin_ui_view_scroll(canlin_module_view(h.m));
+    m = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_FOCUS, 0);
+    CHECK(m && m->y >= 0);
+    tab(&h, 1);
+    tab(&h, 1);
+    tab(&h, 1);
+    m = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_FOCUS, 0);
+    CHECK(m && m->y == 8 && canlin_ui_view_scroll(canlin_module_view(h.m)) < sc);
+    h_done(&h);
+}
+
 /* canlin#30: a draw skipped with EFONT is retried by itself once a slot is unpinned: four
  * pinned sizes (the module at 100 % plus three views), the module moves to 200 % and is
  * skipped; freeing one view wakes it, with no set_ui, invalidate or input from outside. */
@@ -2120,6 +2173,7 @@ int main(void)
     test_font_cache_module();
     test_font_cache_wake();
     test_tab_order();
+    test_tab_scroll();
     test_lua_no_scale();
     if (failures) {
         fprintf(stderr, "ui: %d of %d checks failed\n", failures, checks);
