@@ -139,6 +139,25 @@ unsigned canlin_module_errors(const canlin_module *m);
 /* Last error/fault message; never NULL. */
 const char *canlin_module_errmsg(const canlin_module *m);
 
+/* ---- UI view (UI spec §2–§3) ----
+ * Without a view the module is headless: M.draw still runs and receives a `ui` object
+ * whose every method raises. The view is owned by the module, created on the first
+ * canlin_module_set_ui and freed with the module, after its Lua state; its widget state
+ * is reset for each new generation. */
+struct canlin_ui;
+struct canlin_ui_view;
+struct canlin_ui_input;
+
+/* Attach (or switch, e.g. on theme reload) the shared ui and set the view's screen rect
+ * in px. Requests a draw. EBUSY from inside the module's own callback. */
+int canlin_module_set_ui(canlin_module *m, struct canlin_ui *ui, int x, int y, int w, int h);
+/* The module's view (NULL if headless): render it after a draw, inspect its record. */
+struct canlin_ui_view *canlin_module_view(canlin_module *m);
+/* Route one normalised input event to the module's view (never to M.event, core API
+ * §5.2) and request a draw. EINVAL for a malformed event or no view; an overflowing queue
+ * is reset (ui.h) and still requests the draw that releases held buttons/keys. */
+int canlin_module_input(canlin_module *m, const struct canlin_ui_input *in);
+
 #ifdef __cplusplus
 }
 #endif

@@ -564,17 +564,29 @@ int canlin_render_end(canlin_render *r)
 
 int canlin_render_font_default(canlin_render_font *f, float px_height)
 {
+    return canlin_render_font_default_sizes(f, &px_height, 1);
+}
+
+int canlin_render_font_default_sizes(canlin_render_font *f, const float *px, int n)
+{
     const void *img;
-    int w = 0, h = 0;
+    int i, w = 0, h = 0;
 
     memset(f, 0, sizeof *f);
-    if (!(px_height > 0.0f))
+    if (px == NULL || n < 1 || n > CANLIN_RENDER_FONT_SIZES)
         return -1;
+    for (i = 0; i < n; i++)
+        if (!(px[i] > 0.0f))
+            return -1;
     nk_font_atlas_init_default(&f->atlas);
     nk_font_atlas_begin(&f->atlas);
-    f->font = nk_font_atlas_add_default(&f->atlas, px_height, NULL);
-    if (!f->font)
-        goto fail;
+    for (i = 0; i < n; i++) {
+        f->size[i] = nk_font_atlas_add_default(&f->atlas, px[i], NULL);
+        if (!f->size[i])
+            goto fail;
+    }
+    f->font = f->size[0];
+    f->nsizes = n;
     img = nk_font_atlas_bake(&f->atlas, &w, &h, NK_FONT_ATLAS_ALPHA8);
     if (!img || w <= 0 || h <= 0)
         goto fail;

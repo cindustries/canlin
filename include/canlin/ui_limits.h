@@ -39,6 +39,23 @@
 #define CANLIN_THEME_SIZE_MAXLEN        2u
 #define CANLIN_THEME_DECIMAL_MAXLEN     8u
 
+/* Not in the §8 table: flow layout (UI spec §2, system design §5), in em. */
+#define CANLIN_UI_MIN_TOUCH_EM          2.5f   /* interactive element height */
+#define CANLIN_UI_COLUMNS_EM            40.0f  /* ui:columns side by side at >= this */
+#define CANLIN_UI_LINE_EM               1.25f  /* text line height per font size */
+/* Heading font sizes per level 1-3, relative to em (level 3 uses the body font). */
+#define CANLIN_UI_HEADING1_SCALE        1.5f
+#define CANLIN_UI_HEADING2_SCALE        1.25f
+
+/* Not in the §8 table: per-view bounds of src/ui, chosen here (provisional).
+ * Queued input events between two frames; overflow drops the queue. */
+#define CANLIN_UI_INPUT_MAX             256u
+/* Layout record entries per frame (widgets plus wrapped lines); more are not recorded. */
+#define CANLIN_UI_RECORD_MAX            4096u
+/* Identity hash table slots per view; power of two, >= 4 x CANLIN_UI_MAX_WIDGETS (the
+ * previous and the current frame can each hold MAX_WIDGETS identities; load <= 50%). */
+#define CANLIN_UI_STATE_SLOTS           2048u
+
 /* §6.2: text/background contrast below this ratio logs a warning (WCAG AA). */
 #define CANLIN_THEME_MIN_CONTRAST       4.5f
 

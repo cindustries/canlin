@@ -326,6 +326,15 @@ void canlin_sandbox_charge(lua_State *L, size_t units)
     charge(L, (lua_Unsigned)units);
 }
 
+int canlin_sandbox_pcall(lua_State *L, int nargs, int nresults)
+{
+    void *ud;
+    int status = lua_pcall(L, nargs, nresults, 0);
+    if (lua_getallocf(L, &ud) == sb_alloc)
+        check_status(L, status); /* memory error or fault: re-raised, never returned */
+    return status;
+}
+
 /* Call the wrapped original (upvalue 1) with all arguments; returns all results. */
 static int call_orig(lua_State *L)
 {

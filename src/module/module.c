@@ -7,6 +7,7 @@
  */
 #include "canlin/module.h"
 #include "canlin/sandbox_limits.h"
+#include "canlin/ui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,7 @@ struct canlin_module {
     char name[CANLIN_MODULE_NAME_MAX + 1];
     char version[CANLIN_MODULE_NAME_MAX + 1];
     char errmsg[CANLIN_MODULE_NAME_MAX + 320];
+    canlin_ui_view *view; /* owned; outlives every Lua state of this module */
 };
 
 /* ---- values ---- */
@@ -330,6 +332,7 @@ typedef struct {
     const char *code;
     const char *msg;
     size_t msglen;
+    canlin_ui_view *view; /* ARG_UI: the open frame's view, NULL = headless */
 } call_args;
 
 static int push_args(lua_State *L, void *ud)
@@ -339,12 +342,8 @@ static int push_args(lua_State *L, void *ud)
      * payload before building it; a payload that does not fit faults the scope. */
     if (a->kind == ARG_VALUE || a->kind == ARG_DONE_OK)
         canlin_sandbox_charge(L, value_cost(a->v));
-    if (a->kind == ARG_UI) {
-        /* TODO(UI flow API spec, core API §9 item 1): the flow API object. Until that
-         * spec exists draw(ui) receives a fresh empty table. */
-        lua_createtable(L, 0, 0);
-        return 1;
-    }
+    if (a->kind == ARG_UI)
+        return canlin_ui_push(L, a->view); /* UI spec §3; charges its construction */
     lua_pushstring(L, a->name);
     if (a->kind == ARG_VALUE) {
         push_value(L, a->v);
@@ -465,6 +464,7 @@ static int start_gen(canlin_module *m, const canlin_module_source *src)
         return CANLIN_MODULE_EEV; /* a live old generation is untouched */
     }
     canlin_sandbox_free(m->sb); /* old generation already retired by the reload */
+    canlin_ui_view_reset(m->view); /* widget state belongs to one generation */
     m->sb = sb;
     m->gen = g;
     m->errors = 0;
@@ -565,6 +565,7 @@ void canlin_module_free(canlin_module *m)
     m->in_call = 0;
     canlin_module_stop(m);
     canlin_sandbox_free(m->sb);
+    canlin_ui_view_free(m->view); /* after the Lua state: ui closures point at it */
     free(m);
 }
 
@@ -648,6 +649,8 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         a.kind = ARG_UI;
         cb = "draw";
         budget = CANLIN_SB_BUDGET_DRAW;
+        if (m->view && canlin_ui_view_frame_begin(m->view) == 0)
+            a.view = m->view;
         break;
     default:
         return CANLIN_SANDBOX_OK;
@@ -657,6 +660,8 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
     st = canlin_sandbox_call_budget(m->sb, cb, budget, a.kind == ARG_UI ? 1 : 2, push_args,
                                     &a, &called);
     m->in_call = 0;
+    if (a.view)
+        canlin_ui_view_frame_end(a.view); /* touches no Lua state; ui is dead from here */
 
     switch (st) {
     case CANLIN_SANDBOX_OK:
@@ -675,5 +680,49 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
     }
     if (m->stop_pending && m->state == CANLIN_MODULE_RUNNING)
         end_gen(m, CANLIN_MODULE_STOPPED);
+    if (a.view && m->state == CANLIN_MODULE_RUNNING && canlin_ui_view_pending(a.view))
+        canlin_ev_invalidate(m->ev, m->gen); /* input left for the next frame */
     return st;
+}
+
+/* ---- UI view (UI spec §2–§3) ---- */
+
+int canlin_module_set_ui(canlin_module *m, canlin_ui *ui, int x, int y, int w, int h)
+{
+    if (m == NULL || ui == NULL || w <= 0 || h <= 0)
+        return CANLIN_MODULE_EINVAL;
+    if (m->in_call)
+        return CANLIN_MODULE_EBUSY;
+    if (m->view == NULL) {
+        m->view = canlin_ui_view_new(ui);
+        if (m->view == NULL)
+            return CANLIN_MODULE_ENOMEM;
+    } else {
+        canlin_ui_view_set_ui(m->view, ui);
+    }
+    canlin_ui_view_set_rect(m->view, x, y, w, h);
+    if (m->state == CANLIN_MODULE_RUNNING)
+        canlin_ev_invalidate(m->ev, m->gen);
+    return CANLIN_MODULE_OK;
+}
+
+canlin_ui_view *canlin_module_view(canlin_module *m)
+{
+    return m ? m->view : NULL;
+}
+
+int canlin_module_input(canlin_module *m, const canlin_ui_input *in)
+{
+    int rc;
+    if (m == NULL || m->view == NULL)
+        return CANLIN_MODULE_EINVAL;
+    if (m->in_call)
+        return CANLIN_MODULE_EBUSY;
+    rc = canlin_ui_view_input(m->view, in);
+    if (rc == CANLIN_UI_EINVAL)
+        return CANLIN_MODULE_EINVAL;
+    /* Queued or overflowed (the overflow release still needs a frame): redraw. */
+    if (m->state == CANLIN_MODULE_RUNNING)
+        canlin_ev_invalidate(m->ev, m->gen);
+    return CANLIN_MODULE_OK;
 }

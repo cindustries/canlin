@@ -79,7 +79,9 @@ int canlin_render_end(canlin_render *r);
  * frame. `font->handle` is the struct nk_user_font for nk_init / nk_style_set_font. */
 typedef struct canlin_render_font {
     struct nk_font_atlas atlas;
-    struct nk_font *font;
+    struct nk_font *font;        /* == size[0] */
+    struct nk_font *size[CANLIN_RENDER_FONT_SIZES]; /* one per requested size, one atlas */
+    int nsizes;
     unsigned char *alpha;
     int w, h;
 } canlin_render_font;
@@ -88,6 +90,11 @@ typedef struct canlin_render_font {
  * built-in font; theme TTF blobs are not baked yet (stb_truetype is not safe on
  * untrusted fonts, see third_party/nuklear/VERSION). */
 int canlin_render_font_default(canlin_render_font *f, float px_height);
+
+/* Same, baking n (1..CANLIN_RENDER_FONT_SIZES) sizes of the built-in font into one atlas
+ * (e.g. body and heading sizes), so one canlin_render_set_atlas() serves all of them.
+ * size[i] is baked at px[i] (> 0). Returns 0 or -1. */
+int canlin_render_font_default_sizes(canlin_render_font *f, const float *px, int n);
 void canlin_render_font_free(canlin_render_font *f);
 
 #endif

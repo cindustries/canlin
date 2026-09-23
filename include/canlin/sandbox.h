@@ -110,4 +110,12 @@ canlin_sandbox_status canlin_sandbox_call(canlin_sandbox *sb, const char *field,
  * return. A lua_State not owned by a sandbox is not charged. */
 void canlin_sandbox_charge(struct lua_State *L, size_t units);
 
+/* lua_pcall for host code inside a callback that must restore its own state when a Lua
+ * function it calls raises (e.g. ui:columns running module functions). An ordinary error
+ * is returned as with lua_pcall (error object on the stack), so the host can clean up
+ * and re-raise it. A memory error or a budget/memory fault is never returned: the scope
+ * is faulted and the fault is re-raised, so host code cannot turn it into a catchable
+ * error. No message handler. */
+int canlin_sandbox_pcall(struct lua_State *L, int nargs, int nresults);
+
 #endif

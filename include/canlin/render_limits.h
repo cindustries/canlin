@@ -10,5 +10,7 @@
 #define CANLIN_RENDER_MAX_THICKNESS     16
 /* Points of one polygon/polyline command; larger commands are skipped whole. */
 #define CANLIN_RENDER_MAX_POLY_POINTS   64
+/* Font sizes baked into one atlas (body plus heading levels). */
+#define CANLIN_RENDER_FONT_SIZES        4
 
 #endif
