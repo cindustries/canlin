@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T04:21:25Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T04:10:24Z
+id: 24
+priority: high
+started: 2026-09-23T04:10:44Z
+status: review
+tags:
+- ui
+- render
+title: UI scale per output + per-view output metrics
+updated: 2026-09-23T04:21:25Z
+---
+
+UI spec §2.1: scale steps 75/100/125/150/200 % per output id (system/local), em = base x DPI x scale, no global display state, re-layout + font rebake on change, CANLIN_UI_FONT_SIZES_MAX LRU. Today DPI lives in canlin_ui (per theme load).
+
+Merged 7a044ff. 5875 ui checks, host + ASan/UBSan green, 7 mutants caught. i686 skipped. Scale persistence in system/local/ waits for store.
