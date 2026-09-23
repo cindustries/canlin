@@ -418,6 +418,448 @@ static void test_reload(void)
     h_done(&h);
 }
 
+/* ---- staged reload with rollback (core API §6, canlin#16) ---- */
+
+/* Old generation: state (n) that must survive a failed reload, a rearming timer, a draw. */
+static const char old_src[] =
+    "local M = {}\n"
+    "local n = 0\n"
+    "function M.init(ctx) print('old init', ctx.generation) print('oldh', canlin.timer.after(10)) end\n"
+    "function M.event(name, p)\n"
+    "  n = n + 1\n"
+    "  print('old ' .. name, n)\n"
+    "  if name == 'timer' then canlin.timer.after(10) end\n"
+    "end\n"
+    "function M.draw() print('old draw') end\n"
+    "return M\n";
+
+static const char new_src[] =
+    "local probe = require('probe')\n"
+    "local M = {}\n"
+    "canlin.timer.after(10)\n"
+    "function M.init(ctx) print('new init', ctx.generation) end\n"
+    "function M.event(name, p) print('new ' .. name, p and p.handle) end\n"
+    "function M.draw() print('new draw') end\n"
+    "return M\n";
+
+typedef struct stage_probe {
+    harness *h;
+    int i;
+    int calls;
+    int stop;             /* call canlin_module_stop from inside the staging */
+    int turn;             /* run a scheduler turn from inside the staging */
+    canlin_ev_gen live;   /* canlin_module_gen seen during staging */
+    int reload_rc;        /* nested reload from inside the staging */
+} stage_probe;
+
+static stage_probe probe;
+
+/* require('probe') runs on the owner thread in the middle of the staging (inside
+ * lua#main of the new generation): the old generation is still live but must get
+ * nothing delivered. */
+static int probe_require(void *ud, const char *name, size_t len, const char **src,
+                         size_t *slen)
+{
+    stage_probe *p = ud;
+    harness *h = p->h;
+    static const char body[] = "return {}";
+    if (len != 5 || memcmp(name, "probe", 5) != 0)
+        return 0;
+    p->calls++;
+    p->live = canlin_module_gen(h->m[p->i]);
+    /* Work for the old generation arriving during the staging: an event and a due timer. */
+    post_event(h, p->i, &ev_go);
+    canlin_ev_fake_clock_advance(&h->clock, 10);
+    if (p->turn)
+        h_turn(h); /* the slot is staged: nothing is dispatched to either generation */
+    p->reload_rc = canlin_module_reload(h->m[p->i], NULL);
+    if (p->stop)
+        canlin_module_stop(h->m[p->i]);
+    *src = body;
+    *slen = sizeof body - 1;
+    return 1;
+}
+
+static void mk_src(canlin_module_source *s, const char *main)
+{
+    memset(s, 0, sizeof *s);
+    s->name = "stage";
+    s->version = "2.0";
+    s->main = main;
+    s->main_len = strlen(main);
+    s->require = probe_require;
+    s->require_ud = &probe;
+}
+
+static int h_load_mem(harness *h, int i, const char *src, size_t mem, uint32_t budget)
+{
+    canlin_module_source s;
+    canlin_sandbox_config cfg;
+    int err = 12345;
+    memset(&s, 0, sizeof s);
+    memset(&cfg, 0, sizeof cfg);
+    s.name = "stage";
+    s.version = "1.0";
+    s.main = src;
+    s.main_len = strlen(src);
+    cfg.mem_limit = mem;
+    cfg.budget = budget;
+    cfg.log = log_fn;
+    cfg.ud = &h->log[i];
+    h->m[i] = canlin_module_load(h->ev, &s, &cfg, &err);
+    return err;
+}
+
+static int same_stats(const canlin_ev_stats *a, const canlin_ev_stats *b)
+{
+    return a->items == b->items && a->bytes == b->bytes && a->queued == b->queued &&
+           a->ops == b->ops && a->timers == b->timers && a->gen == b->gen &&
+           a->staged == b->staged;
+}
+
+/* Success: the new generation sees its own id in init, the old one is never called after
+ * the commit, its handles are stale and its queued work (including what arrived during
+ * the staging) is retired. */
+static void test_stage_commit(void)
+{
+    harness h;
+    canlin_module_source s;
+    canlin_ev_gen old, g;
+    canlin_ev_stats st;
+    long long oldh = 0;
+    const char *p;
+    char line[64];
+    int slot;
+
+    h_init(&h);
+    memset(&probe, 0, sizeof probe);
+    probe.h = &h;
+    probe.turn = 1;
+    CHECK(h_load(&h, 0, "stage", old_src, 0) == CANLIN_MODULE_OK);
+    old = canlin_module_gen(h.m[0]);
+    slot = canlin_ev_module_slot(h.ev, old);
+    p = strstr(h.log[0].buf, "oldh\t");
+    CHECK(p && sscanf(p + 5, "%lld", &oldh) == 1 && oldh != 0);
+    h_turn(&h);
+    CHECK(count(&h.log[0], "old draw") == 1);
+
+    mk_src(&s, new_src);
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_OK);
+    CHECK(probe.calls == 1);
+    CHECK(probe.live == old); /* the old generation stayed live during the staging */
+    CHECK(probe.reload_rc == CANLIN_MODULE_EBUSY);
+    g = canlin_module_gen(h.m[0]);
+    CHECK(g != 0 && g != old && canlin_ev_module_slot(h.ev, g) == slot);
+    CHECK(canlin_ev_module_slot(h.ev, old) == CANLIN_EV_ESTALE);
+    CHECK(canlin_module_reload_error(h.m[0]) == 0);
+    snprintf(line, sizeof line, "new init\t%u", (unsigned)g);
+    CHECK(has(&h.log[0], line));
+    /* The turn during staging delivered nothing: the old generation saw only init/draw. */
+    CHECK(!has(&h.log[0], "old go") && !has(&h.log[0], "old timer"));
+    CHECK(h.orphans == 0);
+    /* Old timer and queued event retired; the new generation's timer remains. */
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(st.gen == g && st.staged == 0 && st.timers == 1 && st.queued == 0 && st.items == 1);
+    /* Old handles are stale for every path. */
+    CHECK(canlin_ev_cancel(h.ev, g, (canlin_ev_handle)oldh) == CANLIN_EV_ESTALE);
+    CHECK(canlin_ev_cancel(h.ev, old, (canlin_ev_handle)oldh) == CANLIN_EV_ESTALE);
+    {
+        canlin_ev_handle t;
+        CHECK(canlin_ev_timer_start(h.ev, old, 1, &t) == CANLIN_EV_ESTALE);
+    }
+    CHECK(canlin_ev_post(h.ev, old, CANLIN_MODULE_SOURCE_EVENT, 0, 0, 0, NULL, 0, NULL) ==
+          CANLIN_EV_ESTALE);
+    h_drain(&h);
+    canlin_ev_fake_clock_advance(&h.clock, 10);
+    h_drain(&h);
+    CHECK(has(&h.log[0], "new draw"));
+    CHECK(count(&h.log[0], "new timer") == 1);
+    CHECK(count(&h.log[0], "old draw") == 1);
+    CHECK(!has(&h.log[0], "old go") && !has(&h.log[0], "old timer"));
+    h_done(&h);
+}
+
+/* One failing reload: everything the new generation admitted is retired, the old one
+ * resumes with its Lua state, timers and the work that arrived during the staging. */
+static void expect_rollback(const char *bad, int want, const char *step, const char *why,
+                            size_t mem, uint32_t budget)
+{
+    harness h;
+    canlin_module_source s;
+    canlin_ev_gen old, g;
+    canlin_ev_stats before, proc_before, st;
+    int slot;
+
+    h_init(&h);
+    memset(&probe, 0, sizeof probe);
+    probe.h = &h;
+    probe.turn = 1;
+    CHECK(h_load_mem(&h, 0, old_src, mem, budget) == CANLIN_MODULE_OK);
+    old = canlin_module_gen(h.m[0]);
+    slot = canlin_ev_module_slot(h.ev, old);
+    h_turn(&h);
+    canlin_ev_fake_clock_advance(&h.clock, 10);
+    h_turn(&h);
+    CHECK(has(&h.log[0], "old timer\t1"));
+    canlin_ev_get_stats(h.ev, slot, &before);
+    canlin_ev_get_stats(h.ev, -1, &proc_before);
+
+    mk_src(&s, bad);
+    CHECK(canlin_module_reload(h.m[0], &s) == want);
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_RUNNING);
+    CHECK(canlin_module_gen(h.m[0]) == old);
+    CHECK(canlin_module_reload_error(h.m[0]) == want);
+    CHECK(strncmp(canlin_module_errmsg(h.m[0]), "reload: ", 8) == 0);
+    CHECK(strstr(canlin_module_errmsg(h.m[0]), step) != NULL);
+    if (why)
+        CHECK(strstr(canlin_module_errmsg(h.m[0]), why) != NULL);
+    CHECK(has(&h.log[0], "reload failed, old generation kept"));
+    CHECK(h.orphans == 0);
+
+    /* The new generation's resources are fully retired: only the event and the timer
+     * expiry that arrived for the old generation during the staging are left. */
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(st.gen == old && st.staged == 0);
+    if (probe.calls) {
+        CHECK(st.queued == before.queued + 1 + (probe.turn ? 1u : 0u));
+        CHECK(st.items == before.items + 1 && st.timers == before.timers);
+    } else {
+        CHECK(same_stats(&st, &before));
+    }
+    /* Old generation resumes: Lua state (n) intact, its timer still fires. */
+    h_turn(&h);
+    if (probe.calls) {
+        CHECK(has(&h.log[0], "old go\t2"));
+        CHECK(has(&h.log[0], "old timer\t3"));
+    }
+    h_drain(&h);
+    canlin_ev_fake_clock_advance(&h.clock, 10);
+    h_drain(&h);
+    CHECK(has(&h.log[0], probe.calls ? "old timer\t4" : "old timer\t2"));
+    CHECK(!has(&h.log[0], "new "));
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(same_stats(&st, &before));
+    canlin_ev_get_stats(h.ev, -1, &st);
+    CHECK(st.items == proc_before.items && st.ops == proc_before.ops &&
+          st.timers == proc_before.timers && st.bytes == proc_before.bytes);
+
+    /* The aborted generation id is never reused. */
+    mk_src(&s, new_src);
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_OK);
+    g = canlin_module_gen(h.m[0]);
+    CHECK(g > old + 1);
+    CHECK(canlin_module_reload_error(h.m[0]) == 0);
+    h_done(&h);
+}
+
+static void test_stage_rollback(void)
+{
+    expect_rollback("this is not lua", CANLIN_MODULE_ELOAD, "lua#main", NULL, 0, 0);
+    expect_rollback("local p = require('probe') canlin.timer.after(1) canlin.invalidate() "
+                    "error('top')",
+                    CANLIN_MODULE_ELOAD, "lua#main", "top", 0, 0);
+    expect_rollback("local p = require('probe') return 42", CANLIN_MODULE_ELOAD, "lua#main",
+                    NULL, 0, 0);
+    expect_rollback("local p = require('probe') local M = {}\n"
+                    "function M.init(ctx) canlin.timer.after(5) canlin.invalidate() "
+                    "error('boom') end\n"
+                    "return M",
+                    CANLIN_MODULE_EINIT, "init", "boom", 0, 0);
+    expect_rollback("local p = require('probe') local M = {}\n"
+                    "function M.init() canlin.timer.after(5) while true do end end\n"
+                    "return M",
+                    CANLIN_MODULE_EINIT, "init", "budget", 0, 100000);
+    expect_rollback("local p = require('probe') local M = {}\n"
+                    "function M.init() canlin.timer.after(5) local t = {} "
+                    "for i = 1, 400000 do t[i] = i end end\n"
+                    "return M",
+                    CANLIN_MODULE_EINIT, "init", "memory", 1024 * 1024, 0);
+}
+
+/* Several aborts in a row never hand out a generation twice; a stop requested during the
+ * staging wins over both generations. */
+static void test_stage_abort_ids_and_stop(void)
+{
+    harness h;
+    canlin_module_source s;
+    canlin_ev_gen seen[4];
+    canlin_ev_stats st;
+    char line[64];
+    int k, j;
+    const char *bad = "local p = require('probe') local M = {}\n"
+                      "function M.init(ctx) print('try', ctx.generation) error('x') end\n"
+                      "return M";
+
+    h_init(&h);
+    memset(&probe, 0, sizeof probe);
+    probe.h = &h;
+    CHECK(h_load(&h, 0, "stage", old_src, 0) == CANLIN_MODULE_OK);
+    mk_src(&s, bad);
+    for (k = 0; k < 4; k++) {
+        const char *p;
+        long long v = 0;
+        CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_EINIT);
+        p = h.log[0].buf;
+        for (j = 0; j <= k; j++) {
+            p = strstr(p, "try\t");
+            if (!p)
+                break;
+            p += 4;
+        }
+        CHECK(p && sscanf(p, "%lld", &v) == 1);
+        seen[k] = (canlin_ev_gen)v;
+        CHECK(seen[k] != canlin_module_gen(h.m[0]));
+        for (j = 0; j < k; j++)
+            CHECK(seen[j] != seen[k]);
+    }
+    mk_src(&s, new_src);
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_OK);
+    for (j = 0; j < 4; j++)
+        CHECK(seen[j] != canlin_module_gen(h.m[0]));
+    snprintf(line, sizeof line, "new init\t%u", (unsigned)canlin_module_gen(h.m[0]));
+    CHECK(has(&h.log[0], line));
+
+    /* Stop from inside the staging (deferred like a stop from a callback). */
+    probe.stop = 1;
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_ESTALE);
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_STOPPED);
+    CHECK(canlin_module_gen(h.m[0]) == 0);
+    canlin_ev_get_stats(h.ev, -1, &st);
+    CHECK(st.items == 0 && st.ops == 0 && st.timers == 0 && st.queued == 0);
+    h_drain(&h);
+    h_done(&h);
+}
+
+/* Both generations share the slot's limits: a slot with no room for one more item is
+ * refused with full and the old generation is untouched. */
+static void test_stage_full(void)
+{
+    harness h;
+    canlin_module_source s;
+    canlin_ev_gen old;
+    canlin_ev_stats before, st;
+    unsigned n = 0;
+    int slot;
+
+    h_init(&h);
+    memset(&probe, 0, sizeof probe);
+    probe.h = &h;
+    CHECK(h_load(&h, 0, "stage", old_src, 0) == CANLIN_MODULE_OK);
+    old = canlin_module_gen(h.m[0]);
+    slot = canlin_ev_module_slot(h.ev, old);
+    h_turn(&h);
+    while (canlin_ev_post(h.ev, old, CANLIN_MODULE_SOURCE_EVENT, 0, 0, 0, (void *)&ev_go, 0,
+                          NULL) == CANLIN_EV_OK)
+        n++;
+    CHECK(n == CANLIN_EV_MOD_MAX_ITEMS - 1); /* one item is the old timer's reservation */
+    canlin_ev_get_stats(h.ev, slot, &before);
+    mk_src(&s, new_src);
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_EFULL);
+    CHECK(probe.calls == 0); /* nothing of the new generation ran */
+    CHECK(canlin_module_reload_error(h.m[0]) == CANLIN_MODULE_EFULL);
+    CHECK(strstr(canlin_module_errmsg(h.m[0]), "full") != NULL);
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_RUNNING);
+    CHECK(canlin_module_gen(h.m[0]) == old);
+    canlin_ev_get_stats(h.ev, slot, &st);
+    CHECK(same_stats(&st, &before));
+    h_drain(&h);
+    CHECK(count(&h.log[0], "old go") == n);
+    /* With room again the reload is admitted. */
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_gen(h.m[0]) != old);
+    h_done(&h);
+}
+
+/* A faulted module has no old generation to fall back to: reload is a plain start, and a
+ * failing one leaves it FAULTED. */
+static void test_reload_faulted(void)
+{
+    harness h;
+    canlin_module_source s;
+    h_init(&h);
+    memset(&probe, 0, sizeof probe);
+    probe.h = &h;
+    CHECK(h_load(&h, 0, "stage", spin_src, 100000) == CANLIN_MODULE_OK);
+    post_event(&h, 0, &ev_go);
+    h_turn(&h);
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_FAULTED);
+    mk_src(&s, "local M = {} function M.init() error('again') end return M");
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_EINIT);
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_FAULTED);
+    CHECK(canlin_module_gen(h.m[0]) == 0);
+    CHECK(canlin_module_reload_error(h.m[0]) == 0);
+    mk_src(&s, new_src);
+    CHECK(canlin_module_reload(h.m[0], &s) == CANLIN_MODULE_OK);
+    CHECK(probe.calls == 1 && probe.live == canlin_module_gen(h.m[0])); /* no old one */
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_RUNNING);
+    h_drain(&h);
+    CHECK(has(&h.log[0], "new draw"));
+    h_done(&h);
+}
+
+/* Reload from inside the module's own callback is refused, as before: the module calls
+ * canlin.cancel on an operation whose producer hook tries to reload it. */
+typedef struct busy_prod {
+    harness *h;
+    int rc;
+} busy_prod;
+
+static void busy_cancel(void *ctx, canlin_ev_handle hd)
+{
+    busy_prod *b = ctx;
+    canlin_module_source s;
+    mk_src(&s, new_src);
+    b->rc = canlin_module_reload(b->h->m[0], &s);
+    CHECK(canlin_ev_op_complete(b->h->ev, hd, CANLIN_EV_FAILURE, NULL, 0, NULL) ==
+          CANLIN_EV_RETIRED);
+}
+
+static const char self_reload_src[] =
+    "local M = {}\n"
+    "function M.event(name, p) print('cancel', canlin.cancel(p.h)) end\n"
+    "return M\n";
+
+static void test_reload_busy(void)
+{
+    harness h;
+    busy_prod b;
+    canlin_ev_producer pr;
+    canlin_ev_handle op;
+    canlin_ev_gen g;
+    canlin_value_pair pair;
+    canlin_value val;
+    canlin_module_event e;
+
+    h_init(&h);
+    memset(&probe, 0, sizeof probe);
+    probe.h = &h;
+    CHECK(h_load(&h, 0, "stage", self_reload_src, 0) == CANLIN_MODULE_OK);
+    g = canlin_module_gen(h.m[0]);
+    b.h = &h;
+    b.rc = 1;
+    pr.cancel = busy_cancel;
+    pr.ctx = &b;
+    CHECK(canlin_ev_op_begin(h.ev, g, 0, &pr, &op) == CANLIN_EV_OK);
+    memset(&pair, 0, sizeof pair);
+    pair.key.type = CANLIN_VALUE_STR;
+    pair.key.s = "h";
+    pair.key.len = 1;
+    pair.val.type = CANLIN_VALUE_INT;
+    pair.val.i = (int64_t)op;
+    memset(&val, 0, sizeof val);
+    val.type = CANLIN_VALUE_TABLE;
+    val.pairs = &pair;
+    val.n = 1;
+    e.name = "go";
+    e.value = &val;
+    post_event(&h, 0, &e);
+    h_drain(&h);
+    CHECK(has(&h.log[0], "cancel\tcancelled"));
+    CHECK(b.rc == CANLIN_MODULE_EBUSY);
+    CHECK(canlin_module_gen(h.m[0]) == g && probe.calls == 0);
+    h_done(&h);
+}
+
 static void expect_load_fail(const char *src, int want)
 {
     harness h;
@@ -763,6 +1205,12 @@ int main(void)
     test_draw_budget();
     test_error_count();
     test_reload();
+    test_stage_commit();
+    test_stage_rollback();
+    test_stage_abort_ids_and_stop();
+    test_stage_full();
+    test_reload_faulted();
+    test_reload_busy();
     test_load_errors();
     test_done_next_turn();
     test_oversize();

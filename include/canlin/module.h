@@ -112,7 +112,7 @@ enum {
     CANLIN_MODULE_EINIT = -5,  /* M.init raised or faulted: fatal for the generation */
     CANLIN_MODULE_EBUSY = -6,  /* called while this module is inside a callback */
     CANLIN_MODULE_ESTALE = -7, /* no running generation: input dropped */
-    CANLIN_MODULE_EFULL = -8   /* the scheduler refused input: dropped (see post_input) */
+    CANLIN_MODULE_EFULL = -8   /* the scheduler refused input (post_input) or a staged reload */
 };
 
 /* Start a generation, create its sandbox (cfg: limits and log sink; cfg->require is
@@ -127,9 +127,30 @@ canlin_module *canlin_module_load(canlin_ev *ev, const canlin_module_source *src
  * (CANLIN_SANDBOX_DEAD). A fault stops the generation (spec §5.3). */
 canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_delivery *d);
 
-/* Retire the current generation (if any) and load `src` as a new one. On failure the
- * module is FAULTED with no generation and the error is returned. */
+/* Load `src` as a new generation (core API §6).
+ *
+ * RUNNING module: staged with rollback. The new sandbox, lua#main and M.init run beside
+ * the old generation, which keeps its Lua state, view widget state, timers, operations
+ * and queued work but gets no deliveries meanwhile. Success retires the old generation
+ * (event runtime §7 order), closes its Lua state and resets the view for the new one.
+ * Any failure retires everything the new generation admitted and the old one resumes
+ * unchanged; the error is returned, canlin_module_reload_error() reports it and
+ * canlin_module_errmsg() says "reload: <step>: <why>" while the module stays RUNNING.
+ * Returns: EFULL when the scheduler cannot admit a second generation in the slot
+ * (canlin_ev_module_stage), EEV when generation ids are exhausted, ENOMEM (no sandbox),
+ * ELOAD/EINIT (lua#main/init failed or faulted), EINVAL (bad src). Input queued for the
+ * old generation during staging is delivered to it after a failure and retired with it
+ * after success. A canlin_module_stop from inside the staging (e.g. a require resolver)
+ * wins: both generations are retired, the module is STOPPED, ESTALE is returned.
+ *
+ * STOPPED or FAULTED module: there is no old generation to fall back to; a plain start,
+ * and on failure the module is FAULTED with no generation.
+ *
+ * EBUSY from inside this module's own callback (including its staging). */
 int canlin_module_reload(canlin_module *m, const canlin_module_source *src);
+/* Code of the last failed staged reload whose old generation kept running (see above),
+ * 0 if the last load/reload/restart succeeded. The shell can show it with errmsg. */
+int canlin_module_reload_error(const canlin_module *m);
 
 /* Stop the generation and close its Lua state; the module is STOPPED. Idempotent. */
 void canlin_module_stop(canlin_module *m);

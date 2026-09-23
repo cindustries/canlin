@@ -144,6 +144,7 @@ typedef struct canlin_ev_stats {
     unsigned control;  /* pending control latch bits (module stats only) */
     int dirty;         /* (module stats only) */
     canlin_ev_gen gen; /* active generation, 0 if none (module stats only) */
+    canlin_ev_gen staged; /* staged generation of a reload, 0 if none (module stats only) */
 } canlin_ev_stats;
 
 canlin_ev *canlin_ev_new(const canlin_ev_clock *clock, const canlin_ev_callbacks *cb, void *ud);
@@ -151,11 +152,26 @@ canlin_ev *canlin_ev_new(const canlin_ev_clock *clock, const canlin_ev_callbacks
 int canlin_ev_free(canlin_ev *ev);
 
 /* Lifecycle. start picks a free slot; reload stops `old` and starts a new generation
- * in the same slot. Stop: mark inactive, cancel timers/ops (producer hooks), retire
- * queued work with accounting but without delivery. Allowed inside a callback. */
+ * in the same slot (unstaged; EINVAL while a reload is staged). Stop: mark inactive,
+ * cancel timers/ops (producer hooks), retire queued work with accounting but without
+ * delivery; works on a live or a staged generation. Allowed inside a callback. */
 int canlin_ev_module_start(canlin_ev *ev, canlin_ev_gen *gen_out);
 int canlin_ev_module_stop(canlin_ev *ev, canlin_ev_gen gen);
 int canlin_ev_module_reload(canlin_ev *ev, canlin_ev_gen old_gen, canlin_ev_gen *new_gen);
+/* Staged reload (core API §6): stage starts a new generation `*new_gen` in old_gen's slot
+ * while old_gen stays live with its timers, operations, queue and latches. Both
+ * generations accept admissions and count against the slot's shared limits, but the slot
+ * dispatches nothing while a generation is staged (turn results do not report it as
+ * runnable). EFULL when the slot or process has no room left for one more item and one
+ * more operation; EINVAL if old_gen is not the slot's live generation or a reload is
+ * already staged; ELIMIT when generation ids are exhausted.
+ * commit: stop the live generation (full stop order) and make the staged one live.
+ * abort: stop the staged generation; the live one resumes delivery unchanged.
+ * Both are EINVAL for a generation that is not staged. A generation id is never reused,
+ * aborted or not. */
+int canlin_ev_module_stage(canlin_ev *ev, canlin_ev_gen old_gen, canlin_ev_gen *new_gen);
+int canlin_ev_module_commit(canlin_ev *ev, canlin_ev_gen new_gen);
+int canlin_ev_module_abort(canlin_ev *ev, canlin_ev_gen new_gen);
 /* Returns the slot, or CANLIN_EV_ESTALE. */
 int canlin_ev_module_slot(const canlin_ev *ev, canlin_ev_gen gen);
 
