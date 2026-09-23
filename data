@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T06:12:29Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T06:02:26Z
+id: 55
+priority: medium
+started: 2026-09-23T06:02:27Z
+status: review
+tags:
+- ui
+- font
+title: Switch built-in font to Inter 4.1
+updated: 2026-09-23T06:12:29Z
+---
+
+Owner decision 2026-09-23 after comparing DejaVu/Inter/Atkinson/Plex.
+
+Merged 5b15c51. Host, ASan/UBSan and i686 native run green. Subset 23.8 KB (-15 KB). mkfont.py now deterministic.
