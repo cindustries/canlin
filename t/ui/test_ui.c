@@ -1121,6 +1121,231 @@ static void test_render_e2e(void)
     h_done(&h);
 }
 
+/* ---- canlin#36 polish: pixel checks at 100/150/200 % ---- */
+
+static const int polish_scales[] = {100, 150, 200};
+
+enum { PW = 1000, PH = 1000 }; /* largest view: 5 x 200 */
+static unsigned char polish_px[PW * PH * 3];
+
+/* Initialises h at scale s with a (5 s) x (5 s) px view, draws and renders it over a
+ * magenta clear. */
+static void polish_render(harness *h, const char *src, int s)
+{
+    canlin_render r;
+    int w = 5 * s;
+    h_init(h, NULL, 1.0f, src, w, w);
+    CHECK(canlin_ui_output_set_scale(h->out, s) == CANLIN_UI_OK);
+    h_drain(h);
+    CHECK(!has(h, "draw:"));
+    CHECK(canlin_ui_view_em(canlin_module_view(h->m)) == 16.0f * (float)s / 100.0f);
+    CHECK(canlin_render_init(&r, polish_px, w, w, (size_t)w * 3, NULL, NULL) == 0);
+    canlin_render_begin(&r);
+    canlin_render_clear(&r, nk_rgb(255, 0, 255));
+    canlin_ui_view_render(canlin_module_view(h->m), &r);
+    canlin_render_end(&r);
+}
+
+static int pix(int w, int x, int y, canlin_theme_rgb c)
+{
+    const unsigned char *p = polish_px + ((size_t)y * (size_t)w + (size_t)x) * 3;
+    return p[0] == c.r && p[1] == c.g && p[2] == c.b;
+}
+
+static const char bg_src[] =
+    "local M = {}\n"
+    "function M.draw(ui)\n"
+    "  ui:button('A')\n"
+    "  ui:text('t')\n"
+    "end\n"
+    "return M\n";
+
+/* The view background covers the whole view rect with square corners: no pixel of the
+ * clear colour survives, the four corners carry the background role. Before canlin#36
+ * the window used the theme radius and left the corners unpainted. */
+static void test_view_background_square(void)
+{
+    size_t k;
+    canlin_theme t;
+    canlin_theme_builtin(&t);
+    CHECK(t.radius > 0.0f); /* otherwise the test proves nothing */
+    for (k = 0; k < 3; k++) {
+        int s = polish_scales[k], w = 5 * s, x, y, magenta = 0;
+        harness h;
+        canlin_theme_rgb bg = t.color[CANLIN_THEME_BACKGROUND], mg = {255, 0, 255};
+        polish_render(&h, bg_src, s);
+        for (y = 0; y < w; y++)
+            for (x = 0; x < w; x++)
+                magenta += pix(w, x, y, mg);
+        CHECK(magenta == 0);
+        CHECK(pix(w, 0, 0, bg) && pix(w, w - 1, 0, bg) && pix(w, 0, w - 1, bg) &&
+              pix(w, w - 1, w - 1, bg));
+        h_done(&h);
+    }
+}
+
+static const char toggle_src[] =
+    "local M = {}\n"
+    "local on = false\n"
+    "function M.draw(ui)\n"
+    "  local o = ui:toggle('Toggle', on)\n"
+    "  if o ~= on then on = o print('on=' .. tostring(on)) end\n"
+    "end\n"
+    "return M\n";
+
+/* Toggle: a framed box of 1.25 em, a gap of 2 spacing units to the label (both scale
+ * with em), and a hit target of at least 2.5 em covering box and label: a click on the
+ * label toggles. */
+static void test_toggle_geometry(void)
+{
+    size_t k;
+    canlin_theme t;
+    int gaps[3];
+    canlin_theme_builtin(&t);
+    for (k = 0; k < 3; k++) {
+        int s = polish_scales[k], w = 5 * s;
+        harness h;
+        const canlin_ui_rect *r;
+        float em = 16.0f * (float)s / 100.0f, unit = t.spacing * 0.25f * em;
+        canlin_theme_rgb bg = t.color[CANLIN_THEME_BACKGROUND];
+        gaps[k] = 0;
+        polish_render(&h, toggle_src, s);
+        r = find(&h, CANLIN_UI_W_TOGGLE, CANLIN_UI_P_BOX, 0);
+        CHECK(r != NULL);
+        if (r) {
+            int bs = (int)(1.25f * em + 0.5f), bx = r->x, by = r->y + (r->h - bs) / 2;
+            int my = by + bs / 2, x, y, lx0 = w, lx1 = 0;
+            CHECK(r->h >= (int)(2.5f * em + 0.999f));
+            /* frame (muted) on both sides, surface inside, background right after */
+            CHECK(pix(w, bx, my, t.color[CANLIN_THEME_MUTED]));
+            CHECK(pix(w, bx + bs - 1, my, t.color[CANLIN_THEME_MUTED]));
+            CHECK(pix(w, bx + bs / 2, my, t.color[CANLIN_THEME_SURFACE]));
+            CHECK(pix(w, bx + bs, my, bg));
+            /* label extent: every non-background pixel right of the box within the row */
+            for (y = r->y; y < r->y + r->h; y++)
+                for (x = bx + bs; x < w; x++)
+                    if (!pix(w, x, y, bg)) {
+                        lx0 = x < lx0 ? x : lx0;
+                        lx1 = x > lx1 ? x : lx1;
+                    }
+            CHECK(lx0 < lx1);
+            gaps[k] = lx0 - (bx + bs);
+            CHECK(gaps[k] >= (int)(2.0f * unit) && gaps[k] <= (int)(2.0f * unit + 0.25f * em));
+            /* the hit target covers box and label */
+            CHECK(r->x <= bx && r->x + r->w > lx1 && r->y <= by && r->y + r->h >= by + bs);
+            /* a click on the label (not the box) toggles; the cursor shows in accent */
+            input(&h, CANLIN_UI_IN_MOTION, (lx0 + lx1) / 2, r->y + r->h / 2, 0);
+            input(&h, CANLIN_UI_IN_BUTTON, (lx0 + lx1) / 2, r->y + r->h / 2, 1);
+            input(&h, CANLIN_UI_IN_BUTTON, (lx0 + lx1) / 2, r->y + r->h / 2, 0);
+            h_drain(&h);
+            CHECK(count(&h, "on=true") == 1);
+            {
+                canlin_render rr;
+                CHECK(canlin_render_init(&rr, polish_px, w, w, (size_t)w * 3, NULL, NULL) == 0);
+                canlin_render_begin(&rr);
+                canlin_ui_view_render(canlin_module_view(h.m), &rr);
+                canlin_render_end(&rr);
+                CHECK(pix(w, bx + bs / 2, my, t.color[CANLIN_THEME_ACCENT]));
+                CHECK(pix(w, bx, my, t.color[CANLIN_THEME_MUTED]));
+            }
+        }
+        h_done(&h);
+    }
+    /* the gap grows with em (x1.5, x2 within the glyph's own bearing) */
+    CHECK(gaps[1] > gaps[0] && gaps[2] > gaps[1]);
+    CHECK(gaps[2] >= 2 * gaps[0] - 2);
+}
+
+static const char section_src[] =
+    "local M = {}\n"
+    "function M.draw(ui)\n"
+    "  ui:section('Open', function() ui:text('in') end)\n"
+    "  ui:section('Shut', function() ui:text('no') end, {open = false})\n"
+    "  ui:choice('Pick', {'aa', 'bb'}, 1)\n"
+    "end\n"
+    "return M\n";
+
+/* Bounding box of pixels of colour c inside [x0, x1) x [y0, y1); 0 if none. */
+static int bbox(int w, canlin_theme_rgb c, int x0, int y0, int x1, int y1, int *bx0, int *by0,
+                int *bx1, int *by1)
+{
+    int x, y, n = 0;
+    *bx0 = *by0 = 1 << 30;
+    *bx1 = *by1 = -1;
+    for (y = y0; y < y1; y++)
+        for (x = x0; x < x1; x++)
+            if (pix(w, x, y, c)) {
+                n++;
+                *bx0 = x < *bx0 ? x : *bx0;
+                *by0 = y < *by0 ? y : *by0;
+                *bx1 = x > *bx1 ? x : *bx1;
+                *by1 = y > *by1 ? y : *by1;
+            }
+    return n;
+}
+
+/* Section header vs choice: the header is a heading-style row (no box fill, separator
+ * along the bottom, arrow in its first em: down when open, right when closed, title
+ * left-aligned after it); the choice keeps its surface box with the arrow on the right. */
+static void test_section_header_look(void)
+{
+    size_t k;
+    canlin_theme t;
+    canlin_theme_builtin(&t);
+    for (k = 0; k < 3; k++) {
+        int s = polish_scales[k], w = 5 * s, i;
+        harness h;
+        const canlin_ui_rect *sec[2], *ch;
+        float em = 16.0f * (float)s / 100.0f;
+        canlin_theme_rgb tx = t.color[CANLIN_THEME_TEXT], bg = t.color[CANLIN_THEME_BACKGROUND];
+        polish_render(&h, section_src, s);
+        sec[0] = find(&h, CANLIN_UI_W_SECTION, CANLIN_UI_P_BOX, 0);
+        sec[1] = find(&h, CANLIN_UI_W_SECTION, CANLIN_UI_P_BOX, 1);
+        ch = find(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_BOX, 0);
+        CHECK(sec[0] && sec[1] && ch);
+        if (!(sec[0] && sec[1] && ch)) {
+            h_done(&h);
+            continue;
+        }
+        for (i = 0; i < 2; i++) {
+            const canlin_ui_rect *r = sec[i];
+            int ax0, ay0, ax1, ay1, tx0, ty0, tx1, ty1, e = (int)em, mid = r->y + r->h / 2;
+            CHECK(r->h >= (int)(2.5f * em + 0.999f));
+            /* no box fill: background at both ends of the row's centre line */
+            CHECK(pix(w, r->x + r->w - 3, mid, bg));
+            CHECK(pix(w, r->x + e + 2, r->y + 2, bg));
+            /* separator along the bottom edge */
+            CHECK(pix(w, r->x + r->w / 2, r->y + r->h - 1, t.color[CANLIN_THEME_MUTED]));
+            /* arrow inside the first em */
+            CHECK(bbox(w, tx, r->x, r->y, r->x + e, r->y + r->h, &ax0, &ay0, &ax1, &ay1) > 4);
+            CHECK(ax0 >= r->x && ax1 < r->x + e);
+            if (i == 0) { /* open: pointing down, the top row is the widest */
+                int top = bbox(w, tx, ax0, ay0, ax1 + 1, ay0 + 1, &tx0, &ty0, &tx1, &ty1);
+                int bot = bbox(w, tx, ax0, ay1, ax1 + 1, ay1 + 1, &tx0, &ty0, &tx1, &ty1);
+                CHECK(top > bot && top >= (ax1 - ax0) - 1);
+            } else { /* closed: pointing right, the left column is the tallest */
+                int lft = bbox(w, tx, ax0, ay0, ax0 + 1, ay1 + 1, &tx0, &ty0, &tx1, &ty1);
+                int rgt = bbox(w, tx, ax1, ay0, ax1 + 1, ay1 + 1, &tx0, &ty0, &tx1, &ty1);
+                CHECK(lft > rgt && lft >= (ay1 - ay0) - 1);
+            }
+            /* title left-aligned: starts within the second em, not centred */
+            CHECK(bbox(w, tx, r->x + e, r->y, r->x + r->w, r->y + r->h, &tx0, &ty0, &tx1, &ty1) >
+                  0);
+            CHECK(tx0 >= r->x + e && tx0 < r->x + 2 * e);
+        }
+        /* choice unchanged: surface box, its arrow in the right part, not the left em */
+        {
+            int x0, y0, x1, y1;
+            CHECK(pix(w, ch->x + ch->w / 2, ch->y + 3, t.color[CANLIN_THEME_SURFACE]));
+            CHECK(bbox(w, tx, ch->x + ch->w - 3 * (int)em, ch->y, ch->x + ch->w, ch->y + ch->h,
+                       &x0, &y0, &x1, &y1) > 4);
+            CHECK(bbox(w, tx, ch->x, ch->y, ch->x + (int)em / 2, ch->y + ch->h, &x0, &y0, &x1,
+                       &y1) == 0);
+        }
+        h_done(&h);
+    }
+}
+
 /* ---- outputs and UI scale (spec §2.1) ---- */
 
 static const char scale_src[] =
@@ -1576,6 +1801,9 @@ int main(void)
     test_scroll();
     test_draw_charge();
     test_render_e2e();
+    test_view_background_square();
+    test_toggle_geometry();
+    test_section_header_look();
     test_scale_doubles();
     test_scale_columns_dirty();
     test_scale_min_touch();

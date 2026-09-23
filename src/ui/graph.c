@@ -748,6 +748,30 @@ static int type_clash(const gport *a, const gport *b)
     return a->out != b->out && a->type && b->type && !streq(a->type, a->tyl, b->type, b->tyl);
 }
 
+/* Drag preview (spec §5.2): port p of node n shows as incompatible when a drop there
+ * would be rejected locally for a reason visible before the drop: a type clash, the
+ * dragging node's own ports, or an input that already carries the identical edge. The
+ * edge lifted by this drag (lifted >= 0) does not count: dropping it back is a no-op. */
+static int preview_bad(const canlin_ui_graph *g, int sn, unsigned sp, int lifted, int n,
+                       unsigned p)
+{
+    const gport *a = &g->p[sp], *b = &g->p[p];
+    unsigned k;
+    if (type_clash(a, b) || n == sn)
+        return 1;
+    if (a->out == b->out)
+        return 0;
+    for (k = 0; k < g->ne; k++) {
+        const gedge *x = &g->e[k];
+        if ((int)k == lifted)
+            continue;
+        if (a->out ? ((int)x->fn == sn && x->fp == sp && (int)x->tn == n && x->tp == p)
+                   : ((int)x->fn == n && x->fp == p && (int)x->tn == sn && x->tp == sp))
+            return 1;
+    }
+    return 0;
+}
+
 /* ---- drawing ---- */
 
 static struct nk_color role(const canlin_ui_graph_env *e, int r)
@@ -870,7 +894,8 @@ static float draw_label(struct nk_command_buffer *out, const struct nk_user_font
     return w;
 }
 
-static void draw_node(geo *c, int i, const gport *src)
+/* src_n/src_p: the port drag in progress (src_p < 0: none); lifted: its lifted edge. */
+static void draw_node(geo *c, int i, int src_n, int src_p, int lifted)
 {
     canlin_ui_graph_env *e = c->e;
     const canlin_ui_graph *g = c->g;
@@ -893,12 +918,14 @@ static void draw_node(geo *c, int i, const gport *src)
                r.x + 0.5f * em, r.y + CANLIN_UI_GRAPH_TITLE_EM * em / 2.0f, r.w - em, 0,
                role(e, CANLIN_THEME_TEXT));
     y = r.y + CANLIN_UI_GRAPH_TITLE_EM * em;
-    nk_stroke_line(out, r.x, y, r.x + r.w, y, th, role(e, CANLIN_THEME_MUTED));
+    /* A filled band, not a line: the renderer's line stamps a th square on both inclusive
+     * end points and overshot the right border (spec §6.2: strokes stay inside r). */
+    nk_fill_rect(out, nk_rect(r.x, floorf(y), r.w, th), 0, role(e, CANLIN_THEME_MUTED));
     for (k = 0; k < n->nin + n->nout; k++) {
         const gport *p = &g->p[n->p0 + k];
         float cx, cy;
         struct nk_rect t = port_target(c, i, n->p0 + k);
-        int bad = src && type_clash(src, p);
+        int bad = src_p >= 0 && preview_bad(g, src_n, (unsigned)src_p, lifted, i, n->p0 + k);
         port_centre(c, i, n->p0 + k, &cx, &cy);
         nk_fill_circle(out, nk_rect(cx - dotr, cy - dotr, 2 * dotr, 2 * dotr),
                        role(e, bad ? CANLIN_THEME_DANGER : CANLIN_THEME_ACCENT));
@@ -1282,7 +1309,7 @@ void canlin_ui_graph_run(lua_State *L, canlin_ui_graph *g, int fit, canlin_ui_gr
                        role(e, g->sel_edge == (int)k ? CANLIN_THEME_ACCENT : CANLIN_THEME_TEXT));
         }
         for (k = 0; k < g->nn; k++)
-            draw_node(&c, (int)k, src_p >= 0 ? &g->p[src_p] : NULL);
+            draw_node(&c, (int)k, src_n, src_p, took ? st->dedge : -1);
         if (src_p >= 0) {
             float q[8], sx, sy;
             port_centre(&c, src_n, (unsigned)src_p, &sx, &sy);
