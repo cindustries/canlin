@@ -164,6 +164,10 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
   `canlin_module_event {name, value}`. `CANLIN_MARSHAL_*` apply to the result value,
   not to the `{handle, ok, …}` wrapper; `canlin_value_check` lets a producer check
   before completing. A failure with an unknown or missing code arrives as `unavailable`.
+- **Marshalling is charged** to the receiving callback: the budget is reset, the payload
+  cost (`CANLIN_SB_COST_ELEM` per entry, bytes / `CANLIN_SB_COST_BYTES_PER_UNIT` per
+  string) is charged, then values are built and the callback runs. Host functions use
+  `canlin_sandbox_charge` for this; Lua cannot reach it.
 - **Reserved event names:** `"timer"` and `"done"` only come from the core; posting a
   module event with either name is refused.
 - **First draw:** a successful `init` marks the module dirty. `canlin.*` is usable at
