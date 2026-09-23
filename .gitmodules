@@ -1,0 +1,3 @@
+[submodule "third_party/libbee"]
+	path = third_party/libbee
+	url = ../libbee
