@@ -103,4 +103,11 @@ canlin_sandbox_status canlin_sandbox_call_budget(canlin_sandbox *sb, const char 
 canlin_sandbox_status canlin_sandbox_call(canlin_sandbox *sb, const char *field, int nargs,
                                           canlin_sandbox_host_fn push, void *ud);
 
+/* Charge `units` of native host work (e.g. building payload values) against the budget of
+ * the running callback. Only for host code inside canlin_sandbox_host/_call (a
+ * canlin_sandbox_host_fn): if the units do not fit, the scope is faulted exactly like an
+ * exhausted instruction budget and a Lua error is raised, so the host function does not
+ * return. A lua_State not owned by a sandbox is not charged. */
+void canlin_sandbox_charge(struct lua_State *L, size_t units);
+
 #endif

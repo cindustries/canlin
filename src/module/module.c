@@ -83,6 +83,23 @@ int canlin_value_check(const canlin_value *v)
     return check_rec(v, 0, &entries, &bytes);
 }
 
+/* Budget units for building v in Lua (sandbox_limits.h). Only called on values that passed
+ * canlin_value_check, so the recursion is depth-bounded and the sum cannot overflow. */
+static size_t value_cost(const canlin_value *v)
+{
+    size_t k, cost = 0;
+    if (v == NULL)
+        return 0;
+    if (v->type == CANLIN_VALUE_STR)
+        return v->len / CANLIN_SB_COST_BYTES_PER_UNIT + 1u;
+    if (v->type == CANLIN_VALUE_TABLE) {
+        cost = v->n * CANLIN_SB_COST_ELEM;
+        for (k = 0; k < v->n; k++)
+            cost += value_cost(&v->pairs[k].key) + value_cost(&v->pairs[k].val);
+    }
+    return cost;
+}
+
 /* Only called on values that passed canlin_value_check (depth-bounded recursion). */
 static void push_value(lua_State *L, const canlin_value *v)
 {
@@ -318,6 +335,10 @@ typedef struct {
 static int push_args(lua_State *L, void *ud)
 {
     call_args *a = ud;
+    /* Marshalling runs inside the budgeted callback (budget already reset): charge the
+     * payload before building it; a payload that does not fit faults the scope. */
+    if (a->kind == ARG_VALUE || a->kind == ARG_DONE_OK)
+        canlin_sandbox_charge(L, value_cost(a->v));
     if (a->kind == ARG_UI) {
         /* TODO(UI flow API spec, core API §9 item 1): the flow API object. Until that
          * spec exists draw(ui) receives a fresh empty table. */

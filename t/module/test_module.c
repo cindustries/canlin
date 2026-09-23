@@ -584,6 +584,99 @@ static void test_oversize(void)
     h_done(&h);
 }
 
+/* canlin#15: building a payload in Lua is charged to the receiving callback's budget
+ * (CANLIN_SB_COST_* in sandbox_limits.h), before the callback runs. */
+static const char marshal_src[] =
+    "local M = {}\n"
+    "function M.event(name, p)\n"
+    "  if name == 'done' then p = p.result end\n"
+    "  local n = 0 for _ in pairs(p) do n = n + 1 end\n"
+    "  print('got', name, n)\n"
+    "end\n"
+    "return M\n";
+
+#define MARSHAL_STR_LEN (CANLIN_MARSHAL_MAX_BYTES / CANLIN_MARSHAL_MAX_ENTRIES)
+static char marshal_bytes[CANLIN_MARSHAL_MAX_BYTES];
+static canlin_value_pair marshal_pairs[CANLIN_MARSHAL_MAX_ENTRIES];
+
+static void test_marshal_budget(void)
+{
+    harness h;
+    canlin_value big, small;
+    canlin_module_event ev_big, ev_small;
+    canlin_module_result r_big;
+    canlin_ev_handle op;
+    uint32_t big_cost, tiny;
+    char line[64];
+    unsigned k;
+
+    /* A payload at the marshalling limits: MAX_ENTRIES entries whose string values use
+     * exactly MAX_BYTES. It is legal, and building it costs big_cost units. */
+    memset(marshal_bytes, 'x', sizeof marshal_bytes);
+    for (k = 0; k < CANLIN_MARSHAL_MAX_ENTRIES; k++) {
+        marshal_pairs[k].key.type = CANLIN_VALUE_INT;
+        marshal_pairs[k].key.i = (int64_t)k + 1;
+        marshal_pairs[k].val.type = CANLIN_VALUE_STR;
+        marshal_pairs[k].val.s = marshal_bytes + (size_t)k * MARSHAL_STR_LEN;
+        marshal_pairs[k].val.len = MARSHAL_STR_LEN;
+    }
+    memset(&big, 0, sizeof big);
+    big.type = CANLIN_VALUE_TABLE;
+    big.pairs = marshal_pairs;
+    big.n = CANLIN_MARSHAL_MAX_ENTRIES;
+    CHECK(canlin_value_check(&big) == CANLIN_VALUE_OK);
+    big_cost = CANLIN_MARSHAL_MAX_ENTRIES *
+               (CANLIN_SB_COST_ELEM + MARSHAL_STR_LEN / CANLIN_SB_COST_BYTES_PER_UNIT + 1u);
+    small = big;
+    small.n = 2;
+    /* The tiny budget cannot build the big payload but leaves ample room for small ones. */
+    tiny = big_cost - 1u;
+    CHECK(tiny > 100u * (big_cost / CANLIN_MARSHAL_MAX_ENTRIES) * small.n);
+    CHECK(tiny < CANLIN_SB_BUDGET_DRAW);
+
+    ev_big.name = "big";
+    ev_big.value = &big;
+    ev_small.name = "small";
+    ev_small.value = &small;
+    memset(&r_big, 0, sizeof r_big);
+    r_big.value = &big;
+
+    h_init(&h);
+    CHECK(h_load(&h, 0, "tiny", marshal_src, tiny) == CANLIN_MODULE_OK);
+    CHECK(h_load(&h, 1, "normal", marshal_src, 0) == CANLIN_MODULE_OK);
+    CHECK(h_load(&h, 2, "tinyop", marshal_src, tiny) == CANLIN_MODULE_OK);
+
+    /* Small payloads fit the tiny budget, repeatedly: the budget is reset per callback. */
+    for (k = 0; k < 3; k++)
+        post_event(&h, 0, &ev_small);
+    post_event(&h, 1, &ev_big); /* default budget: unaffected */
+    h_drain(&h);
+    CHECK(count(&h.log[0], "got\tsmall\t2") == 3);
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_RUNNING);
+    snprintf(line, sizeof line, "got\tbig\t%u", (unsigned)CANLIN_MARSHAL_MAX_ENTRIES);
+    CHECK(has(&h.log[1], line));
+    CHECK(canlin_module_get_state(h.m[1]) == CANLIN_MODULE_RUNNING);
+
+    /* Big event payload with the tiny budget: the scope faults before Lua runs. */
+    post_event(&h, 0, &ev_big);
+    h_drain(&h);
+    CHECK(!has(&h.log[0], "got\tbig"));
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_FAULTED);
+    CHECK(canlin_module_gen(h.m[0]) == 0);
+    CHECK(strstr(canlin_module_errmsg(h.m[0]), "budget") != NULL);
+
+    /* Same for a successful operation result. */
+    CHECK(canlin_ev_op_begin(h.ev, canlin_module_gen(h.m[2]), 64, NULL, &op) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, op, CANLIN_EV_SUCCESS, &r_big, 64, NULL) == CANLIN_EV_OK);
+    h_drain(&h);
+    CHECK(!has(&h.log[2], "got\tdone"));
+    CHECK(canlin_module_get_state(h.m[2]) == CANLIN_MODULE_FAULTED);
+    CHECK(strstr(canlin_module_errmsg(h.m[2]), "budget") != NULL);
+
+    CHECK(canlin_module_get_state(h.m[1]) == CANLIN_MODULE_RUNNING); /* isolated */
+    h_done(&h);
+}
+
 /* Module B knows module A's timer handle but cannot cancel it, cannot mark A dirty and
  * cannot see A's globals. */
 static const char victim_src[] =
@@ -673,6 +766,7 @@ int main(void)
     test_load_errors();
     test_done_next_turn();
     test_oversize();
+    test_marshal_budget();
     test_isolation();
     test_control_consumed();
     if (failures) {

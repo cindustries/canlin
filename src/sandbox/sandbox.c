@@ -318,6 +318,14 @@ void canlin_lstr_charge(lua_State *L, size_t steps)
     charge(L, (lua_Unsigned)steps);
 }
 
+void canlin_sandbox_charge(lua_State *L, size_t units)
+{
+    void *ud;
+    if (lua_getallocf(L, &ud) != sb_alloc)
+        return;
+    charge(L, (lua_Unsigned)units);
+}
+
 /* Call the wrapped original (upvalue 1) with all arguments; returns all results. */
 static int call_orig(lua_State *L)
 {

@@ -37,6 +37,9 @@
  *   - load(): CANLIN_SB_COST_LOAD_BYTE units per source byte, before parsing.
  *   - pattern matching (find/match/gmatch/gsub, patched lstrlib): 1 unit per
  *     match step/compared byte, reported in chunks of 256 steps.
+ *   - payload marshalling (module delivery, canlin#15): CANLIN_SB_COST_ELEM units per
+ *     table entry plus 1 unit per CANLIN_SB_COST_BYTES_PER_UNIT string bytes, plus 1
+ *     per string, charged up-front to the callback that receives the payload.
  * Charged up-front where the size is known in advance; unpack, byte, sub and
  * format are charged after the call from their (stack/memory-bounded) result. */
 #define CANLIN_SB_COST_ELEM           1u                  /* provisional */
