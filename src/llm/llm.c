@@ -106,8 +106,13 @@ static const llm_tool tools[] = {
      "\"type\":{\"type\":\"string\",\"enum\":[\"heading\",\"text\",\"bubble\",\"field\","
      "\"area\",\"toggle\",\"choice\",\"meter\",\"separator\",\"section\",\"columns\","
      "\"graph\",\"button\"]},\"id\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"},"
-     "\"label\":{\"type\":\"string\"},\"options\":{\"type\":\"array\",\"items\":"
-     "{\"type\":\"string\"}},\"action\":{\"type\":\"string\",\"enum\":[\"submit\"]}},"
+     "\"label\":{\"type\":\"string\"},\"value\":{},\"index\":{\"type\":\"integer\"},"
+     "\"role\":{\"type\":\"string\",\"enum\":[\"user\",\"assistant\"]},"
+     "\"options\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},"
+     "\"widgets\":{\"type\":\"array\"},\"left\":{\"type\":\"array\"},"
+     "\"right\":{\"type\":\"array\"},\"nodes\":{\"type\":\"array\"},"
+     "\"edges\":{\"type\":\"array\"},"
+     "\"action\":{\"type\":\"string\",\"enum\":[\"submit\"]}},"
      "\"required\":[\"type\"]}}},\"required\":[\"widgets\"]}"},
 };
 

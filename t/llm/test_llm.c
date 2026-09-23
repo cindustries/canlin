@@ -1,6 +1,7 @@
 /* LLM providers contract tests (LLM providers spec §2–§9, core API §3, §5): the real
  * sandbox, scheduler, module layer and openai-chat dialect against the fixture
  * transport, fake clock, no network, no key of any real provider. Exits 0 on success. */
+#include "canlin/json.h"
 #include "canlin/llm.h"
 #include "canlin/module.h"
 
@@ -569,6 +570,23 @@ static void test_oversize(void)
     free(body);
 }
 
+static int tok_nop(void *ud, const canlin_json_token *t)
+{
+    (void)ud;
+    (void)t;
+    return 0;
+}
+
+/* The whole body (tool schema included) is one valid JSON document. */
+static int json_ok(const char *p, size_t n)
+{
+    static char buf[CANLIN_LLM_JSON_STRING_MAX];
+    canlin_json js;
+    canlin_json_limits lim = {CANLIN_LLM_JSON_DEPTH, sizeof buf, 64, CANLIN_LLM_REQUEST_MAX};
+    return canlin_json_init(&js, &lim, buf, sizeof buf, tok_nop, NULL) == CANLIN_JSON_OK &&
+           canlin_json_feed(&js, p, n) == CANLIN_JSON_OK && canlin_json_finish(&js) == CANLIN_JSON_OK;
+}
+
 static void test_golden_request(void)
 {
     static const char setup[] =
@@ -606,6 +624,7 @@ static void test_golden_request(void)
     if (rec && strncmp(rec->body, golden_head, strlen(golden_head)) != 0)
         fprintf(stderr, "body: %s\n", rec->body);
     CHECK(rec && strncmp(rec->body, golden_head, strlen(golden_head)) == 0);
+    CHECK(rec && json_ok(rec->body, rec->body_len));
     CHECK(rec && rec->body_len > strlen(golden_tail) &&
           strcmp(rec->body + rec->body_len - strlen(golden_tail), golden_tail) == 0);
     h_done(&h);
