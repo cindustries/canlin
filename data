@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-23T17:43:22Z
+claimed_by: canlin
+class: standard
+created: 2026-09-23T05:13:41Z
+id: 39
+priority: high
+started: 2026-09-23T17:32:41Z
+status: review
+tags:
+- llm
+title: 'LLM step 2: anthropic-messages dialect'
+updated: 2026-09-23T17:43:22Z
+---
+
+LLM providers spec §2.1, §10.2.
+
+Landed b700136. host make test green; i686 build + qemu-i386 -cpu pentium2 user-mode test_llm/test_response green; full-system canlin-os gate unavailable. Open: lmstudio-anthropic preset w/ dummy key?; truncated tool under max_tokens -> fail vs length (both dialects); anthropic-version per preset if a gateway needs it; live smoke vs MiniMax/Moonshot not done.
