@@ -6,12 +6,7 @@
 #ifndef CANLIN_MODULE_LIMITS_H
 #define CANLIN_MODULE_LIMITS_H
 
-/* Instruction budget of a draw callback; it runs every dirty frame. Belongs with the
- * sandbox limits; defined here until sandbox_limits.h adopts it (guarded so the two
- * cannot conflict). The effective draw budget is min(this, configured budget). */
-#ifndef CANLIN_SB_BUDGET_DRAW
-#define CANLIN_SB_BUDGET_DRAW        500000u
-#endif
+/* The draw budget CANLIN_SB_BUDGET_DRAW lives in sandbox_limits.h. */
 
 /* Consecutive erroring callbacks before the scope is faulted (spec §4). */
 #define CANLIN_MODULE_MAX_ERRORS     8u

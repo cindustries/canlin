@@ -1,19 +1,27 @@
 /* CanLin sandbox numeric limits.
  *
- * PROVISIONAL: every value here is a placeholder until the core API spec fixes
- * per-module and process-wide budgets (system design §4, event runtime §2/§5).
+ * Memory and budget values are v1 values from
+ * docs/superpowers/specs/2026-09-23-canlin-core-api-design.md §7, to be calibrated on
+ * P2 (canlin#13). Values the spec table does not list stay provisional.
  * Configured values are clamped to the *_MAX ceilings; 0 selects the default.
  */
 #ifndef CANLIN_SANDBOX_LIMITS_H
 #define CANLIN_SANDBOX_LIMITS_H
 
 /* Lua heap per module state, in bytes (includes the state's own bookkeeping). */
-#define CANLIN_SB_MEM_DEFAULT      (8u * 1024u * 1024u)   /* provisional */
-#define CANLIN_SB_MEM_MAX          (64u * 1024u * 1024u)  /* provisional */
+/* v1 value (core API spec §7), to be calibrated on P2 (canlin#13). */
+#define CANLIN_SB_MEM_DEFAULT      (16u * 1024u * 1024u)
+#define CANLIN_SB_MEM_MAX          (64u * 1024u * 1024u)
 
-/* Lua VM instructions (plus charged native work units) per callback. */
-#define CANLIN_SB_BUDGET_DEFAULT   10000000u              /* provisional */
-#define CANLIN_SB_BUDGET_MAX       200000000u             /* provisional */
+/* Lua VM instructions (plus charged native work units) per callback.
+ * v1 value (core API spec §7), to be calibrated on P2 (canlin#13). */
+#define CANLIN_SB_BUDGET_DEFAULT   2000000u
+#define CANLIN_SB_BUDGET_MAX       50000000u
+
+/* Budget of a draw callback; it runs every dirty frame. The effective draw budget is
+ * min(this, configured budget). v1 value (core API spec §7), to be calibrated on P2
+ * (canlin#13). */
+#define CANLIN_SB_BUDGET_DRAW      500000u
 
 /* Count-hook stride: the budget is checked every this many instructions,
  * so a callback may overrun its budget by less than one stride. */

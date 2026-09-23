@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L /* alarm(): watchdog so a budget regression cannot hang */
 
 #include "canlin/sandbox.h"
+#include "canlin/sandbox_limits.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -480,7 +481,8 @@ static void test_memory(void)
     for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         host h;
         memset(&h, 0, sizeof h);
-        expect(cases[i].what, MEM, 100000000u, cases[i].src, CANLIN_SANDBOX_FAULT_MEMORY, &h);
+        /* the largest budget: memory must run out first */
+        expect(cases[i].what, MEM, CANLIN_SB_BUDGET_MAX, cases[i].src, CANLIN_SANDBOX_FAULT_MEMORY, &h);
         CHECK(strstr(h.log, "after") == NULL, "%s: code ran after memory fault", cases[i].what);
     }
     {
