@@ -1,6 +1,6 @@
 # CanLin — accounts, instances and configuration storage
 
-Status: **idea draft** from the project owner's concept (2026-09-23), with open
+Status: draft; the owner answered §8 questions 1, 3 and 4 on 2026-09-23 (see §2), with remaining
 questions in §8. Nothing here is decided until those are answered. It extends the
 standalone-first model of the [system design](2026-09-22-canlin-system-design.md) §1 and
 the provider setup of the [LLM providers design](2026-09-23-canlin-llm-providers-design.md).
@@ -21,6 +21,14 @@ gateway, they are offered; otherwise the standard presets of the providers spec 
 shown and the user enters an API key.
 
 ## 2. Instances
+
+**Decided 2026-09-23 (owner):** both views hold. The *login* (service or storage account)
+holds the configurations of **all** the user's instances; each running instance pulls
+and writes **its own** configuration from there. If a device dies, the user sets it up
+fresh, logs in, picks "restore instance X" (or "new instance") and gets everything back
+that was synced. Copying from one instance to another stays an explicit action.
+Only encrypted storage protocols are offered (no plain `ftp://`), and API keys may be
+stored remotely only passphrase-encrypted (§5).
 
 Every CanLin installation is an **instance** with a random id created on first start
 and a name the user gives it ("Küche-Tablet", "P2-Werkstatt"). Configuration is bound to
@@ -75,7 +83,7 @@ Rules that keep this simple and safe:
 | `davs://` (WebDAV over HTTPS) | first | reuses the HTTP/TLS transport (canlin#41); Hetzner Storage Boxes and most NAS/cloud offer it |
 | `ftps://` (FTP with explicit TLS) | second | small protocol on top of the same TLS |
 | `sftp://` | later | needs an SSH implementation — a larger dependency to choose carefully (licence and size) |
-| `ftp://` | only with an explicit warning | plain text: the password and all configuration travel unencrypted; never allowed to store secrets (§5) |
+| `ftp://` | **not offered** (decided 2026-09-23) | plain text: the password and all configuration would travel unencrypted |
 | `file://` | later | USB stick or mounted share on native images |
 
 The browser build cannot open raw FTP/SFTP sockets; there, only `davs://` (with CORS

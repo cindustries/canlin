@@ -53,7 +53,9 @@ A stream is successful only on the dialect's terminal marker: `openai-chat` a
 incomplete SSE record or a JSON error is a failure; text already delivered stays and is
 marked partial by the assistant (LLM/UI §4). Tool calls are delivered only when their
 block is complete (`openai-chat`: at `finish_reason = "tool_calls"`; `anthropic-messages`:
-at `content_block_stop`) and their arguments parse as one complete JSON object.
+at `content_block_stop`) and their arguments parse as one complete JSON object. A tool
+call is **acted on only after `done` with `ok = true`**; if the stream fails after a tool
+event, the assistant discards that call (decided 2026-09-23, canlin#38).
 
 ## 3. Presets
 
@@ -79,8 +81,9 @@ Langertha version they came from; they are data and can be updated without code.
 
 ## 4. Lua surface
 
-Only the built-in assistant module gets `canlin.llm` in v1; other modules see it absent
-(`nil`), not a stub. Granting it to other modules is a later permission decision.
+`canlin.llm` is present only for modules granted the `llm` capability (module roles
+spec §3); for all others it is absent (`nil`), not a stub. Until grants exist, a trusted
+loader flag on the built-in assistant stands in for the grant (canlin#38).
 
 ```lua
 local profiles = canlin.llm.profiles()        -- { {id=, title=, model=, tools=true}, ... } no URLs, no keys
@@ -104,7 +107,7 @@ Events for the request handle (core API §5.2):
 | `"llm"` | `{handle, kind = "text", text}` — a UTF-8 fragment (validated, D5) |
 | `"llm"` | `{handle, kind = "tool", id, name, args}` — one complete tool call, `args` a JSON string |
 | `"llm"` | `{handle, kind = "usage", input, output}` — if the provider reports it |
-| `"done"` | `{handle, ok = true, stop = "end"\|"tool"\|"length"}` or `{handle, ok = false, code, message}` |
+| `"done"` | `{handle, ok = true, result = {stop = "end"\|"tool"\|"length"}}` or `{handle, ok = false, code, message}` (the generic shape of core API §5.2) |
 
 `tools` names core-provided tools; their JSON schemas come from the core (for `set_view`
 the UI spec §7 schema), so a module cannot describe arbitrary tools to the provider in

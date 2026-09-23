@@ -115,8 +115,16 @@ Enter or Space activates a focused button, toggle or section header and opens/cl
 choice; Up/Down step a focused choice. A focused graph keeps Tab for node cycling and Del
 for delete; Esc hands Tab back to the view order. A pointer press on button, toggle,
 choice or section header clears keyboard focus; fields and graphs take focus on press.
-The rawfb touch path shows an on-screen keyboard for a focused field on outputs without
-a keyboard (system design §4; canlin#45).
+An output has an input class (pointer, touch, keyboard; set by the shell through
+`canlin_ui_output_set_input`). On a touch output without a keyboard, a focused field or
+area shows the on-screen keyboard (canlin#45): German QWERTZ with umlauts and ß, a
+symbol layer with digits, € and @, one-shot shift / double-tap caps lock, backspace,
+space, Enter (newline in an area, "next" = Tab in a field) and hide (keeps focus and
+value). Keys are 2.5 em square, shrinking evenly to 1.5 em in narrow views; below one
+free 2.5 em content row the panel is not shown. Keys act on release inside the pressed
+key; panel input never reaches Lua. Moving keyboard focus (Tab, "next", panel shown or
+typing) scrolls the focused widget into view by the least amount. Tab is navigation and
+never inserts a tab character.
 
 ## 4. Model area and trusted chrome
 
