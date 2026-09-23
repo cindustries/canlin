@@ -197,6 +197,7 @@ static int sb_load(lua_State *L)
     int status;
     if (strcmp(mode, "t") != 0)
         return luaL_error(L, "load: only text chunks are allowed");
+    charge(L, (lua_Unsigned)len * CANLIN_SB_COST_LOAD_BYTE);
     status = luaL_loadbufferx(L, s, len, name, "t");
     check_status(L, status);
     if (status != LUA_OK) {
@@ -305,6 +306,115 @@ static int sb_require(lua_State *L)
 
 /* ---- string/table replacements --------------------------------------- */
 
+/* Hook for the patched lstrlib (patches/lua/0001-lstrlib-match-step-budget.patch):
+ * pattern-matching steps are charged to the callback budget. States not owned
+ * by a sandbox (identified by their allocator) are not budgeted. */
+void canlin_lstr_charge(lua_State *L, size_t steps);
+void canlin_lstr_charge(lua_State *L, size_t steps)
+{
+    void *ud;
+    if (lua_getallocf(L, &ud) != sb_alloc)
+        return;
+    charge(L, (lua_Unsigned)steps);
+}
+
+/* Call the wrapped original (upvalue 1) with all arguments; returns all results. */
+static int call_orig(lua_State *L)
+{
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, lua_gettop(L) - 1, LUA_MULTRET);
+    return lua_gettop(L);
+}
+
+static lua_Unsigned bytes_cost(size_t n)
+{
+    return (lua_Unsigned)(n / CANLIN_SB_COST_BYTES_PER_UNIT) + 1u;
+}
+
+/* #t of a table argument (may run __len); 0 for anything else, which the
+ * original rejects or handles without iterating. */
+static lua_Unsigned tab_len(lua_State *L, int idx)
+{
+    lua_Integer n;
+    if (lua_type(L, idx) != LUA_TTABLE)
+        return 0;
+    n = luaL_len(L, idx);
+    return n > 0 ? (lua_Unsigned)n : 0;
+}
+
+/* table.concat(list [, sep [, i [, j]]]): j - i + 1 elements, charged up-front. */
+static int sb_concat(lua_State *L)
+{
+    lua_Unsigned n = tab_len(L, 1);
+    lua_Integer i = luaL_optinteger(L, 3, 1);
+    lua_Integer j = lua_isnoneornil(L, 4) ? (lua_Integer)n : luaL_checkinteger(L, 4);
+    if (j >= i)
+        charge(L, ((lua_Unsigned)j - (lua_Unsigned)i + 1u) * CANLIN_SB_COST_ELEM);
+    return call_orig(L);
+}
+
+/* table.insert/table.remove: with an explicit position up to #t elements move. */
+static int sb_insert(lua_State *L)
+{
+    charge(L, lua_gettop(L) >= 3 ? tab_len(L, 1) * CANLIN_SB_COST_ELEM + 1u : 1u);
+    return call_orig(L);
+}
+
+static int sb_remove(lua_State *L)
+{
+    charge(L, lua_gettop(L) >= 2 ? tab_len(L, 1) * CANLIN_SB_COST_ELEM + 1u : 1u);
+    return call_orig(L);
+}
+
+/* table.sort: about n * log2(n) comparisons and swaps. */
+static int sb_sort(lua_State *L)
+{
+    lua_Unsigned n = tab_len(L, 1), log2n = 1, m;
+    for (m = n; m > 1; m >>= 1)
+        log2n++;
+    if (n < (lua_Unsigned)1 << 40) /* larger: the original rejects it */
+        charge(L, n * log2n * CANLIN_SB_COST_ELEM);
+    return call_orig(L);
+}
+
+/* string.upper/lower/reverse: output length equals input length. */
+static int sb_strmap(lua_State *L)
+{
+    size_t l;
+    luaL_checklstring(L, 1, &l);
+    charge(L, bytes_cost(l));
+    return call_orig(L);
+}
+
+/* string.char: one output byte per argument. */
+static int sb_char(lua_State *L)
+{
+    charge(L, (lua_Unsigned)lua_gettop(L) * CANLIN_SB_COST_ELEM);
+    return call_orig(L);
+}
+
+/* table.unpack/string.byte: charged per result after the call; the result
+ * count is bounded by the Lua stack limit, which the original enforces. */
+static int sb_per_result(lua_State *L)
+{
+    int n = call_orig(L);
+    charge(L, (lua_Unsigned)n * CANLIN_SB_COST_ELEM);
+    return n;
+}
+
+/* string.sub/string.format: charged by result length after the call; the
+ * work is bounded by the result size, which the memory limit bounds. */
+static int sb_per_output(lua_State *L)
+{
+    size_t l = 0;
+    int n = call_orig(L);
+    if (n > 0 && lua_type(L, -n) == LUA_TSTRING)
+        lua_tolstring(L, -n, &l);
+    charge(L, bytes_cost(l));
+    return n;
+}
+
 /* string.rep: the stock loop runs n times even for empty pieces, without
  * hooks. Reject results above the memory limit and charge n units. */
 static int sb_rep(lua_State *L)
@@ -322,10 +432,7 @@ static int sb_rep(lua_State *L)
     if ((lua_Unsigned)n > sb->mem_limit || l + lsep > sb->mem_limit / (size_t)n)
         return luaL_error(L, "resulting string too large");
     charge(L, (lua_Unsigned)n);
-    lua_pushvalue(L, lua_upvalueindex(1));
-    lua_insert(L, 1);
-    lua_call(L, lua_gettop(L) - 1, 1);
-    return 1;
+    return call_orig(L);
 }
 
 /* table.move iterates e-f+1 times regardless of content, without hooks. */
@@ -335,10 +442,7 @@ static int sb_move(lua_State *L)
     lua_Integer e = luaL_checkinteger(L, 3);
     if (e >= f)
         charge(L, (lua_Unsigned)e - (lua_Unsigned)f + 1u);
-    lua_pushvalue(L, lua_upvalueindex(1));
-    lua_insert(L, 1);
-    lua_call(L, lua_gettop(L) - 1, 1);
-    return 1;
+    return call_orig(L);
 }
 
 static void wrap_field(lua_State *L, const char *field, lua_CFunction fn)
@@ -374,10 +478,22 @@ static int open_env(lua_State *L)
     luaL_requiref(L, LUA_STRLIBNAME, luaopen_string, 1);
     clear_field(L, "dump");
     wrap_field(L, "rep", sb_rep);
+    wrap_field(L, "upper", sb_strmap);
+    wrap_field(L, "lower", sb_strmap);
+    wrap_field(L, "reverse", sb_strmap);
+    wrap_field(L, "char", sb_char);
+    wrap_field(L, "byte", sb_per_result);
+    wrap_field(L, "sub", sb_per_output);
+    wrap_field(L, "format", sb_per_output);
     lua_pop(L, 1);
 
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
     wrap_field(L, "move", sb_move);
+    wrap_field(L, "concat", sb_concat);
+    wrap_field(L, "unpack", sb_per_result);
+    wrap_field(L, "sort", sb_sort);
+    wrap_field(L, "insert", sb_insert);
+    wrap_field(L, "remove", sb_remove);
     lua_pop(L, 1);
 
     luaL_requiref(L, LUA_MATHLIBNAME, luaopen_math, 1);

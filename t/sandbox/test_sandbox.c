@@ -1,10 +1,14 @@
 /* Sandbox contract tests: run Lua snippets through canlin_sandbox_run and
  * assert on status, log output and scope liveness. Exit 0 on success. */
+#define _POSIX_C_SOURCE 200809L /* alarm(): watchdog so a budget regression cannot hang */
+
 #include "canlin/sandbox.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -290,6 +294,175 @@ static void test_budget(void)
     }
 }
 
+/* The re-raise in the sandbox pcall/xpcall continuation must hold even when
+ * the protected call is invoked from C (table.sort's comparator), where no Lua
+ * instruction runs before the next callback: the stride-1 hook alone would let
+ * sort go on to call print. */
+static void test_fault_reraise_from_c(void)
+{
+    static const struct {
+        const char *what;
+        const char *src;
+    } cases[] = {
+        /* cmp(t[3], t[1]) = pcall(looper, 'escaped'); then cmp(t[2], t[1]) =
+         * pcall(print, 'escaped') unless the fault is re-raised. */
+        {"pcall as sort comparator",
+         "local looper = function() while true do end end\n"
+         "table.sort({'escaped', print, looper}, pcall)"},
+        /* cmp(t[3], t[1]) = xpcall(looper, print); then xpcall(print, print). */
+        {"xpcall as sort comparator",
+         "local looper = function() while true do end end\n"
+         "table.sort({print, print, looper}, xpcall)"},
+    };
+    size_t i;
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        host h;
+        memset(&h, 0, sizeof h);
+        expect(cases[i].what, MEM, SMALL_BUDGET, cases[i].src, CANLIN_SANDBOX_FAULT_BUDGET, &h);
+        CHECK(h.log_len == 0, "%s: code ran after caught fault: '%s'", cases[i].what, h.log);
+    }
+}
+
+static void watchdog(int sig)
+{
+    static const char msg[] = "FAIL: sandbox test watchdog expired (budget not enforced?)\n";
+    (void)sig;
+    if (write(2, msg, sizeof msg - 1) < 0)
+        _exit(2);
+    _exit(1);
+}
+
+/* Pattern matching (patched lstrlib) is charged per step: pathological
+ * patterns fault instead of running for hours. Run under the watchdog. */
+static void test_patterns(void)
+{
+    static const struct {
+        const char *what;
+        const char *src;
+    } cases[] = {
+        {"find backtracking", "string.find(('a'):rep(20000), ('a-'):rep(12) .. 'b')"},
+        {"match backtracking", "string.match(('a'):rep(20000), ('a*'):rep(12) .. 'b')"},
+        {"method call backtracking", "local s = ('a'):rep(20000) s:find(('a-'):rep(12) .. 'b')"},
+        {"find in pcall", "local ok = pcall(string.find, ('a'):rep(20000), ('a-'):rep(12) .. 'b')\n"
+                          "print('escaped', ok)"},
+        {"gsub backtracking", "string.gsub(('a'):rep(20000), ('a-'):rep(12) .. 'b', '')"},
+        {"gsub across subject", "string.gsub(('a'):rep(20000), 'a*b', 'x')"},
+        {"gmatch backtracking",
+         "for m in string.gmatch(('a'):rep(20000), ('a-'):rep(12) .. 'b') do end"},
+        {"gmatch across subject", "for m in ('a'):rep(20000):gmatch('a*b') do end"},
+        {"balanced scan", "string.find(('('):rep(20000), '%b()')"},
+        {"back-reference", "string.find(('a'):rep(20000), '(a*)%1b')"},
+        {"plain find", "string.find(('a'):rep(20000), ('a'):rep(1000) .. 'b', 1, true)"},
+        {"plain find (no specials)", "string.find(('a'):rep(20000), ('a'):rep(1000) .. 'b')"},
+    };
+    size_t i;
+    host h;
+
+    signal(SIGALRM, watchdog);
+    alarm(60); /* generous: each case faults after SMALL_BUDGET steps */
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        memset(&h, 0, sizeof h);
+        expect(cases[i].what, MEM, SMALL_BUDGET, cases[i].src, CANLIN_SANDBOX_FAULT_BUDGET, &h);
+        CHECK(strstr(h.log, "escaped") == NULL, "%s: fault was swallowed", cases[i].what);
+    }
+
+    memset(&h, 0, sizeof h);
+    expect("ordinary patterns", MEM, SMALL_BUDGET,
+           "assert(string.find('hello world', 'o w') == 5)\n"
+           "assert(('hello'):gsub('l', 'L') == 'heLLo')\n"
+           "assert(select(2, ('hello'):gsub('l', 'L')) == 2)\n"
+           "local k, v = string.match('key=val', '(%w+)=(%w+)')\n"
+           "assert(k == 'key' and v == 'val')\n"
+           "local n = 0 for w in ('a bb ccc'):gmatch('%a+') do n = n + #w end assert(n == 6)\n"
+           "assert(string.find('x(a(b)c)y', '%b()') == 2)\n"
+           "assert(string.find('THE (quick) fox', '%f[%a]%a+', 5) == 6)\n"
+           "assert(string.match('abab', '(ab)%1') == 'ab')\n"
+           "assert(string.find(('a'):rep(10000) .. 'b', 'b', 1, true) == 10001)\n"
+           "assert(string.find(('a'):rep(10000) .. 'b', 'a*b') == 1)\n"
+           "assert(select(2, ('x'):rep(10000):gsub('x', 'y')) == 10000)\n",
+           CANLIN_SANDBOX_OK, &h);
+
+    /* Charges are per callback: many ordinary matching callbacks succeed. */
+    {
+        canlin_sandbox *sb;
+        int k;
+        memset(&h, 0, sizeof h);
+        sb = mk(&h, MEM, SMALL_BUDGET);
+        for (k = 0; k < 50; k++) {
+            canlin_sandbox_status st =
+                run(sb, "local s = ('ab'):rep(2000) assert(select(2, s:gsub('ab', '')) == 2000)");
+            CHECK(st == CANLIN_SANDBOX_OK, "pattern callback %d: %s (%s)", k, st_name(st),
+                  canlin_sandbox_errmsg(sb));
+        }
+        canlin_sandbox_free(sb);
+    }
+    alarm(0);
+}
+
+#define BIG_MEM (16u * 1024u * 1024u)
+#define MID_BUDGET 1000000u
+
+/* Proportional C-library work is charged: each case needs well under
+ * MID_BUDGET VM instructions but far more than MID_BUDGET native work. */
+static void test_native_charges(void)
+{
+    static const struct {
+        const char *what;
+        const char *src;
+    } cases[] = {
+        {"table.concat", "local t = {string.byte(('a'):rep(20000), 1, -1)}\n"
+                         "for k = 1, 100 do table.concat(t) end"},
+        {"table.concat range", "table.concat({}, '', 1, 1 << 40)"},
+        {"table.unpack", "local t = {string.byte(('a'):rep(20000), 1, -1)}\n"
+                         "for k = 1, 100 do table.unpack(t) end"},
+        {"table.sort", "local t = {string.byte(('a'):rep(20000), 1, -1)}\n"
+                       "for k = 1, 20 do table.sort(t) end"},
+        {"table.insert at front", "local t = {string.byte(('a'):rep(20000), 1, -1)}\n"
+                                  "for k = 1, 100 do table.insert(t, 1, 0) end"},
+        {"table.remove at front", "local t = {string.byte(('a'):rep(20000), 1, -1)}\n"
+                                  "for k = 1, 100 do table.remove(t, 1) end"},
+        {"string.upper", "local s = ('a'):rep(1024):rep(1024) for k = 1, 100 do s:upper() end"},
+        {"string.lower", "local s = ('A'):rep(1024):rep(1024) for k = 1, 100 do s:lower() end"},
+        {"string.reverse", "local s = ('a'):rep(1024):rep(1024) for k = 1, 100 do s:reverse() end"},
+        {"string.sub", "local s = ('a'):rep(1024):rep(1024) for k = 1, 100 do s:sub(2) end"},
+        {"string.format", "local s = ('a'):rep(1024):rep(1024)\n"
+                          "for k = 1, 100 do string.format('%s', s) end"},
+        {"string.byte", "local s = ('a'):rep(20000) for k = 1, 100 do s:byte(1, -1) end"},
+        /* not isolated: the unpack that feeds char is charged as well */
+        {"string.char", "local t = {string.byte(('a'):rep(20000), 1, -1)}\n"
+                        "for k = 1, 100 do string.char(table.unpack(t)) end"},
+        {"load", "local s = '--' .. ('x'):rep(1024):rep(256)\n"
+                 "for k = 1, 10 do load(s) end"},
+    };
+    size_t i;
+    host h;
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        memset(&h, 0, sizeof h);
+        expect(cases[i].what, BIG_MEM, MID_BUDGET, cases[i].src, CANLIN_SANDBOX_FAULT_BUDGET, &h);
+    }
+
+    memset(&h, 0, sizeof h);
+    expect("ordinary library use", MEM, SMALL_BUDGET,
+           "local t = {'a', 'b', 'c'}\n"
+           "assert(table.concat(t, ',') == 'a,b,c' and table.concat(t, '', 2, 3) == 'bc')\n"
+           "assert(table.concat({}) == '' and table.concat(t, '', 3, 1) == '')\n"
+           "local x, y, z = table.unpack(t) assert(x == 'a' and z == 'c')\n"
+           "assert(select('#', table.unpack({}, 1, 0)) == 0)\n"
+           "assert(not pcall(table.unpack, {}, 1, 1e8))\n"
+           "local s = {5, 3, 9, 1} table.sort(s) assert(s[1] == 1 and s[4] == 9)\n"
+           "table.sort(s, function(a, b) return a > b end) assert(s[1] == 9)\n"
+           "table.insert(t, 'd') table.insert(t, 1, 'z') assert(#t == 5 and t[1] == 'z')\n"
+           "assert(table.remove(t) == 'd' and table.remove(t, 1) == 'z' and #t == 3)\n"
+           "assert(('abc'):sub(2) == 'bc' and ('abc'):upper() == 'ABC')\n"
+           "assert(('ABC'):lower() == 'abc' and ('abc'):reverse() == 'cba')\n"
+           "assert(string.format('%d-%s', 7, 'x') == '7-x')\n"
+           "assert(select('#', ('abc'):byte(1, -1)) == 3 and string.char(104, 105) == 'hi')\n"
+           "assert(not pcall(table.concat, {{}}))\n"
+           "assert(not pcall(table.sort))\n"
+           "assert(load('return 1')() == 1)\n",
+           CANLIN_SANDBOX_OK, &h);
+}
+
 static void test_memory(void)
 {
     static const struct {
@@ -375,6 +548,9 @@ int main(void)
     test_environment();
     test_binary_chunks();
     test_budget();
+    test_fault_reraise_from_c();
+    test_patterns();
+    test_native_charges();
     test_memory();
     test_isolation();
     test_require();
