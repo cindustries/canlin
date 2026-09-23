@@ -21,7 +21,10 @@
  * command list points into that atlas). Unpinned entries stay baked and are released
  * least recently used first when a new size needs the slot. If every slot is pinned, the
  * frame that needs a new size fails with CANLIN_UI_EFONT; the view keeps its previous
- * frame and size, nothing is released under another view.
+ * frame and size, nothing is released under another view. When any entry of the same ui
+ * becomes unpinned later (a view freed, re-bound or moved to another em), every view
+ * whose last frame_begin failed with EFONT is marked dirty and its dirty callback runs,
+ * so its owner retries the draw without an external invalidate (canlin#30).
  *
  * Frame protocol (canlin_module does this around M.draw):
  *   canlin_ui_view_frame_begin(v)   apply queued input, start the Nuklear frame
@@ -109,12 +112,34 @@ typedef enum canlin_ui_key {
     CANLIN_UI_KEY_HOME,
     CANLIN_UI_KEY_END,
     CANLIN_UI_KEY_SHIFT,
-    CANLIN_UI_KEY_CTRL
+    CANLIN_UI_KEY_CTRL,
+    CANLIN_UI_KEY_ESCAPE    /* leaves the graph's keyboard mode (focus order, below) */
 } canlin_ui_key;
+#define CANLIN_UI_KEY_LAST CANLIN_UI_KEY_ESCAPE
+
+/* Keyboard focus (UI spec §3, canlin#26). One widget of a view has the focus. Focusable,
+ * in draw order: field, area, button, toggle, choice, section header, graph. Tab /
+ * Shift-Tab move it to the next / previous focusable widget of the last finished frame's
+ * draw order (wrapping); the widget then shows an accent focus mark (record part
+ * P_FOCUS) until a pointer press. Enter or Space (text U+0020) activates a focused
+ * button, toggle, section header or choice (expands/collapses); Up/Down step a focused
+ * choice's index. A focused graph keeps Tab / Shift-Tab (node cycling) and Del for
+ * itself; Esc leaves its keyboard mode, and the next Tab moves on from it. A pointer
+ * press clears the focus of button, toggle, choice and section; fields and graphs take
+ * the focus by press as before. Keys reserved by the shell never reach a view. */
+
+/* Pointer buttons of CANLIN_UI_IN_BUTTON (canlin#32). Primary is 0, so a zeroed event is
+ * a primary edge. Touch contact is primary; backends map a platform's context gesture to
+ * SECONDARY only where the platform itself does (no long-press synthesis here). */
+typedef enum canlin_ui_button {
+    CANLIN_UI_BUTTON_PRIMARY = 0,
+    CANLIN_UI_BUTTON_SECONDARY = 1,
+    CANLIN_UI_BUTTON_MIDDLE = 2
+} canlin_ui_button;
 
 typedef enum canlin_ui_input_type {
     CANLIN_UI_IN_MOTION = 1, /* x, y: pointer position, screen px */
-    CANLIN_UI_IN_BUTTON,     /* x, y, down: primary button / touch contact edge */
+    CANLIN_UI_IN_BUTTON,     /* x, y, down, button: button / touch contact edge */
     CANLIN_UI_IN_KEY,        /* key, down */
     CANLIN_UI_IN_TEXT,       /* cp: one Unicode scalar value (no surrogates, <= 0x10FFFF) */
     CANLIN_UI_IN_SCROLL      /* dy: px, positive scrolls content up (towards the end) */
@@ -124,6 +149,7 @@ typedef struct canlin_ui_input {
     canlin_ui_input_type type;
     int x, y;
     int down;
+    int button;  /* BUTTON: canlin_ui_button; ignored for every other type */
     int key;
     uint32_t cp;
     int dy;
@@ -141,18 +167,18 @@ enum {
     CANLIN_UI_EBUSY = -5    /* a frame is open */
 };
 
-/* 1 if in is a well-formed input event (known type, key in range, text a Unicode scalar
- * value other than 0), else 0. */
+/* 1 if in is a well-formed input event (known type, button and key in range, text a
+ * Unicode scalar value other than 0), else 0. */
 int canlin_ui_input_valid(const canlin_ui_input *in);
 
-/* Queues one input event in order. At most one edge per button and per key is applied
+/* Queues one input event in order. At most one edge (of any button or key) is applied
  * per frame; later edges stay queued for the next frame (canlin_ui_view_pending), so a
  * press and release between two draws still produce a press frame. On overflow
  * (CANLIN_UI_INPUT_MAX) the view is reset as by canlin_ui_view_input_reset (event
  * runtime §5: overflow clears stuck interaction state) and EFULL returned. */
 int canlin_ui_view_input(canlin_ui_view *v, const canlin_ui_input *in);
 /* Input was lost (overflow outside or inside the view): drop the queue, release pressed
- * buttons/keys at the next frame and cancel graph gestures without edits. No-op inside
+ * buttons (every button held) and keys at the next frame and cancel graph gestures without edits. No-op inside
  * a frame. */
 void canlin_ui_view_input_reset(canlin_ui_view *v);
 /* Queued events not yet applied: the host requests another draw while this is > 0. */
@@ -170,8 +196,10 @@ void canlin_ui_view_free(canlin_ui_view *v);
 int canlin_ui_view_bind(canlin_ui_view *v, canlin_ui *ui, canlin_ui_output *o);
 /* Screen rectangle of the view in px (w, h > 0), in its output's coordinates. */
 void canlin_ui_view_set_rect(canlin_ui_view *v, int x, int y, int w, int h);
-/* Called (owner thread, outside any frame) when the view's output metrics change, so the
- * owner can schedule a draw. fn may be NULL. */
+/* Called (owner thread, outside the view's own frame) when the view's output metrics
+ * change or, after an EFONT skip, a font slot was unpinned, so the owner can schedule a
+ * draw. It may run while another view's frame starts; it must only schedule. fn may be
+ * NULL. */
 void canlin_ui_view_set_dirty_fn(canlin_ui_view *v, void (*fn)(void *ud), void *ud);
 /* 1 if the view needs a re-layout (new output metrics or binding) since its last frame. */
 int canlin_ui_view_dirty(const canlin_ui_view *v);
@@ -200,6 +228,15 @@ struct lua_State;
  * frame_begin and frame_end; the object raises when used outside that frame. */
 int canlin_ui_push(struct lua_State *L, canlin_ui_view *v);
 
+/* Time-driven redraw (canlin#33). The owner passes the scheduler's monotonic time before
+ * each frame_begin (same clock as canlin_ui_input.t); widgets that change look with time
+ * alone (graph long-press feedback) read it. canlin_ui_view_wake returns 1 and *at when
+ * the last finished frame needs another draw at monotonic ms *at even without input, else
+ * 0. The owner arms a core-owned one-shot timer for it (never delivered to Lua) and cancels
+ * it once a frame no longer asks. Without set_now the time is 0 (nothing is due). */
+void canlin_ui_view_set_now(canlin_ui_view *v, uint64_t now);
+int canlin_ui_view_wake(const canlin_ui_view *v, uint64_t *at);
+
 /* Rasterizes the last finished frame into r; sets r's atlas to the view's font. */
 void canlin_ui_view_render(canlin_ui_view *v, canlin_render *r);
 
@@ -218,9 +255,15 @@ typedef enum canlin_ui_part {
     CANLIN_UI_P_LINE,     /* one wrapped text line */
     CANLIN_UI_P_OPTION,   /* one option row of an expanded choice */
     CANLIN_UI_P_NODE,     /* graph: a visible node panel; off = node index (from 0) */
-    CANLIN_UI_P_PORT      /* graph: a visible port touch target; off = node index,
+    CANLIN_UI_P_PORT,     /* graph: a visible port touch target; off = node index,
                            * len = port index, inputs first then outputs */
+    CANLIN_UI_P_FOCUS,    /* keyboard focus mark around the focused widget (canlin#26) */
+    CANLIN_UI_P_HOLD      /* graph: long-press feedback shown while a press is held past
+                           * CANLIN_UI_LONG_PRESS_MS; off = node index, or
+                           * CANLIN_UI_HOLD_CANVAS for a hold on empty canvas */
 } canlin_ui_part;
+
+#define CANLIN_UI_HOLD_CANVAS 0xffffffffu
 
 typedef struct canlin_ui_rect {
     unsigned char kind, part;

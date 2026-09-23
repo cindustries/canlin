@@ -509,6 +509,54 @@ static void test_focus_tap_through(void)
     h_done();
 }
 
+/* canlin#32: a secondary press focuses the view under it and is delivered like a primary
+ * one; the capture holds until every button pressed into the view is released; chrome
+ * has no secondary binding. */
+static void test_secondary_routing(void)
+{
+    canlin_ui_input in;
+    canlin_shell_rect v0, v1, sw;
+    int pane;
+    h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
+    settle();
+    v0 = part(CANLIN_SHELL_P_VIEW, 0);
+    v1 = part(CANLIN_SHELL_P_VIEW, 1);
+    in = button(v1.x + 20, v1.y + 200, 1);
+    in.button = 3;
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_EINVAL);
+    in.button = CANLIN_UI_BUTTON_SECONDARY;
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+    CHECK(canlin_shell_focused(H.sh, NULL, &pane) == H.m[1] && pane == 1);
+    /* Primary pressed into the same view, secondary released: still captured. */
+    in = button(v1.x + 20, v1.y + 200, 1);
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+    in.down = 0;
+    in.button = CANLIN_UI_BUTTON_SECONDARY;
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+    in = motion(v0.x + 30, v0.y + 40);
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+    drain();
+    CHECK(H.last_mx[1] == v0.x + 30 && H.motions[0] == 0);
+    in = button(v0.x + 30, v0.y + 40, 0);
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW); /* ends capture */
+    drain();
+    CHECK(H.buttons[1] == 4 && H.buttons[0] == 0);
+    in = motion(v0.x + 31, v0.y + 41);
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+    drain();
+    CHECK(H.last_mx[0] == v0.x + 31);
+    /* Secondary on the switcher button: consumed, nothing opens, focus unchanged. */
+    sw = part(CANLIN_SHELL_P_SWITCH_BUTTON, 0);
+    in = button(sw.x + sw.w / 2, sw.y + sw.h / 2, 1);
+    in.button = CANLIN_UI_BUTTON_SECONDARY;
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_CHROME);
+    in.down = 0;
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_DROPPED);
+    CHECK(!canlin_shell_switcher_open(H.sh, H.out));
+    CHECK(canlin_shell_focused(H.sh, NULL, NULL) == H.m[1]);
+    h_done();
+}
+
 /* ---- §4 reserved keys ---- */
 
 static void test_reserved_keys(void)
@@ -840,6 +888,7 @@ int main(void)
     test_fallback_restore();
     test_divider_drag();
     test_focus_tap_through();
+    test_secondary_routing();
     test_reserved_keys();
     test_status_bar();
     test_fault_restart();

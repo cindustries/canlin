@@ -105,9 +105,18 @@ settings (LLM/UI design §3). Limits per draw are §8. Calls beyond a limit are 
 with a Lua error, so the bug is visible instead of a silently truncated view.
 
 Input (pointer, touch, keys, text) reaches widgets through the core's UI state; the
-scheduler never delivers raw input as `event` (core API §5.2). Focus moves with Tab /
-Shift-Tab in draw order on keyboard hosts; the rawfb touch path shows the Nuklear
-on-screen keyboard for a focused field (system design §4).
+scheduler never delivers raw input as `event` (core API §5.2). Pointer input carries a
+button (primary, secondary, middle); ordinary widgets act on primary only.
+
+**Keyboard focus (canlin#26):** field, area, button, toggle, choice, section header and
+graph take focus in the draw order of the previous finished frame; Tab / Shift-Tab move
+and wrap. The focused widget shows an accent mark when focus came from the keyboard.
+Enter or Space activates a focused button, toggle or section header and opens/closes a
+choice; Up/Down step a focused choice. A focused graph keeps Tab for node cycling and Del
+for delete; Esc hands Tab back to the view order. A pointer press on button, toggle,
+choice or section header clears keyboard focus; fields and graphs take focus on press.
+The rawfb touch path shows an on-screen keyboard for a focused field on outputs without
+a keyboard (system design §4; canlin#45).
 
 ## 4. Model area and trusted chrome
 
@@ -164,7 +173,11 @@ without touching `g`); a move that rounds back to the start produces nothing. `s
 is produced only when the selection changes. Long press (≥ `CANLIN_UI_LONG_PRESS_MS`,
 movement ≤ 0.5 em) and double tap (within `CANLIN_UI_DOUBLE_TAP_MS`) are measured on the
 scheduler's monotonic clock stamped into each input event, and recognised at release.
-`opts.fit` is edge-triggered: it re-centres when it becomes true, so a later pan
+A secondary press on empty canvas produces `add` at that point (on the press edge);
+it does nothing on nodes, ports or edges. While a press is held within the slop, the
+core arms one core-owned timer (never delivered to Lua, counted against the module's
+timer limit) so an accent mark appears at the long-press deadline; recognition itself
+stays at release. `opts.fit` is edge-triggered: it re-centres when it becomes true, so a later pan
 survives. A press inside the graph gives it keyboard focus, so Del in a field never
 deletes a node. Dragging from an input that has an edge lifts that edge: drop on another
 input → disconnect + connect, on the same input → nothing, elsewhere → disconnect.
@@ -281,7 +294,17 @@ Its argument is JSON mapped onto the same widget set:
   section (with nested `widgets`), columns (`left`/`right` arrays), graph, button.
   `icon` references built-in assistant icons only.
 - `id`: `[a-z0-9_-]{1,32}`, unique within the view; required for every input widget
-  and every button. Control characters are rejected in every string (core API D5).
+  and every button. Control characters are rejected in ids, labels, titles, options and
+  enum values (core API D5); multi-line content (`text`, `bubble`, `area` values) may
+  contain `\n` and `\t` but no other control character.
+- Bubble roles in model views are `user` and `assistant` only; `system` is reserved for
+  trusted content and rejected in `set_view`.
+- Field names (canlin#20): `value` is the initial value of field, area and toggle and
+  the value of a meter; `choice` uses a 1-based `index` (as `ui:choice`), also in the
+  submission; edges are `{from: [node, port], to: [node, port]}`; unknown keys, duplicate
+  JSON keys and non-integer numbers where integers are expected are rejected. A view has
+  at most 8 graphs. Recorded results per turn: at most 16; a repeated call id returns the
+  recorded result, the same id with different arguments is `invalid`.
 - The only `action` in v1 is `submit`. A submit sends
   `{revision, action = <button id>, values = {<id>: <value>}}` for the input widgets of
   that view — field/area text, toggle boolean, choice index, graph `{nodes, edges}` —
