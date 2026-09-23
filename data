@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-23T05:25:24Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T04:10:25Z
+id: 26
+priority: medium
+started: 2026-09-23T05:06:43Z
+status: review
+tags:
+- ui
+- input
+title: Tab focus order and rawfb on-screen keyboard
+updated: 2026-09-23T05:25:24Z
+---
+
+UI spec §3. From canlin#18.
+
+Tab order merged (2e4ae98). On-screen keyboard moved to #45.
