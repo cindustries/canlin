@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-09-23T17:41:14Z
+id: 58
+priority: medium
+status: backlog
+tags:
+- llm
+title: 'LLM: reasoning_content echo for thinking models in tool loops'
+updated: 2026-09-23T17:41:14Z
+---
+
+From #51: openai-chat ignores delta.reasoning_content. Kimi thinking models (maybe DeepSeek, MiniMax) may require it echoed in assistant tool-call messages for multi-turn tool use. Verify against provider docs, then spec + fixture tests.
