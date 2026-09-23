@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T04:37:40Z
+id: 34
+priority: low
+status: backlog
+tags:
+- shell
+- ui
+title: Free floating windows (opt-in, pointer outputs)
+updated: 2026-09-23T04:37:40Z
+---
+
+Deferred from v1 per Getty 2026-09-23. Shell spec §1.
