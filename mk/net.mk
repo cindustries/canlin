@@ -23,3 +23,16 @@ LIBOBJ += $(HTTP_OBJ)
 $(HTTP_OBJ): $(HTTP_HDR)
 $(BUILD)/src/net/tls.o: override CPPFLAGS += $(MBEDTLS_CPPFLAGS)
 
+# End to end over loopback (t/net/tsrv.c: forked test server on the same Mbed TLS build;
+# fixtures from t/net/fixtures/mkcerts.sh, embedded via certs.h).
+HTTP_TEST := $(BUILD)/t/net/http_test
+TSRV_OBJ := $(BUILD)/t/net/tsrv.o
+TESTS += $(HTTP_TEST)
+
+$(BUILD)/t/net/http_test.o $(TSRV_OBJ): override CPPFLAGS += $(MBEDTLS_CPPFLAGS)
+$(BUILD)/t/net/http_test.o $(TSRV_OBJ): $(HTTP_HDR) t/net/tsrv.h t/net/fixtures/certs.h
+
+$(HTTP_TEST): $(BUILD)/t/net/http_test.o $(TSRV_OBJ) $(HTTP_OBJ) $(NET_OBJ) $(EV_OBJ) \
+		$(MBEDTLS_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(HTTP_LIBS)
