@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-23T05:49:07Z
+id: 53
+priority: low
+status: backlog
+tags:
+- ui
+- shell
+title: On-screen keyboard only in the shell-focused pane; layout/locale setting
+updated: 2026-09-23T05:49:07Z
+---
+
+From canlin#45.
