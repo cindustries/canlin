@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-23T05:40:23Z
+claimed_by: orchestrator
+class: standard
+created: 2026-09-23T02:17:20Z
+id: 16
+priority: medium
+started: 2026-09-23T05:21:05Z
+status: review
+tags:
+- spec
+- module
+title: 'Decide: staged module reload with rollback to old generation'
+updated: 2026-09-23T05:40:23Z
+---
+
+Today a failing lua#main/init after the old generation retired leaves the module faulted. Rollback needs start-new-then-retire-old in ev. Spec decision first. From canlin#9.
+
+Decision (Getty 2026-09-23): build rollback (staged reload: start new generation, retire old only on success).
+
+Merged bce7cb2 (14eb1b8). module 2669 checks, host + ASan/UBSan green. i686 skipped. Lua memory doubles during overlap.
