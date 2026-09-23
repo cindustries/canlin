@@ -68,6 +68,10 @@ canlin_ui_graph_state *canlin_ui_graph_state_get(canlin_ui_graph_state *states, 
 /* Frees the entries not drawn in `frame` (called when that frame ends). */
 void canlin_ui_graph_state_evict(canlin_ui_graph_state *states, uint32_t frame);
 
+/* Input was lost (overflow): end every gesture in progress without an edit. A moved
+ * pan returns to where it started, a pending tap is forgotten. */
+void canlin_ui_graph_state_cancel(canlin_ui_graph_state *states);
+
 /* Handles this frame's input, draws the graph into e->box and pushes the array of edits.
  * Every Nuklear call happens before the first Lua allocation. */
 void canlin_ui_graph_run(struct lua_State *L, canlin_ui_graph *g, int fit,

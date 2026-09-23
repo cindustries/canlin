@@ -35,6 +35,11 @@ typedef struct harness {
     char log[LOGMAX];
     size_t loglen;
     unsigned draws, draws2;
+    unsigned nin; /* input deliveries to m, in delivery order */
+    struct {
+        uint32_t type;
+        int32_t a, b;
+    } tr[64];
 } harness;
 
 static void log_fn(void *ud, const char *msg, size_t len)
@@ -55,6 +60,14 @@ static void on_deliver(void *ud, canlin_ev *ev, const canlin_ev_delivery *d)
     if (h->m && canlin_module_gen(h->m) == d->gen) {
         if (d->kind == CANLIN_EV_D_DRAW)
             h->draws++;
+        if (d->kind == CANLIN_EV_D_EVENT && d->source == CANLIN_MODULE_SOURCE_INPUT) {
+            if (h->nin < sizeof h->tr / sizeof h->tr[0]) {
+                h->tr[h->nin].type = d->type & 0xffu;
+                h->tr[h->nin].a = d->a;
+                h->tr[h->nin].b = d->b;
+            }
+            h->nin++;
+        }
         canlin_module_deliver(h->m, d);
     } else if (h->m2 && canlin_module_gen(h->m2) == d->gen) {
         if (d->kind == CANLIN_EV_D_DRAW)
@@ -217,7 +230,7 @@ static void input(harness *h, canlin_ui_input_type type, int x, int y, int down)
     in.x = x;
     in.y = y;
     in.down = down;
-    CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
 }
 
 static void click(harness *h, const canlin_ui_rect *r)
@@ -235,7 +248,7 @@ static void type_text(harness *h, const char *s)
     in.type = CANLIN_UI_IN_TEXT;
     for (; *s; s++) {
         in.cp = (unsigned char)*s;
-        CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+        CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
     }
 }
 
@@ -246,9 +259,9 @@ static void key(harness *h, int k)
     in.type = CANLIN_UI_IN_KEY;
     in.key = k;
     in.down = 1;
-    CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
     in.down = 0;
-    CHECK(canlin_module_input(h->m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
 }
 
 /* A filled rect command exactly at r exists in the view's command list (the record and
@@ -771,7 +784,227 @@ static void test_input_overflow(void)
     CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) == 0);
     in.type = CANLIN_UI_IN_TEXT;
     in.cp = 0xd800;
-    CHECK(canlin_module_input(h.m, &in) == CANLIN_MODULE_EINVAL);
+    CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_EINVAL);
+    h_done(&h);
+}
+
+/* ---- input through the scheduler (canlin#27, event runtime §4–§5, core API §5.2) ---- */
+
+static unsigned queued(harness *h)
+{
+    canlin_ev_stats st;
+    int slot = canlin_ev_module_slot(h->ev, canlin_module_gen(h->m));
+    CHECK(slot >= 0);
+    CHECK(canlin_ev_get_stats(h->ev, slot, &st) == CANLIN_EV_OK);
+    return st.queued;
+}
+
+static unsigned pending_control(harness *h)
+{
+    canlin_ev_stats st;
+    int slot = canlin_ev_module_slot(h->ev, canlin_module_gen(h->m));
+    CHECK(canlin_ev_get_stats(h->ev, slot, &st) == CANLIN_EV_OK);
+    return st.control;
+}
+
+static int nk_left_down(harness *h)
+{
+    struct nk_context *ctx = canlin_ui_view_nk(canlin_module_view(h->m));
+    return ctx->input.mouse.buttons[NK_BUTTON_LEFT].down;
+}
+
+/* motion A -> press -> motion B stays three items in that order; motions coalesce only
+ * with an adjacent motion, to the latest position. */
+static void test_input_order(void)
+{
+    harness h;
+    int i;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    h.nin = 0;
+    input(&h, CANLIN_UI_IN_MOTION, 10, 11, 0);
+    input(&h, CANLIN_UI_IN_BUTTON, 12, 13, 1);
+    input(&h, CANLIN_UI_IN_MOTION, 14, 15, 0);
+    CHECK(queued(&h) == 3);
+    h_drain(&h);
+    CHECK(h.nin == 3);
+    CHECK(h.tr[0].type == CANLIN_UI_IN_MOTION && h.tr[0].a == 10 && h.tr[0].b == 11);
+    CHECK(h.tr[1].type == CANLIN_UI_IN_BUTTON);
+    CHECK(h.tr[2].type == CANLIN_UI_IN_MOTION && h.tr[2].a == 14 && h.tr[2].b == 15);
+
+    /* 100 motions between two turns: one item, the last position. */
+    h.nin = 0;
+    for (i = 0; i < 100; i++)
+        input(&h, CANLIN_UI_IN_MOTION, i, 2 * i, 0);
+    CHECK(queued(&h) == 1);
+    h_drain(&h);
+    CHECK(h.nin == 1 && h.tr[0].a == 99 && h.tr[0].b == 198);
+
+    /* Scrolls coalesce too, and keep their summed distance. */
+    {
+        canlin_ui_input in;
+        memset(&in, 0, sizeof in);
+        in.type = CANLIN_UI_IN_SCROLL;
+        in.dy = 3;
+        for (i = 0; i < 10; i++)
+            CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+        CHECK(queued(&h) == 1);
+    }
+    h_done(&h);
+}
+
+/* Saturated scheduler queue: the refused release raises INPUT_OVERFLOW; the input queued
+ * before the gap is dropped, the held button is released and nothing fires. Input after
+ * the gap works normally. */
+static void test_input_overflow_latch(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    canlin_ui_input in;
+    unsigned n = 0;
+    int x, y, rc;
+
+    h_init(&h, NULL, 1.0f,
+           "local M = {}\n"
+           "function M.draw(ui)\n"
+           "  if ui:button('Go') then print('clicked') end\n"
+           "  local v = ui:field('F', '')\n"
+           "  if v ~= '' then print('typed') end\n"
+           "end\n"
+           "return M\n",
+           300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (!b) {
+        h_done(&h);
+        return;
+    }
+    /* Press outside every widget and hold it. */
+    x = 290;
+    y = 290;
+    input(&h, CANLIN_UI_IN_BUTTON, x, y, 1);
+    h_drain(&h);
+    CHECK(nk_left_down(&h) == 1);
+
+    /* Queued before the gap: release, then a full click on the button. None of it may
+     * take effect once an edge after it was lost. */
+    input(&h, CANLIN_UI_IN_BUTTON, x, y, 0);
+    click(&h, b);
+    /* Flood with text edges until the scheduler refuses one. */
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_TEXT;
+    in.cp = 'a';
+    while ((rc = canlin_module_post_input(h.m, &in)) == CANLIN_MODULE_OK && n < 1000)
+        n++;
+    CHECK(rc == CANLIN_MODULE_EFULL);
+    CHECK(n == CANLIN_EV_MOD_MAX_ITEMS - 4); /* release, motion, press, release */
+    CHECK(pending_control(&h) & CANLIN_EV_CTL_INPUT_OVERFLOW);
+    /* The release is refused too (queue still full): the button stays held until the
+     * latch is consumed. */
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.x = x;
+    in.y = y;
+    CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_EFULL);
+    h_drain(&h);
+    CHECK(pending_control(&h) == 0);
+    CHECK(queued(&h) == 0);
+    CHECK(nk_left_down(&h) == 0); /* released by the reset */
+    CHECK(!has(&h, "typed"));     /* stale edges from before the gap were dropped */
+    CHECK(!has(&h, "clicked"));
+    CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) == 0);
+
+    /* After the gap input is delivered normally. */
+    click(&h, b);
+    h_drain(&h);
+    CHECK(count(&h, "clicked") == 1);
+    h_done(&h);
+}
+
+/* Input for a stopped or replaced generation never reaches the next one. */
+static void test_input_stale_generation(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    canlin_module_source s;
+    canlin_ui_input in;
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (!b) {
+        h_done(&h);
+        return;
+    }
+    click(&h, b); /* queued for the old generation */
+    CHECK(queued(&h) == 3);
+    memset(&s, 0, sizeof s);
+    s.name = "uitest";
+    s.version = "2";
+    s.main = button_src;
+    s.main_len = strlen(button_src);
+    CHECK(canlin_module_reload(h.m, &s) == CANLIN_MODULE_OK);
+    CHECK(queued(&h) == 0); /* retired with the old generation */
+    h.nin = 0;
+    h_drain(&h);
+    CHECK(h.nin == 0);
+    CHECK(!has(&h, "clicked"));
+    CHECK(nk_left_down(&h) == 0);
+
+    canlin_module_stop(h.m);
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.down = 1;
+    CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_ESTALE);
+    in.type = CANLIN_UI_IN_MOTION;
+    CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_ESTALE);
+    h_drain(&h);
+    CHECK(h.nin == 0);
+    h_done(&h);
+}
+
+/* Lua is never entered for input: every Lua entry is a draw delivery. */
+static void test_input_no_lua(void)
+{
+    harness h;
+    canlin_ui_input in;
+    int i;
+    h_init(&h, NULL, 1.0f,
+           "local M = {}\n"
+           "local n = 0\n"
+           "function M.event(name) n = n + 1 print('EVENT ' .. name) end\n"
+           "function M.draw(ui) n = n + 1 print('enter') ui:button('Go') ui:field('F', '') end\n"
+           "return M\n",
+           300, 300);
+    h_drain(&h);
+    h.draws = 0;
+    h.nin = 0;
+    h.loglen = 0;
+    h.log[0] = 0;
+    for (i = 0; i < 8; i++) {
+        memset(&in, 0, sizeof in);
+        in.type = CANLIN_UI_IN_MOTION;
+        in.x = i;
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+        in.type = CANLIN_UI_IN_BUTTON;
+        in.down = i & 1;
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+        in.type = CANLIN_UI_IN_KEY;
+        in.key = CANLIN_UI_KEY_SHIFT;
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+        in.type = CANLIN_UI_IN_TEXT;
+        in.cp = 'x';
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+        in.type = CANLIN_UI_IN_SCROLL;
+        in.dy = 1;
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+    }
+    h_drain(&h);
+    CHECK(h.nin == 40);
+    CHECK(h.draws > 0);
+    CHECK(count(&h, "enter") == h.draws);
+    CHECK(!has(&h, "EVENT"));
     h_done(&h);
 }
 
@@ -780,7 +1013,7 @@ static void test_scroll(void)
 {
     harness h;
     const canlin_ui_rect *b;
-    int y0, ch;
+    int y0, ch, i;
     canlin_ui_input in;
     h_init(&h, NULL, 1.0f,
            "local M = {}\n"
@@ -795,13 +1028,15 @@ static void test_scroll(void)
     CHECK(ch > 200);
     memset(&in, 0, sizeof in);
     in.type = CANLIN_UI_IN_SCROLL;
-    in.dy = 100;
-    CHECK(canlin_module_input(h.m, &in) == CANLIN_MODULE_OK);
+    in.dy = 20; /* five scrolls coalesce into one item that keeps their sum */
+    for (i = 0; i < 5; i++)
+        CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
+    CHECK(queued(&h) == 1);
     h_drain(&h);
     b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
     CHECK(b && b->y == y0 - 100);
     in.dy = 100000;
-    CHECK(canlin_module_input(h.m, &in) == CANLIN_MODULE_OK);
+    CHECK(canlin_module_post_input(h.m, &in) == CANLIN_MODULE_OK);
     h_drain(&h);
     CHECK(canlin_ui_view_scroll(canlin_module_view(h.m)) == ch - 200);
     h_done(&h);
@@ -1334,6 +1569,10 @@ int main(void)
     test_columns_pcall();
     test_headless();
     test_input_overflow();
+    test_input_order();
+    test_input_overflow_latch();
+    test_input_stale_generation();
+    test_input_no_lua();
     test_scroll();
     test_draw_charge();
     test_render_e2e();

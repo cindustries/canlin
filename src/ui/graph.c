@@ -508,6 +508,22 @@ void canlin_ui_graph_state_evict(canlin_ui_graph_state *states, uint32_t frame)
             memset(&states[i], 0, sizeof states[i]);
 }
 
+void canlin_ui_graph_state_cancel(canlin_ui_graph_state *states)
+{
+    unsigned i;
+    for (i = 0; i < CANLIN_UI_GRAPH_STATES; i++) {
+        canlin_ui_graph_state *st = &states[i];
+        if (st->moved && (st->drag == G_PAN || st->drag == G_EDGE)) {
+            st->panx = st->ax; /* a cancelled pan snaps back like a node preview */
+            st->pany = st->ay;
+        }
+        st->drag = G_NONE;
+        st->moved = 0;
+        st->has_tap = 0; /* a tap before the gap never pairs with one after it */
+        st->dedge = -1;
+    }
+}
+
 /* ---- geometry ---- */
 
 typedef struct geo {
