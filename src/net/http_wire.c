@@ -658,6 +658,11 @@ int canlin_http_parser_feed(canlin_http_parser *p, const char *buf, size_t n, si
     return CANLIN_HTTP_P_MORE;
 }
 
+int canlin_http_parser_needs_eof(const canlin_http_parser *p)
+{
+    return p->state == PS_BODY_CLOSE;
+}
+
 int canlin_http_parser_eof(canlin_http_parser *p)
 {
     switch (p->state) {

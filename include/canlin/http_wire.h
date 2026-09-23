@@ -127,6 +127,8 @@ void canlin_http_parser_init(canlin_http_parser *p, void *mem, int no_body,
 int canlin_http_parser_feed(canlin_http_parser *p, const char *buf, size_t n, size_t *used);
 /* Transport EOF: DONE for a close-delimited body or a finished message, else EEOF. */
 int canlin_http_parser_eof(canlin_http_parser *p);
+/* 1 while the body is close-delimited (only EOF can end it). */
+int canlin_http_parser_needs_eof(const canlin_http_parser *p);
 /* Static detail text of the sticky error ("obsolete line folding", ...). */
 const char *canlin_http_parser_why(const canlin_http_parser *p);
 
