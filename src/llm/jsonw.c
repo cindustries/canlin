@@ -1,6 +1,7 @@
 /* Bounded JSON writer and UTF-8 validation for request bodies (spec §7
  * CANLIN_LLM_REQUEST_MAX). Errors are sticky; the buffer never exceeds w->max bytes. */
 #include "llm_int.h"
+#include "canlin/json.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -113,13 +114,12 @@ int llm_utf8_valid(const char *s, size_t n)
     return 1;
 }
 
-void llm_jw_str(llm_jw *w, const char *s, size_t n)
+void llm_jw_esc(llm_jw *w, const char *s, size_t n)
 {
     static const char hex[] = "0123456789abcdef";
     const unsigned char *p = (const unsigned char *)s;
     size_t i = 0, l;
 
-    llm_jw_raw(w, "\"", 1);
     while (i < n && !w->err) {
         unsigned char c = p[i];
         char esc[6];
@@ -156,5 +156,35 @@ void llm_jw_str(llm_jw *w, const char *s, size_t n)
         }
         i++;
     }
+}
+
+void llm_jw_str(llm_jw *w, const char *s, size_t n)
+{
     llm_jw_raw(w, "\"", 1);
+    llm_jw_esc(w, s, n);
+    llm_jw_raw(w, "\"", 1);
+}
+
+static int first_tok(void *ud, const canlin_json_token *t)
+{
+    int *first = ud;
+    if (*first == 0)
+        *first = t->type;
+    return 0;
+}
+
+int llm_json_object_valid(char *buf, size_t buflen, const char *p, size_t n, size_t max_total)
+{
+    canlin_json js;
+    canlin_json_limits lim;
+    int first = 0;
+    lim.max_depth = CANLIN_LLM_JSON_DEPTH;
+    lim.max_string = CANLIN_LLM_JSON_STRING_MAX;
+    lim.max_number = CANLIN_LLM_JSON_NUMBER_MAX;
+    lim.max_total = max_total;
+    if (canlin_json_init(&js, &lim, buf, buflen, first_tok, &first) != CANLIN_JSON_OK)
+        return 0;
+    if (canlin_json_feed(&js, p, n) != CANLIN_JSON_OK || canlin_json_finish(&js) != CANLIN_JSON_OK)
+        return 0;
+    return first == CANLIN_JSON_OBJ_BEGIN;
 }

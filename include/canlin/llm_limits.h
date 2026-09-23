@@ -2,7 +2,7 @@
  *
  * v1 values from docs/superpowers/specs/2026-09-23-canlin-llm-providers-design.md §7.
  * Nothing outside this header may hard-code them. Values marked "not in the spec" were
- * chosen by the canlin#38 implementation where the spec is silent.
+ * chosen by the canlin#38/#39 implementations where the spec is silent.
  */
 #ifndef CANLIN_LLM_LIMITS_H
 #define CANLIN_LLM_LIMITS_H
@@ -31,6 +31,9 @@
 #define CANLIN_LLM_MESSAGES_MAX      256u
 /* Not in the spec: largest max_tokens a module may ask for. */
 #define CANLIN_LLM_MAX_TOKENS_MAX    (1u << 20)
+/* Not in the spec: max_tokens sent by anthropic-messages when the request gives none
+ * (the Messages API requires the field; Langertha's default_response_size). */
+#define CANLIN_LLM_ANTHROPIC_MAX_TOKENS_DEFAULT 1024u
 /* Not in the spec: text bytes per "llm" text event; longer pending text is split at a
  * UTF-8 boundary. Half of CANLIN_MARSHAL_MAX_BYTES leaves room for the other fields. */
 #define CANLIN_LLM_EVENT_TEXT_MAX    (32u * 1024u)

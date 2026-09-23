@@ -38,7 +38,7 @@ enum {
 
 typedef enum canlin_llm_dialect {
     CANLIN_LLM_DIALECT_OPENAI_CHAT = 1,
-    CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES = 2 /* canlin#39: not implemented yet */
+    CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES = 2
 } canlin_llm_dialect;
 
 typedef enum canlin_llm_auth_scheme {

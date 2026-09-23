@@ -25,9 +25,11 @@
  * version path). Groq/OpenRouter/OllamaOpenAI require the user to choose a model there
  * ("" here), except ollama which takes Ollama.pm's default. anthropic, minimax and
  * moonshot use their Anthropic-compatible engines (Anthropic.pm, MiniMaxAnthropic.pm,
- * MoonshotAnthropic.pm) and stay unavailable until anthropic-messages exists
- * (canlin#39, spec §2.2). minimax-openai and moonshot-openai are the same providers'
- * OpenAI-compatible endpoints (MiniMax.pm, Moonshot.pm; canlin#51).
+ * MoonshotAnthropic.pm) and the anthropic-messages dialect (canlin#39). LM Studio's
+ * Anthropic mode (LMStudioAnthropic.pm) has no preset of its own: the v1 list has one
+ * lmstudio entry (openai-chat); a custom anthropic-messages profile reaches it.
+ * minimax-openai and moonshot-openai are the same providers' OpenAI-compatible
+ * endpoints (MiniMax.pm, Moonshot.pm; canlin#51).
  * stream_usage (stream_options.include_usage) is set only where the provider documents
  * it: OpenAI. Langertha sends it for no engine, so every other preset leaves it off
  * until a connection test on that endpoint shows it is accepted. */
@@ -96,7 +98,13 @@ const canlin_llm_preset *canlin_llm_preset_find(const char *id)
 
 static const llm_dialect *dialect_of(canlin_llm_dialect d)
 {
-    return d == CANLIN_LLM_DIALECT_OPENAI_CHAT ? &llm_dialect_openai_chat : NULL;
+    switch (d) {
+    case CANLIN_LLM_DIALECT_OPENAI_CHAT:
+        return &llm_dialect_openai_chat;
+    case CANLIN_LLM_DIALECT_ANTHROPIC_MESSAGES:
+        return &llm_dialect_anthropic_messages;
+    }
+    return NULL;
 }
 
 int canlin_llm_dialect_available(canlin_llm_dialect d)
@@ -1280,6 +1288,8 @@ static int l_request(lua_State *L)
             return lfail(L, "invalid", "request body exceeds CANLIN_LLM_REQUEST_MAX");
         if (rc == JW_EUTF8)
             return lfail(L, "invalid", "message text is not valid UTF-8");
+        if (rc == JW_EINVAL)
+            return lfail(L, "invalid", "tool call args are not one JSON object");
         return lfail(L, "unavailable", "out of memory");
     }
     snprintf(r->url, sizeof r->url, "%s%s", p->base, d->path);

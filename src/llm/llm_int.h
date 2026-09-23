@@ -1,5 +1,5 @@
 /* CanLin LLM — internal seams between the request core (llm.c), the dialect adapters
- * (openai_chat.c; anthropic_messages.c in canlin#39) and the bounded JSON writer. */
+ * (openai_chat.c, anthropic_messages.c) and the bounded JSON writer. */
 #ifndef CANLIN_LLM_INT_H
 #define CANLIN_LLM_INT_H
 
@@ -10,7 +10,8 @@
 
 /* ---- bounded JSON writer (jsonw.c) ---- */
 
-enum { JW_OK = 0, JW_EFULL = -1, JW_ENOMEM = -2, JW_EUTF8 = -3 };
+/* JW_EINVAL: a dialect refused caller data it would have to embed as raw JSON. */
+enum { JW_OK = 0, JW_EFULL = -1, JW_ENOMEM = -2, JW_EUTF8 = -3, JW_EINVAL = -4 };
 
 typedef struct llm_jw {
     char *buf;
@@ -24,10 +25,16 @@ void llm_jw_raw(llm_jw *w, const char *s, size_t n);
 void llm_jw_lit(llm_jw *w, const char *s); /* NUL-terminated raw text */
 /* JSON string with escapes; invalid UTF-8 is a sticky JW_EUTF8. */
 void llm_jw_str(llm_jw *w, const char *s, size_t n);
+/* The escaped string body without quotes (to join several spans into one string). */
+void llm_jw_esc(llm_jw *w, const char *s, size_t n);
 void llm_jw_uint(llm_jw *w, unsigned long v);
 
 /* 1 iff s[0..n) is well-formed UTF-8 (no overlongs, surrogates or > U+10FFFF). */
 int llm_utf8_valid(const char *s, size_t n);
+
+/* 1 iff p[0..n) is exactly one complete JSON object within the CANLIN_LLM_JSON_* limits
+ * and max_total bytes. buf: token storage of CANLIN_LLM_JSON_STRING_MAX bytes. */
+int llm_json_object_valid(char *buf, size_t buflen, const char *p, size_t n, size_t max_total);
 
 /* ---- normalised request (spec §4) ---- */
 
@@ -100,5 +107,6 @@ typedef struct llm_dialect {
 } llm_dialect;
 
 extern const llm_dialect llm_dialect_openai_chat;
+extern const llm_dialect llm_dialect_anthropic_messages;
 
 #endif

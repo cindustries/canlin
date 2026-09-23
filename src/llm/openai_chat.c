@@ -418,32 +418,6 @@ static int merge_delta(oa *o, const tdelta *td)
     return 0;
 }
 
-/* Arguments must be exactly one complete JSON object. */
-static int args_tok(void *ud, const canlin_json_token *t)
-{
-    int *first = ud;
-    if (*first == 0)
-        *first = t->type;
-    return 0;
-}
-
-/* buf: the chunk parser's token buffer, idle once a document has been parsed. */
-static int args_valid(char *buf, size_t buflen, const char *p, size_t n)
-{
-    canlin_json js;
-    canlin_json_limits lim;
-    int first = 0;
-    lim.max_depth = CANLIN_LLM_JSON_DEPTH;
-    lim.max_string = CANLIN_LLM_JSON_STRING_MAX;
-    lim.max_number = CANLIN_LLM_JSON_NUMBER_MAX;
-    lim.max_total = CANLIN_LLM_TOOL_ARGS_MAX;
-    if (canlin_json_init(&js, &lim, buf, buflen, args_tok, &first) != CANLIN_JSON_OK)
-        return 0;
-    if (canlin_json_feed(&js, p, n) != CANLIN_JSON_OK || canlin_json_finish(&js) != CANLIN_JSON_OK)
-        return 0;
-    return first == CANLIN_JSON_OBJ_BEGIN;
-}
-
 static void emit_tools(oa *o)
 {
     size_t i, n = 0;
@@ -458,7 +432,8 @@ static void emit_tools(oa *o)
             fail_proto(o, "tool call without a name");
             return;
         }
-        if (!args_valid(o->jbuf, sizeof o->jbuf, s->args, s->argsn)) {
+        if (!llm_json_object_valid(o->jbuf, sizeof o->jbuf, s->args, s->argsn,
+                                   CANLIN_LLM_TOOL_ARGS_MAX)) {
             fail_proto(o, "tool call arguments are not one complete JSON object");
             return;
         }

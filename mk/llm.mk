@@ -1,11 +1,12 @@
-# LLM providers (canlin#38): presets, profiles, session credentials, the openai-chat
-# dialect, the fixture transport and canlin.llm, in src/llm. Needs mk/ev.mk, mk/lua.mk,
-# mk/module.mk (and what it needs) and mk/net.mk; headers are named by path.
+# LLM providers (canlin#38, #39): presets, profiles, session credentials, the
+# openai-chat and anthropic-messages dialects, the fixture transport and canlin.llm, in
+# src/llm. Needs mk/ev.mk, mk/lua.mk, mk/module.mk (and what it needs) and mk/net.mk;
+# headers are named by path.
 LLM_HDR := include/canlin/llm.h include/canlin/llm_limits.h src/llm/llm_int.h \
 	include/canlin/sse.h include/canlin/json.h include/canlin/module.h \
 	include/canlin/module_limits.h include/canlin/sandbox.h include/canlin/ev.h
-LLM_OBJ := $(BUILD)/src/llm/llm.o $(BUILD)/src/llm/openai_chat.o $(BUILD)/src/llm/jsonw.o \
-	$(BUILD)/src/llm/fixture.o
+LLM_OBJ := $(BUILD)/src/llm/llm.o $(BUILD)/src/llm/openai_chat.o \
+	$(BUILD)/src/llm/anthropic_messages.o $(BUILD)/src/llm/jsonw.o $(BUILD)/src/llm/fixture.o
 LIBOBJ += $(LLM_OBJ)
 
 LLM_TEST := $(BUILD)/t/llm/test_llm
