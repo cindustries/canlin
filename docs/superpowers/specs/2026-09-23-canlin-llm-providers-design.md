@@ -73,9 +73,11 @@ presets without a release.
 | `default_model` | a model id, or empty = the user must choose |
 | `capabilities` | `tools`, `streaming` as configured facts for this preset; the connection test confirms them, nothing is inferred from model names |
 | `local` | true for localhost presets (Ollama, LM Studio, vLLM, llama.cpp): plain HTTP to loopback allowed, no key required |
+| `stream_usage` | `openai-chat` only: send `stream_options.include_usage`; set only where the provider documents it (v1: openai), never for custom profiles (canlin#51) |
 
 v1 list: openai, anthropic, groq, mistral, deepseek, openrouter, xai, cerebras, minimax,
-moonshot, ollama, lmstudio, vllm, llamacpp. Exact URLs and default models are copied
+moonshot (both `anthropic-messages`), minimax-openai, moonshot-openai (their
+`openai-chat` endpoints), ollama, lmstudio, vllm, llamacpp. Exact URLs and default models are copied
 from the corresponding Langertha engines at implementation time and recorded with the
 Langertha version they came from; they are data and can be updated without code.
 
