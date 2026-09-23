@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-23T18:14:21Z
+claimed_by: canlin
+class: standard
+created: 2026-09-23T18:05:46Z
+id: 59
+priority: medium
+started: 2026-09-23T18:05:50Z
+status: review
+tags:
+- llm
+title: 'LLM: lmstudio-anthropic preset + drop unfinished tool calls on length stop'
+updated: 2026-09-23T18:14:21Z
+---
+
+Owner decision 2026-09-23, providers spec §2.3 and §3 (commit above). Both dialects.
+
+Landed 29bf6bd. host make test green; i686 + qemu-i386 pentium2 user-mode test_llm/test_response green. Open: openai-chat can't detect a last call whose args happen to be complete JSON; open text block at max_tokens still fails (servers skipping content_block_stop?) — needs live fixture.
