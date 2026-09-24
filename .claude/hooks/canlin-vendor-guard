@@ -6,7 +6,7 @@ pre  — PreToolUse: Edit/Write only inside the vendoring paths; Bash without gi
 stop — Stop: every changed path in the working tree must be a vendoring path.
 Exit 2 blocks the call (or the stop) and hands stderr back to the agent.
 """
-import json, os, re, subprocess, sys
+import json, os, re, shlex, subprocess, sys
 
 def allowed(rel):
     rel = rel.replace(os.sep, "/")
@@ -20,6 +20,26 @@ def allowed(rel):
         return any(os.path.isdir(os.path.join(ROOT, d, name))
                    for d in ("third_party", "libs"))
     return bool(re.fullmatch(r"src/[a-z0-9_]+/canlin_[a-z0-9_]+_config\.h", rel))
+
+GIT_WRITES = {"commit", "push", "reset", "checkout", "switch", "restore", "rebase",
+              "merge", "tag", "stash", "clean", "am", "apply", "cherry-pick", "revert"}
+
+def git_subcommands(cmd):
+    """The subcommand of every git call in a shell line: the first word after git and
+    its global options. Flags and revisions (--no-checkout, v20^{commit}) never count."""
+    for seg in re.split(r"\|\|?|&&|;|&|\n|\$\(|`|[()]", cmd):
+        try:
+            toks = shlex.split(seg)
+        except ValueError:
+            toks = seg.split()
+        for i, t in enumerate(toks):
+            if os.path.basename(t) != "git":
+                continue
+            j = i + 1
+            while j < len(toks) and toks[j].startswith("-"):
+                j += 2 if toks[j] in ("-C", "-c", "--git-dir", "--work-tree") else 1
+            if j < len(toks):
+                yield toks[j]
 
 def block(msg):
     sys.stderr.write("canlin-vendor lane: " + msg + "\n")
@@ -47,9 +67,9 @@ if mode == "pre":
                   "src/<dir>/canlin_<lib>_config.h). Report it instead.")
     elif tool == "Bash":
         cmd = inp.get("command", "")
-        if re.search(r"\bgit\b[^|;&]*\b(commit|push|reset|checkout|switch|restore|rebase|"
-                     r"merge|tag|stash|clean|am|apply|cherry-pick|revert)\b", cmd):
-            block("git history and working-tree resets belong to the dispatcher.")
+        bad = sorted(set(git_subcommands(cmd)) & GIT_WRITES)
+        if bad:
+            block(f"git {bad[0]}: git history and working-tree resets belong to the dispatcher.")
         if re.search(r"\bkarr\b\s+(?!list\b|show\b|board\b)\w", cmd):
             block("karr board mutations belong to the dispatcher; propose tickets in the report.")
     sys.exit(0)
