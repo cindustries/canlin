@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-24T04:08:00Z
+id: 65
+priority: medium
+status: backlog
+tags:
+- platform
+- sdl2
+title: 'SDL2 backend: window per output, input, SDL wait with net tick'
+updated: 2026-09-24T04:08:00Z
+---
+
+Native loop spec §4/§5.4. SDL2 not yet available in the build (vendor or system lib? decide).
