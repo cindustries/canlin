@@ -27,7 +27,10 @@ in the report; do not write it.
    publishes no tarball) into the scratchpad, not the repo.
 2. Verify its sha256 against the checksum **upstream publishes** (checksum file, release
    notes, asset digest). A checksum you only computed yourself proves nothing — if
-   upstream publishes none, stop.
+   upstream publishes none, stop. Exception, only when the ticket names tag and commit
+   id: a tag without published checksum is verified by `git rev-parse <tag>^{commit}`
+   equal to that id; `VERSION` records `commit:` and the `git archive` sha256 marked
+   self-computed (see `third_party/cmp/VERSION`).
 3. Licence must be permissive per `docs/THIRD-PARTY.md` (MIT, BSD, Apache-2.0, public
    domain/CC0, OFL for fonts). Dual licence with a permissive option: record the choice.
    Anything else → stop.
@@ -88,6 +91,9 @@ Then run every gate that exists and name each one that does not:
 2. i686: `make TARGET=i686` (static musl); then the canlin-os harness under
    `qemu-system-i386 -cpu pentium2 -m 1024` if present
 3. WASM / mobile builds, once they exist
+
+`make`/`make test` only compile what something links. A lib without a consumer yet is
+built by its own target: `make <name>` and `make TARGET=i686 <name>` — say which you ran.
 
 A gate that does not exist yet is reported as **skipped: not available**, never as
 passed. A host pass says nothing about i686.
