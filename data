@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-09-24T18:37:41Z
+id: 68
+priority: medium
+status: backlog
+tags:
+- cmp
+- sandbox
+- lua-api
+title: 'cmp: Lua binding canlin.* MessagePack encode/decode'
+updated: 2026-09-24T18:37:41Z
+---
+
+Worker work after canlin#67 (cmp v20 vendored in 8c65eba, nothing links it yet).
+
+Sandboxed canlin.* API over third_party/cmp: encode/decode Lua values <-> MessagePack via cmp read/write callbacks on bounded buffers. Needs a spec section first (API shape, limits). Hostile-module review before it ships: malformed/truncated input, nesting depth, element count and size limits, cost charged against the callback budget (#8/#15), no unbounded allocation. Tests: fuzz-ish malformed corpus, round-trip, limits, P2 (no SSE).
