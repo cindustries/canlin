@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-24T04:07:59Z
+id: 64
+priority: high
+status: backlog
+tags:
+- platform
+- rawfb
+- p2
+title: 'rawfb backend: /dev/fb0 present, evdev input as loop source, runtime binary'
+updated: 2026-09-24T04:07:59Z
+---
+
+Native loop spec §5.4. Uses canlin_loop poll wait. First runnable P2 binary.
