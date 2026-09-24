@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-24T04:20:57Z
+claimed_by: canlin
+class: standard
+created: 2026-09-23T18:19:29Z
+id: 61
+priority: high
+started: 2026-09-24T04:07:59Z
+status: review
+tags:
+- net
+- platform
+title: Wire canlin_http pollfds/step into rawfb and SDL2 loops
+updated: 2026-09-24T04:20:57Z
+---
+
+HTTP spec §3. SDL2 has no pollable descriptor — needs a platform-adapter design (event runtime §3).
+
+Spec 2026-09-24-canlin-native-loop-design.md. No rawfb/SDL2 backend exists; #61 = shared loop core + poll wait + tests; backends separate.
+
+Landed (canlin_ev_peek + loop, spec updated). host make test green; i686 test_loop/test_loop_native/test_ev/test_llm_http/test_shell under qemu-i386 pentium2 green. Full-system harness not available.
