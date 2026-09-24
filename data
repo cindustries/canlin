@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-09-24T18:37:41Z
+id: 69
+priority: medium
+status: backlog
+tags:
+- cmp
+- vendor
+- patch
+title: 'cmp: patch skip_bytes() error propagation (upstream PR #81)'
+updated: 2026-09-24T18:37:41Z
+---
+
+cmp v20 swallows errors from skip_bytes() in cmp_skip_object, cmp_skip_object_flat, cmp_skip_object_no_limit, cmp_skip_object_limit. Fixed upstream after v20: eeceeea (merged e564b7a, PR #81, 2025). On untrusted input a failed skip can leave the reader at a wrong offset and parsing continues.
+
+Proposal: patches/cmp/ with exactly that upstream fix (plus README with manual re-check), applied at build time; vendored files stay read-only. Alternative: pin a post-v20 master commit instead of v20 — decide in this ticket. Should land before or with the Lua binding ticket.
