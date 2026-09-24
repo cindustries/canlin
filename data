@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T04:07:32Z
+claimed_by: canlin
+class: standard
+created: 2026-09-23T05:13:41Z
+id: 40
+priority: high
+status: backlog
+tags:
+- llm
+- assistant
+title: 'LLM step 3: built-in assistant module with set_view tool loop'
+updated: 2026-09-24T04:07:32Z
+---
+
+LLM providers spec §10.3; UI spec §7; needs #20.
+
+Needs privileged host binding for the built-in assistant (canlin_assistant_view_draw, submission pickup), granted only to compiled-in modules; sandbox review. From canlin#20.
+
+Owner 2026-09-24: dropped/cut-off answers per LLM/UI spec §4 (text kept + marked abgebrochen/gekürzt, history without dropped calls, view unchanged + one-line note).
