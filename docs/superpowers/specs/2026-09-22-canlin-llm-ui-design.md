@@ -106,6 +106,18 @@ must validate the provider's terminal state. Tool arguments are not executable w
 streaming and are admitted only once complete, valid and authorised by that turn's
 protocol state. Text already shown on a failed stream remains visibly marked partial.
 
+**Dropped and cut-off answers** (decided 2026-09-24, owner, canlin#40): when a stream
+fails after tool calls arrived, or ends on the length stop with `dropped_tools > 0`
+(providers spec §2.3), the assistant
+
+- keeps the text already shown, marked "abgebrochen" (failure) or "gekürzt" (length);
+- records that text in the conversation history **without** the dropped tool calls, so
+  they are never sent back to the provider;
+- leaves the current view unchanged and says so in one short line ("Ansicht nicht
+  geändert").
+
+Complete tool calls of a successful length-stopped answer are applied as usual.
+
 Cancel closes/stops the scoped transport and rejects late delivery; it cannot undo a
 request the provider already received or guarantee absence of billing. Do not blindly
 retry an ambiguous provider POST after disconnect. Explicit retry is a new, visible
