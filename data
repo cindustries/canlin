@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-24T18:37:47Z
+claimed_by: canlin
+class: standard
+created: 2026-09-24T17:52:29Z
+id: 67
+priority: medium
+started: 2026-09-24T18:37:47Z
+status: review
+tags:
+- vendor
+- third_party
+- cmp
+title: Vendor cmp v20 (MessagePack) — canlin-vendor trial run
+updated: 2026-09-24T18:37:47Z
+---
+
+Trial run of the canlin-vendor agent. Everything below is fixed; anything else open = stop.
+
+- lib: cmp (MessagePack, C), https://github.com/camgunz/cmp
+- version: tag v20 (latest release, 2022-03-29), commit fba1ac1121434ad480d62ebc4e2f9a495e2ed4b3
+- source: the tagged commit (upstream publishes no release asset or checksum). Fetch with `git clone` / `git fetch` of tag v20 into the scratchpad.
+- verification (decision for this ticket, replaces the published-checksum step): `git rev-parse v20^{commit}` must equal fba1ac1121434ad480d62ebc4e2f9a495e2ed4b3 (the id GitHub reports for refs/tags/v20). Record in VERSION: "verified: <date> against tag v20 -> commit fba1ac11… (git object id; upstream publishes no archive checksum)". Also record the sha256 of `git archive --format=tar v20` for reference, labelled as self-computed.
+- licence: MIT (LICENSE in repo root), verbatim.
+- subset: cmp.c, cmp.h, LICENSE into third_party/cmp/ (upstream paths = repo root). Not vendored: examples/, test/, Makefile, CMakeLists.txt, README.md, TODO.md, CODE_OF_CONDUCT.md, .github/, .travis.yml, .restyled.yaml, .gitignore.
+- configuration: none. No defines. mk/cmp.mk after the shape of mk/mbedtls.mk: CMP_DIR, CMP_CPPFLAGS := -I$(CMP_DIR), CMP_OBJ from cmp.c appended to LIBOBJ, `-w -Wno-error` override, phony target `cmp`. No consumer in src/ yet; no Lua binding (worker work, separate ticket later).
+- docs/THIRD-PARTY.md: move cmp from "Planned" to "Linked into the runtime today" as "cmp v20 | third_party/cmp | MIT".
+- gates: host make + make test; make TARGET=i686; qemu-system harness if present, else skipped. Platform-checklist grep reported with file:line.
+- note: upstream master has fixes after v20 (e.g. skip_bytes error handling, 2025, PR #81). Not part of this ticket; report whether any post-v20 fix looks relevant as a proposal.
+- deliver: working tree changes + report + proposed commit message. No commit, no board writes.
+
+Landed 8c65eba (cmp v20, byte-identical to tag v20 -> fba1ac11, verified independently). Gates: host make cmp + make test green; i686 skipped (no i686-linux-musl-gcc, no 32-bit headers); canlin-os harness skipped (not present). Trial-run findings fixed: guard hook 25df7f4, skill eb76d7b. Follow-ups: binding + skip_bytes patch tickets.
