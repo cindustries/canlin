@@ -24,6 +24,12 @@ optional service owner, not a prerequisite for the runtime or local data authori
 | STM32 firmware consuming libbee; SunRiser reference IoT device | `sunriser8` |
 | Optional provider gateway, STT/TTS, sync authority/deduplication, service auth/wire protocol, module distribution | `canlin-server` (planned, not yet created) |
 
+Remotes: `libbee`, `canlin`, `canlin-os` and `p5-beepack` live public at
+`github.com/cindustries/<repo>`; `sunriser8` at `src.ci:ledaquaristik/sunriser8`;
+`canlin-server` gets `cindustries/canlin-server` once created. `canlin` pulls libbee as
+submodule `../libbee`, so both stay on the same host. Boards travel with the repo:
+`karr sync --push` / `--pull` for `refs/karr/*`.
+
 Missing checkout: record the dependency on the originating board and report it. Do not
 invent a remote, create the repo or implement its side locally without explicit assignment.
 Client/service contract work needs both owners; a fixture does not silently decide the
