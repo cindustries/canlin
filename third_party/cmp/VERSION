@@ -1,0 +1,23 @@
+cmp v20 (MessagePack C library)
+source: https://github.com/camgunz/cmp, tag v20 (2022-03-29; upstream publishes no
+release asset or checksum for this project)
+commit: fba1ac1121434ad480d62ebc4e2f9a495e2ed4b3
+verified: 2026-09-24 against tag v20 -> commit fba1ac1121434ad480d62ebc4e2f9a495e2ed4b3
+(git object id; upstream publishes no archive checksum). v20 is a lightweight tag
+(`git cat-file -t v20` reports "commit"), so `git rev-parse v20` already resolves to the
+commit id above, matching it directly.
+self-computed reference only (canlin#67 ticket decision, replaces the published-checksum
+step for this lib): sha256 of `git archive --format=tar v20` =
+bf8bdf7aae856def32e737f1e0a402dc27889a478a50ecc55e73dcdc2097931b (368640 bytes)
+
+Contents, unmodified from the tagged commit (upstream paths = repo root):
+- cmp.c, cmp.h
+- LICENSE (MIT, (c) 2020 Charles Gunyon)
+Not vendored: examples/, test/, Makefile, CMakeLists.txt, README.md, TODO.md,
+CODE_OF_CONDUCT.md, .github/, .travis.yml, .restyled.yaml, .gitignore.
+
+Configuration: none. No defines, no CMP_CONFIG_FILE. No consumer in src/ yet; a Lua
+binding is separate canlin-worker work.
+
+Read-only. Any fix is a patch file plus ticket.
+Check: `sha256sum -c SHA256SUMS` from this dir.
