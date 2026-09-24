@@ -202,6 +202,13 @@ int canlin_ev_cancel(canlin_ev *ev, canlin_ev_gen gen, canlin_ev_handle h);
 
 /* One bounded scheduler turn. */
 int canlin_ev_turn(canlin_ev *ev, canlin_ev_turn_result *out);
+/* What a turn would report now as more / has_deadline / deadline, without dispatching,
+ * expiring timers or touching any state (dispatched = 0). A timer whose deadline has
+ * passed is reported by its deadline, not as `more`. Hosts call it after work that may
+ * have enqueued (transport callbacks, pumps, shell updates) and before they wait, so
+ * nothing admitted since the last turn is missed (native loop spec §3). Allowed inside
+ * a callback. EINVAL for NULL arguments. */
+int canlin_ev_peek(const canlin_ev *ev, canlin_ev_turn_result *out);
 
 /* Current monotonic time of the scheduler's clock (clamped, never backwards). */
 canlin_ev_time canlin_ev_now(canlin_ev *ev);

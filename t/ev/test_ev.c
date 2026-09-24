@@ -573,6 +573,53 @@ static void test_idle_reports_nothing(void)
     h_done(&h);
 }
 
+/* ---- peek: a turn's summary without dispatch (native loop spec §3, step 5) ---- */
+
+static void test_peek(void)
+{
+    harness h;
+    canlin_ev_gen g, g2;
+    canlin_ev_handle t;
+    canlin_ev_turn_result r;
+
+    h_init(&h);
+    CHECK(canlin_ev_peek(NULL, &r) == CANLIN_EV_EINVAL);
+    CHECK(canlin_ev_peek(h.ev, NULL) == CANLIN_EV_EINVAL);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(!r.more && !r.has_deadline && r.dispatched == 0);
+    CHECK(canlin_ev_module_start(h.ev, &g) == CANLIN_EV_OK);
+    CHECK(canlin_ev_timer_start(h.ev, g, 50, &t) == CANLIN_EV_OK);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(!r.more && r.has_deadline && r.deadline == 50);
+    /* posted after the last turn: peek sees it, and delivers nothing */
+    CHECK(canlin_ev_post(h.ev, g, 1, 1, 0, 0, NULL, 0, NULL) == CANLIN_EV_OK);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(r.more && r.dispatched == 0 && h.n == 0);
+    r = h_turn(&h);
+    CHECK(r.dispatched == 1 && !r.more);
+    CHECK(canlin_ev_invalidate(h.ev, g) == CANLIN_EV_OK);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(r.more);
+    /* an expired timer is reported by its deadline, not expired by peek */
+    r = h_turn(&h);
+    canlin_ev_fake_clock_advance(&h.clock, 60);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(!r.more && r.has_deadline && r.deadline == 50);
+    r = h_turn(&h);
+    CHECK(count_kind(&h, CANLIN_EV_D_OP, g) + count_kind(&h, CANLIN_EV_D_TIMER, g) == 1);
+    /* a staged slot is not runnable, as in a turn */
+    CHECK(canlin_ev_post(h.ev, g, 1, 1, 0, 0, NULL, 0, NULL) == CANLIN_EV_OK);
+    CHECK(canlin_ev_module_stage(h.ev, g, &g2) == CANLIN_EV_OK);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(!r.more);
+    CHECK(canlin_ev_module_abort(h.ev, g2) == CANLIN_EV_OK);
+    CHECK(canlin_ev_peek(h.ev, &r) == CANLIN_EV_OK);
+    CHECK(r.more);
+    r = h_turn(&h);
+    CHECK(canlin_ev_module_stop(h.ev, g) == CANLIN_EV_OK);
+    h_done(&h);
+}
+
 /* ---- pointer-motion coalescing never crosses a button edge ---- */
 
 enum { SRC_PTR = 5, T_MOTION = 1, T_BUTTON = 2 };
@@ -777,6 +824,7 @@ int main(void)
     test_stage_commit_abort();
     test_exactly_one_terminal();
     test_idle_reports_nothing();
+    test_peek();
     test_motion_coalescing_preserves_button_edges();
     test_fifo_and_rotation();
     if (failures) {

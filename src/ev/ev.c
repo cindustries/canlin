@@ -742,6 +742,27 @@ static int dispatch_one(canlin_ev *ev, unsigned s, unsigned *quota, int *drawn, 
     return 0;
 }
 
+/* more / has_deadline / deadline as a turn reports them; dispatched is left alone. */
+static void summarise(const canlin_ev *ev, canlin_ev_turn_result *r)
+{
+    unsigned s, i;
+    for (s = 0; s < CANLIN_EV_MAX_MODULES; s++) {
+        const mod *m = &ev->mods[s];
+        if (m->stage.gen)
+            continue; /* staging: nothing runnable until commit or abort */
+        if (m->count || (m->live.gen && (m->live.ctl || m->live.dirty)))
+            r->more = 1;
+    }
+    for (i = 0; i < CANLIN_EV_PROC_MAX_OPS; i++) {
+        const op *o = &ev->ops[i];
+        if (o->state == OP_PENDING && o->is_timer &&
+            (!r->has_deadline || o->deadline < r->deadline)) {
+            r->has_deadline = 1;
+            r->deadline = o->deadline;
+        }
+    }
+}
+
 int canlin_ev_turn(canlin_ev *ev, canlin_ev_turn_result *out)
 {
     unsigned quota[CANLIN_EV_MAX_MODULES];
@@ -774,23 +795,20 @@ int canlin_ev_turn(canlin_ev *ev, canlin_ev_turn_result *out)
     }
     ev->rr = (last + 1) % CANLIN_EV_MAX_MODULES;
 
-    for (s = 0; s < CANLIN_EV_MAX_MODULES; s++) {
-        const mod *m = &ev->mods[s];
-        if (m->stage.gen)
-            continue; /* staging: nothing runnable until commit or abort */
-        if (m->count || (m->live.gen && (m->live.ctl || m->live.dirty)))
-            r.more = 1;
-    }
-    for (i = 0; i < CANLIN_EV_PROC_MAX_OPS; i++) {
-        const op *o = &ev->ops[i];
-        if (o->state == OP_PENDING && o->is_timer &&
-            (!r.has_deadline || o->deadline < r.deadline)) {
-            r.has_deadline = 1;
-            r.deadline = o->deadline;
-        }
-    }
+    summarise(ev, &r);
     if (out)
         *out = r;
+    return CANLIN_EV_OK;
+}
+
+int canlin_ev_peek(const canlin_ev *ev, canlin_ev_turn_result *out)
+{
+    canlin_ev_turn_result r;
+    if (ev == NULL || out == NULL)
+        return CANLIN_EV_EINVAL;
+    memset(&r, 0, sizeof r);
+    summarise(ev, &r);
+    *out = r;
     return CANLIN_EV_OK;
 }
 
