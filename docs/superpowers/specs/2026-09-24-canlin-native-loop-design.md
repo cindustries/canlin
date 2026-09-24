@@ -1,7 +1,7 @@
 # CanLin — native main loop
 
-Status: draft for canlin#61 (2026-09-24). It implements the rawfb / native POSIX and
-SDL2 rows of the [event runtime design](2026-09-22-canlin-event-runtime-design.md) §3
+Status: implemented for canlin#61 (2026-09-24); §3 updated to the implementation.
+It implements the rawfb / native POSIX and SDL2 rows of the [event runtime design](2026-09-22-canlin-event-runtime-design.md) §3
 and is where the [HTTP transport](2026-09-23-canlin-http-transport-design.md) §3 drive
 API, `canlin_llm_pump` and shell rendering meet. The browser loop is a separate slice.
 
@@ -33,24 +33,33 @@ on other threads; the HTTP DNS worker keeps its own pipe inside `canlin_http`.
 
 ```
 now = clock()
-1. ev turns: canlin_ev_turn() until !more or CANLIN_LOOP_TURNS_MAX turns
-2. canlin_llm_pump(llm)
+1. ev turns: canlin_ev_turn() until !more or CANLIN_LOOP_TURNS_MAX (4) turns
+2. pump hook (canlin_loop_llm_pump → canlin_llm_pump; the core does not link LLM/Lua)
 3. step every source once (bounded by the source)
 4. render: for each output with canlin_shell_dirty(): begin / shell_render / end,
    then backend present — at most once per output per iteration
-5. wait: timeout = 0 if work remains (ev more, a source reported ready data it did not
-   finish), else min(ev deadline, source deadlines) - now, or infinite if none
+5. canlin_ev_peek(): steps 2–4 may have queued work after the last turn, so the
+   step-1 result is stale; peek reads the current more/deadline without dispatching
+6. wait: timeout = 0 if peek says more, else min(ev deadline, source deadlines,
+   display tick from canlin_shell_next_tick_ms) - now, or infinite if none
 ```
 
+Adapters (`loop_http.c`, `loop_llm.c`, `loop_shell.c`) are separate objects, so the
+core links only against the scheduler. More descriptors than `CANLIN_LOOP_POLLFDS_MAX`
+(32) is counted as an overflow and the loop does not wait at all rather than wait on a
+subset.
+
 - Lost wakeups: every producer that can make work runnable either runs on the owner
-  thread before step 5 or writes the wake pipe; step 5 computes its timeout after
-  steps 1–4, so nothing enqueued during them is missed.
+  thread before step 5 or writes the wake pipe; step 6 computes its timeout from the
+  step-5 peek, so nothing enqueued during steps 1–4 is missed.
 - Idle: no runnable work, no deadline, no ready descriptor → the wait blocks without a
   timeout. No frame loop.
 - Fairness: steps 1–3 are each bounded, so a busy stream cannot starve rendering or
   module turns and vice versa.
-- `canlin_loop_run` returns when a quit flag is set (from a module stop of the last
-  module, a signal, or the backend's close event).
+- `canlin_loop_run` returns when a quit flag is set (a signal, the backend's close
+  event, or the embedder's own rule such as "last module stopped" — the loop does not
+  decide that). Quit is safe from the owner thread and signal handlers; another thread
+  calls `canlin_loop_wake` and lets its source's step set quit.
 
 ## 4. Waiting per backend
 
