@@ -137,6 +137,8 @@ Subsystems, each testable at its boundary:
   Restart/unload invalidates that module instance's outstanding work.
 - **sandbox**: Lua 5.4 state per module, without `os`, `io`, `package` or `debug`; binary
   chunk loading is forbidden. `require` resolves only this module's executable keys.
+  **Amended 2026-09-24:** and the libs of its declared dependency closure — see the
+  [libs design](2026-09-24-canlin-libs-design.md).
   Lua instruction and allocator budgets are supplemented by native-work/result budgets.
 
 Only the owner thread enters Lua or changes UI/module state. Backend audio callbacks and
