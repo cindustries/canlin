@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Lane guard for the canlin-vendor agent (hooks in .claude/agents/canlin-vendor.md).
+
+pre  — PreToolUse: Edit/Write only inside the vendoring paths; Bash without git
+       history writes or karr mutations.
+stop — Stop: every changed path in the working tree must be a vendoring path.
+Exit 2 blocks the call (or the stop) and hands stderr back to the agent.
+"""
+import json, os, re, subprocess, sys
+
+def allowed(rel):
+    rel = rel.replace(os.sep, "/")
+    if rel == "docs/THIRD-PARTY.md":
+        return True
+    if re.match(r"(third_party|libs)/[^/]+/", rel):
+        return True
+    m = re.fullmatch(r"mk/([a-z0-9_-]+)\.mk", rel)
+    if m:
+        name = m.group(1)
+        return any(os.path.isdir(os.path.join(ROOT, d, name))
+                   for d in ("third_party", "libs"))
+    return bool(re.fullmatch(r"src/[a-z0-9_]+/canlin_[a-z0-9_]+_config\.h", rel))
+
+def block(msg):
+    sys.stderr.write("canlin-vendor lane: " + msg + "\n")
+    sys.exit(2)
+
+data = json.load(sys.stdin)
+ROOT = data.get("cwd") or os.getcwd()
+top = subprocess.run(["git", "-C", ROOT, "rev-parse", "--show-toplevel"],
+                     capture_output=True, text=True)
+if top.returncode == 0:
+    ROOT = top.stdout.strip()
+mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
+
+if mode == "pre":
+    tool = data.get("tool_name", "")
+    inp = data.get("tool_input", {}) or {}
+    if tool in ("Edit", "Write", "NotebookEdit"):
+        path = inp.get("file_path") or inp.get("notebook_path") or ""
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(ROOT))
+        if rel.startswith(".."):
+            sys.exit(0)  # scratchpad and other paths outside the repo
+        if not allowed(rel):
+            block(f"{rel} is outside the vendoring paths (third_party/<lib>/, libs/<lib>/, "
+                  "mk/<lib>.mk, docs/THIRD-PARTY.md, "
+                  "src/<dir>/canlin_<lib>_config.h). Report it instead.")
+    elif tool == "Bash":
+        cmd = inp.get("command", "")
+        if re.search(r"\bgit\b[^|;&]*\b(commit|push|reset|checkout|switch|restore|rebase|"
+                     r"merge|tag|stash|clean|am|apply|cherry-pick|revert)\b", cmd):
+            block("git history and working-tree resets belong to the dispatcher.")
+        if re.search(r"\bkarr\b\s+(?!list\b|show\b|board\b)\w", cmd):
+            block("karr board mutations belong to the dispatcher; propose tickets in the report.")
+    sys.exit(0)
+
+if mode == "stop":
+    # Block at most once per agent run: stop_hook_active is not documented for
+    # subagents, so a marker in the git dir keeps a foreign dirty path from looping.
+    gd = subprocess.run(["git", "-C", ROOT, "rev-parse", "--absolute-git-dir"],
+                        capture_output=True, text=True).stdout.strip()
+    key = re.sub(r"[^A-Za-z0-9_-]", "", str(data.get("agent_id") or data.get("session_id") or ""))
+    marker = os.path.join(gd, "canlin-vendor-stop-" + key) if gd and key else ""
+    if data.get("stop_hook_active") or (marker and os.path.exists(marker)):
+        sys.exit(0)
+    st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "-uall"],
+                        capture_output=True, text=True)
+    bad = []
+    for line in st.stdout.splitlines():
+        path = line[3:].split(" -> ")[-1].strip('"')
+        if not allowed(path):
+            bad.append(path)
+    if bad:
+        if marker:
+            open(marker, "w").close()
+        block("changed paths outside the vendoring lane: " + ", ".join(bad) +
+              ". Undo your own changes there (you may not use git for it) or, if they "
+              "were not yours, name them in the report.")
+    sys.exit(0)

@@ -41,6 +41,7 @@ Depends on whether the Agent/Task tool is available to you.
   |---|---|
   | Implement / refactor / debug the C core, the Lua API, built-in modules | `canlin-worker` (default) |
   | Write or extend tests (C, Lua, offscreen screen tests) | `canlin-test-writer` |
+  | Vendor/update third-party C or Lua libs, run their platform gates | `canlin-vendor` |
   | Route a family ticket or execute an exclusive board-writer batch | `karr-coordinator` |
 
 - **You cannot spawn subagents** (you ARE a `canlin-*` agent): the lock does not apply —

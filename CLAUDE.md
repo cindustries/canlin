@@ -22,10 +22,12 @@ principle and lane are in `.claude/rules/canlin-rules.md`.
 |---|---|
 | Implement / refactor / debug the C core, event/platform adapters, Lua API and modules | `canlin-worker` (default) |
 | Write/extend C, sandboxed Lua, offscreen and WASM contract tests; propose coverage gaps | `canlin-test-writer` |
+| Vendor/update a C library or Lua lib, run its platform gates (ticket fixes lib, version, config) | `canlin-vendor` (sonnet, own worktree) |
 | Propose family ticket routing; execute an explicitly delegated exclusive board batch | `karr-coordinator` |
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/` —
 `canlin-core` (architecture and invariants) and `canlin-coordination` (family ownership) are
-owned here and hardlinked into `canlin-os`; `beepack-format` is owned by `libbee`. Work is
+owned here and hardlinked into `canlin-os`; `canlin-vendoring` (vendoring procedure) is
+owned here, canlin only; `beepack-format` is owned by `libbee`. Work is
 tracked on the local `karr` board.
