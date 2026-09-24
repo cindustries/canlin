@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-24T04:20:58Z
+id: 66
+priority: medium
+status: backlog
+tags:
+- llm
+- loop
+title: canlin_llm_pump reports more/deadline to the loop
+updated: 2026-09-24T04:20:58Z
+---
+
+From #61: LLM idle timeout and refused-post retries run only when something else wakes the loop. Edge: queue limit exhausted by reservations with empty queue -> retries wait for an unrelated wakeup.
