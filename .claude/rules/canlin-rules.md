@@ -32,7 +32,7 @@ Depends on whether the Agent/Task tool is available to you.
 
 - **You can spawn subagents** (orchestrating main agent): do NOT touch behavior-relevant
   code yourself — delegate. Your lane: coordinate, inspect, plan, review diffs, run tests,
-  manage git, write and edit specs and prose docs. When in doubt, delegate. Why: only the
+  write and edit specs and prose docs. When in doubt, delegate. Why: only the
   `canlin-*` agents get their skills force-loaded via `briefing.skills`; you get no briefing
   and would touch the sandbox, the storage stack or the render loop with too little
   context.
@@ -60,7 +60,7 @@ not created implicitly.
 
 - `karr list --compact` / `karr board` — open work · `karr show ID` — detail
 - `karr create "Title" --priority high --tags a,b --body '…'` · `karr edit ID -a "note"`
-  · `--claim NAME` · `karr move ID in-progress` — full surface: skill `kanban-issues-karr-cli`
+  · `--claim NAME` · `karr move ID in-progress` — full surface: skill `kanban-issues-karr-coordination`
 
 **One board writer when fanning out** — workers return proposals, never board mutations.
 The orchestrator writes sequentially, or delegates one exclusive batch to karr-coordinator

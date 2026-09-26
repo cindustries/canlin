@@ -7,7 +7,7 @@ briefing:
   skills:
     - canlin-core
     - beepack-format
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-ticket
 ---
 
 You write tests for **CanLin**. The conventions above are non-negotiable — apply silently,

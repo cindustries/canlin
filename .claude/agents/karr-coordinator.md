@@ -5,7 +5,8 @@ model: sonnet
 tools: Read, Bash, Glob, Grep
 briefing:
   skills:
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-coordination
+    - kanban-issues-karr-ticket
     - canlin-coordination
 ---
 
