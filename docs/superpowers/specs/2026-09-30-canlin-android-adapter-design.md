@@ -54,9 +54,12 @@ thread; that thread is CanLin's **owner thread** and runs `canlin_loop_run`. The
 Android UI thread only forwards activity callbacks through the glue's command pipe.
 
 Android wait (new row for native loop §4): the owner thread's `ALooper` is the one
-blocking primitive. The glue's command and input idents are registered on it; the loop's
-descriptors (sources' `pollfds` + wake pipe) are registered with `ALooper_addFd`, and
-changes to that set between iterations are applied as add/remove before waiting. The
+blocking primitive. The glue's command and input idents are registered on it. The loop's
+descriptors (sources' `pollfds` + wake pipe) go into one private epoll set owned by the
+adapter, and only that epoll descriptor is registered with the Looper, once. Changes to
+the set between iterations are applied to the private epoll set. (Implemented in k72:
+sources such as `canlin_http` close their sockets on their own, and a per-descriptor
+`ALooper_addFd`/`removeFd` pairing on KitKat risks stale Looper records on fd reuse.) The
 wait is `ALooper_pollOnce(timeout)` with the timeout computed by loop step 6. Idle stays
 idle: no descriptor ready, no deadline, no command → infinite wait. Commands and input
 are drained within the loop's bounded steps, never inside a Lua callback.
@@ -74,6 +77,11 @@ are drained within the loop's bounded steps, never inside a Lua callback.
 | `APP_CMD_SAVE_STATE` | nothing: correctness never depends on a final flush |
 | `APP_CMD_LOW_MEMORY` | log; release unpinned font sizes and other caches |
 | `APP_CMD_DESTROY` | set quit; the loop returns. The process may also be killed without any command |
+| `APP_CMD_WINDOW_REDRAW_NEEDED` | full present |
+
+`PAUSE`, `STOP` and `TERM_WINDOW` also release a held touch. On the A7600-H, resuming
+after power-on delivers a `TERM_WINDOW` + `INIT_WINDOW` pair; the second window gets a
+full present and the module state is kept (verified in k72).
 
 The clock is `CLOCK_MONOTONIC`. It stops while the device sleeps; per core API D4 this
 adapter documents it: a timer due during deep sleep fires once after wake-up, late by
@@ -99,6 +107,8 @@ together with the rotation sensor (§10).
   per-output UI scale (UI §2.1) corrects it. Phase 0 decides whether this device's
   default scale is 100 % or higher.
 - Memory: 1280×800 RGB frame + shadow ≈ 6 MB; the window buffers are Android's.
+- Verified on the A7600-H (k72): the lock reports `RGBX_8888` (format 2), stride 1280.
+  With the navigation bar still shown (until §7) the window is 1280×752.
 
 ## 6. Input and platform services
 
@@ -108,10 +118,14 @@ together with the rotation sensor (§10).
   the normalised primary button press/motion/release in output pixels through
   `canlin_module_post_input`, stamped at post (core API §6, canlin#37 stays open for
   hardware timestamps). Further pointers are ignored in v1; `ACTION_CANCEL` releases the
-  held button like an input overflow does. Scroll comes from the UI's existing touch
+  held button at its last position. **Open decision:** a real input overflow clears a
+  pressed on-screen-keyboard key without typing it, while a release at the last position
+  over such a key types it; k72 implements the release. Whether cancel should behave like
+  overflow instead is undecided. Scroll comes from the UI's existing touch
   drag handling, not from Android gestures.
 - **Keys:** Back maps to Escape and is always consumed (CanLin is the home screen; the
-  activity never finishes on Back). Volume keys are returned unhandled so Android's
+  activity never finishes on Back). Menu (this device's navigation bar has a Menu
+  button) opens/closes the shell's switcher. Volume keys are returned unhandled so Android's
   volume control keeps working. A hardware or Bluetooth keyboard delivers keys and text
   like any other key source.
 - **Text input:** the output's input class is touch; a focused field shows CanLin's own
@@ -155,6 +169,14 @@ Audio (OpenSL ES, available since API 9) is named here but specified with the au
 spec (system design §8); it is not part of v1 of this adapter.
 
 ## 7. Appliance mode without root
+
+Manifest as built in k72: `NativeActivity`, `hasCode="false"`, `launchMode="singleTask"`,
+`configChanges` covering orientation/screen size/keyboard, `windowSoftInputMode=
+"stateAlwaysHidden"`, theme `Theme.NoTitleBar.Fullscreen`, landscape, `minSdkVersion` and
+`targetSdkVersion` 19, `allowBackup="false"`, permissions `INTERNET` and
+`ACCESS_NETWORK_STATE`. The package name `industries.conflict.canlin` is a placeholder
+awaiting the owner's decision: changing it later is a new app identity and loses the
+app's local data. APK signing: v1 (JAR) + v2 + v3, debug keystore generated into `build/`.
 
 - The manifest declares the activity for `MAIN` + `LAUNCHER` and `MAIN` + `HOME` +
   `DEFAULT`. The operator selects CanLin as the default home app once ("always"). After
