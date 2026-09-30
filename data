@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-30T05:53:47Z
+claimed_by: canlin
+class: standard
+created: 2026-09-30T04:46:12Z
+depends_on:
+- 61
+- 71
+id: 72
+priority: high
+started: 2026-09-30T05:15:16Z
+status: in-progress
+tags:
+- android
+- backend
+title: 'Android adapter: NativeActivity APK, ALooper wait, lifecycle, present, input'
+updated: 2026-09-30T05:53:47Z
+---
+
+Phase 1 of docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md. Makefile-built APK (NDK r25c, minSdk 19, armeabi-v7a, hasCode=false, aapt2/zipalign/apksigner, no Gradle); android_native_app_glue; owner thread runs canlin_loop_run with ALooper_pollOnce as the wait and loop descriptors via ALooper_addFd (§3); lifecycle table (§4); present via ANativeWindow_lock with RGB->RGBX conversion of every row in the returned bounds (§5); touch/keys to canlin_module_post_input, Back=Escape, volume unhandled, own on-screen keyboard (§6.1); own CA bundle, allowBackup=false (§8). Host tests for the pure parts: input mapping, lifecycle state machine, row conversion with enlarged bounds. Done when the shell shows on the A7600-H; with k40 and a key store, the assistant runs against a real provider.
+
+2026-09-30 05:22 Start (canlin-worker): plan = mk/android.mk APK (aapt2/zipalign/apksigner, v1 sig), src/android/{adapter.c pure, activity.c device}, src/app assembly + compiled-in demo module, host tests t/android t/app, then device qualification. Loop wait hook is poll-shaped already; Android wait plugs in as canlin_loop_wait_fn, no loop change planned.
+
+2026-09-30 05:32 Device first light OK: APK (aapt2/zipalign/apksigner, v1+v2+v3 verified, minSdk 19) installs on A7600-H; window 1280x752 (nav bar remains, immersive is phase 3), lock reports format 2 = RGBX_8888 after setBuffersGeometry (phase 0 saw RGBA default). Shell + demo module render correctly (shots in build/android-armv7/shots/).
+
+2026-09-30 05:41 Unexplained one-off (device, pid 5833): after Greet (greet 1) + ~40 s idle across a minute tick + Back x2, the demo logged 'greet 2 Hallo' (shot 05-after-back.png shows '(2)'). Not reproduced in 4 device replays (Back only; Greet+Back; full sequence incl. typing/screencap/top; tick then Back) nor on host (every canlin_ui_key edge after Greet, with/without field focus, with minute ticks). Code read: Escape maps to no nk key, activated() needs Enter/Space, nk button needs a DOWN edge. Keep watching; propose a card only if it recurs.
+
+2026-09-30 05:50 Final build re-qualified on A7600-H (shots build/android-armv7/shots/final-*.png, log final-logcat.txt): first frame, field tap -> own QWERTZ keyboard (no Android IME), typing via key taps incl. one-shot shift, Greet runs Lua and updates text, Back consumed (activity stays focused), power off/on + slide unlock -> resume with new window, full present, state kept; Home + am start -> same pid, task to front, full present. Idle: 0 ticks on all threads over 20 s (owner thread in ALooper_pollOnce(-1)); loop ~50 iterations per whole interactive session. No W/E/F canlin lines, no fatal/ANR. Device suites: 20/21 pass incl. new test_android/test_app; http_test = known k76. Host make test ALL TESTS PASSED. i686 musl builds of the two new tests pass on host (not P2-QEMU). Spec deviation: loop descriptors in one private epoll set registered once with ALooper_addFd (4.4 Looper removeFd bookkeeping), see activity.c header. Not verified on device: APP_CMD_DESTROY path (no graceful destroy trigger via adb on 4.4), LOW_MEMORY, ACTION_CANCEL, config change, hardware keyboard.
+
+First light committed: 82d5dfb (adapter, APK, runtime assembly, tests), spec 232e49d. Orchestrator verified: host make test green (test_android 127, test_app 74), screenshots of keyboard and power resume inspected. Remaining for k72: own CA bundle (k75), assistant + key store + real provider (k40), §4 sleep-delay test, device checks for DESTROY/CANCEL/config change. Decisions pending: package name, ACTION_CANCEL semantics.
