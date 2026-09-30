@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-30T06:07:36Z
+claimed_by: canlin
+class: standard
+created: 2026-09-30T05:54:05Z
+id: 81
+priority: low
+status: backlog
+tags:
+- shell
+- android
+title: 'Shell: Back/Escape has no visible effect (does not close the switcher)'
+updated: 2026-09-30T06:07:36Z
+---
+
+Found in k72: Back maps to Escape and is consumed, but the shell ignores it; e.g. the open switcher stays open. The shell spec is silent on Escape. Decide semantics (close switcher/overlay, unfocus field, hide on-screen keyboard) and implement in the shell.
+
+Also seen in k74 (immersive-07): Escape is swallowed while the switcher is open.
