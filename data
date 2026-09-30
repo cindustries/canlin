@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-30T05:53:57Z
+id: 80
+priority: low
+status: backlog
+tags:
+- ui
+- touch
+- android
+title: 'Touch: hover highlight stays after finger lifts on touch-only outputs'
+updated: 2026-09-30T05:53:57Z
+---
+
+Found in k72 on the A7600-H: after a tap the button stays hover-highlighted because the pointer position persists. On an output with input class touch, lifting the finger should clear the hover position (UI/shell input path). Test with the offscreen harness.
