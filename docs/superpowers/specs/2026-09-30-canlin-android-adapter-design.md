@@ -51,7 +51,12 @@ it changes permission behaviour and must be reviewed, not bumped silently.
 The app is one `NativeActivity` using `android_native_app_glue` from the NDK (compiled
 from the NDK tree like libc, not vendored). The glue runs `android_main` on its own
 thread; that thread is CanLin's **owner thread** and runs `canlin_loop_run`. The
-Android UI thread only forwards activity callbacks through the glue's command pipe.
+Android UI thread forwards activity callbacks through the glue's command pipe and does
+one thing itself: it sets the system UI flags (§7). For that the manifest meta-data
+`android.app.func_name` names `canlin_onCreate`, which calls the glue's
+`ANativeActivity_onCreate` and wraps its `onResume` and `onWindowFocusChanged` callbacks;
+the wrappers call the glue first, then `setSystemUiVisibility` via JNI on the UI thread,
+where `activity->env` is valid. Java exceptions are cleared and logged.
 
 Android wait (new row for native loop §4): the owner thread's `ALooper` is the one
 blocking primitive. The glue's command and input idents are registered on it. The loop's
@@ -71,7 +76,7 @@ are drained within the loop's bounded steps, never inside a Lua callback.
 | `APP_CMD_INIT_WINDOW` | the output appears: size, format (§5), DPI; full invalidate |
 | `APP_CMD_TERM_WINDOW` | the output is gone; nothing is presented until a new window arrives |
 | `APP_CMD_WINDOW_RESIZED`, `APP_CMD_CONFIG_CHANGED` | re-read metrics; relayout and invalidate the output (UI §2.1) |
-| `APP_CMD_GAINED_FOCUS` | re-apply immersive mode (§7) |
+| `APP_CMD_GAINED_FOCUS` | nothing for the owner: immersive flags are applied on the UI thread at resume and at every focus gain (§3) |
 | `APP_CMD_PAUSE` / `APP_CMD_STOP` | suspension as event runtime §7: stop capture, keep durable work, no presenting |
 | `APP_CMD_RESUME` | recheck capabilities, reconnect as needed, redraw; each due timer fires once (core API D4) |
 | `APP_CMD_SAVE_STATE` | nothing: correctness never depends on a final flush |
@@ -108,7 +113,8 @@ together with the rotation sensor (§10).
   default scale is 100 % or higher.
 - Memory: 1280×800 RGB frame + shadow ≈ 6 MB; the window buffers are Android's.
 - Verified on the A7600-H (k72): the lock reports `RGBX_8888` (format 2), stride 1280.
-  With the navigation bar still shown (until §7) the window is 1280×752.
+  With immersive mode (§7) the window is 1280×800 from the first layout; a forced
+  752→800 resize relayouts and full-presents without a stale stripe (k74).
 
 ## 6. Input and platform services
 
@@ -125,7 +131,9 @@ together with the rotation sensor (§10).
   drag handling, not from Android gestures.
 - **Keys:** Back maps to Escape and is always consumed (CanLin is the home screen; the
   activity never finishes on Back). Menu (this device's navigation bar has a Menu
-  button) opens/closes the shell's switcher. Volume keys are returned unhandled so Android's
+  button) opens/closes the shell's switcher. With the bars hidden, Menu is only
+  reachable on the transient bar after a swipe; the shell bar's "Modules" button is the
+  main way to the switcher. Volume keys are returned unhandled so Android's
   volume control keeps working. A hardware or Bluetooth keyboard delivers keys and text
   like any other key source.
 - **Text input:** the output's input class is touch; a focused field shows CanLin's own
@@ -181,9 +189,14 @@ app's local data. APK signing: v1 (JAR) + v2 + v3, debug keystore generated into
 - The manifest declares the activity for `MAIN` + `LAUNCHER` and `MAIN` + `HOME` +
   `DEFAULT`. The operator selects CanLin as the default home app once ("always"). After
   that the device boots straight into CanLin, and Home returns to it.
-- Immersive sticky mode (API 19) hides status and navigation bars; it is re-applied on
-  focus gain. An edge swipe still shows the bars transiently. Without root this is not a
+- Immersive sticky mode (API 19) hides status and navigation bars (flags `0x1706`:
+  IMMERSIVE_STICKY, HIDE_NAVIGATION, FULLSCREEN and the three LAYOUT flags), applied at
+  resume and on every focus gain (§3). Verified on the A7600-H in k74. An edge swipe still shows the bars transiently. Without root this is not a
   lock: a determined user can reach Android. v1 accepts this and says so.
+- Android shows a one-time "swipe from the top to exit fullscreen" prompt that swallows
+  touches until OK is tapped; OK is recorded in `Settings.Secure
+  immersive_mode_confirmations`. A power cycle within about 5 s re-arms the prompt.
+  Confirming it is an operator setup step.
 - Operator setup (documented, manual): update to 4.4, set the screen lock to "none",
   choose CanLin as home, connect Wi-Fi (in CanLin or Android). Whether the stock
   launcher can be disabled from `adb shell` without root is checked in phase 0.
