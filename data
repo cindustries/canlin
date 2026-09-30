@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T06:10:36Z
+claimed_by: canlin
+class: standard
+completed: 2026-09-30T06:10:36Z
+created: 2026-09-30T05:12:43Z
+id: 76
+priority: medium
+started: 2026-09-30T06:10:36Z
+status: done
+tags:
+- test
+- net
+- android
+title: 'http_test: connect-stall fixture does not stall on Linux 3.4 (Android device)'
+updated: 2026-09-30T06:10:36Z
+---
+
+Found by k71 on the A7600-H (kernel 3.4.67): http_test fails 3/1147 checks (lines ~705, 708, 767), the connect-stall and connect-cancel cases. The fixture relies on a listen(fd, 0) server with a full accept queue so the client's connect never completes; on 3.4 the kernel drops a SYN on a full accept queue only when more than one young half-open request waits, so the client gets SYN-ACK and reaches ESTABLISHED (seen: client ESTABLISHED, server SYN_RECV). Newer kernels drop the SYN (believed: upstream 2017 'tcp/dccp: drop SYN packets if accept queue is full', unverified). Done when the connect-timeout claim holds on the device without weakening it on the host; no skip. Lane: canlin-test-writer.
+
+2026-09-30 test-writer: fixture fixed in t/net only (tsrv.c, http_test.c, tsrv.h). Cause confirmed on device: 3.4 answers a SYN when <2 young (unretransmitted, ~1s) requests wait; probe shows 2-4 held connects stall, but the window reopens at each SYN-ACK retransmit. tsrv child now keeps a ring of 8 pending connects to the backlog listener, refreshed every 2ms. Residual ms window remains (first attempt at 20ms tick failed 1/6, 2ms tick 5/30 because the test phase aligns with the 1s expiry), so http_test go_backlog() restarts a stream that left the connect phase (max 8); phase==CONNECT + timeout/cancel asserts unchanged. Device: 30/30 http_test runs green + full test-device green. Not proven for every kernel timing; a kernel-independent stall would need root/netns.
+
+Committed fab125d. Orchestrator verified: host make test green; device test-device ALL TESTS PASSED (all suites, http_test 1051). Fixture is probabilistic on 3.4 (bounded retry, claim unchanged); kernel-independent stall needs root/netns. Proposal: print retry count.
