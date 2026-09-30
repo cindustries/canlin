@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CanLin as a NativeActivity (Android adapter spec §2, §7, §8; canlin#72).
+     No Java code (hasCode=false); the activity is android.app.NativeActivity loading
+     libcanlin.so. Landscape only in v1. No HOME filter yet (appliance mode is canlin#74).
+     configChanges keeps the activity (and the runtime) alive across configuration
+     changes; they arrive as APP_CMD_CONFIG_CHANGED (§4). The Android IME is never shown
+     (§6.1: CanLin's own on-screen keyboard). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="industries.conflict.canlin"
+    android:versionCode="1"
+    android:versionName="0.0.1">
+
+    <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="19" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:label="CanLin"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:label="CanLin"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="stateAlwaysHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|locale|fontScale">
+            <meta-data android:name="android.app.lib_name" android:value="canlin" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

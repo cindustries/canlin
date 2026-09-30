@@ -13,12 +13,16 @@ CFLAGS += -march=i686 -mno-sse -static
 endif
 # Android armeabi-v7a, API 19, NDK r25c clang with its default flags (Thumb-2, softfp,
 # NEON, PIE). Dynamic against the device's bionic. Run with 'make TARGET=android-armv7
-# test-device' (tools/android-test.sh; ANDROID_SERIAL selects the device).
+# test-device' (tools/android-test.sh; ANDROID_SERIAL selects the device). The
+# NativeActivity APK is 'make TARGET=android-armv7 apk' (mk/android.mk).
 ifeq ($(TARGET),android-armv7)
 NDK_HOME ?= $(HOME)/android-sdk/ndk/25.2.9519653
 ANDROID_NDK ?= $(NDK_HOME)
 ANDROID_API ?= 19
 CC := $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi$(ANDROID_API)-clang
+# Position-independent code everywhere: the same objects go into the test executables
+# (PIE) and into libcanlin.so for the APK (mk/android.mk).
+CFLAGS += -fPIC
 PTHREAD_LIBS :=
 endif
 BUILD := build/$(TARGET)
