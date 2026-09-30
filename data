@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-30T04:46:30Z
+id: 75
+priority: high
+status: backlog
+tags:
+- tls
+- security
+- android
+title: 'Own CA bundle for the runtime: source, update path, embedded in APK and images'
+updated: 2026-09-30T04:46:30Z
+---
+
+docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md §8: Android 4.4's system store lacks ISRG Root X1 (checked on the A7600-H), so CanLin never uses the platform store. Decide the bundle source (e.g. Mozilla via curl's cacert.pem), how it is updated and verified, and how the runtime loads it (embedded vs data file). Same source as canlin-os#4 so native images and the APK trust the same roots. Relates to k63 (CA bundle parse cost on the P2).
