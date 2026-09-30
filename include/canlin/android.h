@@ -55,7 +55,10 @@ enum {
     CANLIN_ANDROID_DO_SUSPEND = 1u << 4,   /* event runtime §7 suspension (v1: nothing
                                             * captures yet; presenting stops by state) */
     CANLIN_ANDROID_DO_RESUME = 1u << 5,    /* recheck capabilities, reconnect (v1: none) */
-    CANLIN_ANDROID_DO_IMMERSIVE = 1u << 6, /* re-apply immersive mode (§7, phase 3) */
+    CANLIN_ANDROID_DO_IMMERSIVE = 1u << 6, /* re-apply immersive mode (§7): done on the UI
+                                            * thread by the activity's focus/resume
+                                            * callbacks before the command arrives; nothing
+                                            * left for the owner thread */
     CANLIN_ANDROID_DO_TRIM = 1u << 7,      /* low memory: log, release caches */
     CANLIN_ANDROID_DO_PRESENT = 1u << 8,   /* present the whole frame once presentable */
     CANLIN_ANDROID_DO_QUIT = 1u << 9       /* end canlin_loop_run */
@@ -77,6 +80,24 @@ void canlin_android_life_init(canlin_android_life *l);
 unsigned canlin_android_life_cmd(canlin_android_life *l, int cmd);
 /* 1 if a frame may be presented now: a window, resumed, not quitting. */
 int canlin_android_life_presentable(const canlin_android_life *l);
+
+/* ---- immersive sticky mode (§7) ---- */
+
+/* View.SYSTEM_UI_FLAG_* (API 16/19, same values). */
+enum {
+    CANLIN_ANDROID_UI_HIDE_NAVIGATION = 0x0002,
+    CANLIN_ANDROID_UI_FULLSCREEN = 0x0004,
+    CANLIN_ANDROID_UI_LAYOUT_STABLE = 0x0100,
+    CANLIN_ANDROID_UI_LAYOUT_HIDE_NAVIGATION = 0x0200,
+    CANLIN_ANDROID_UI_LAYOUT_FULLSCREEN = 0x0400,
+    CANLIN_ANDROID_UI_IMMERSIVE_STICKY = 0x1000
+};
+/* The set applied: status and navigation bars hidden, an edge swipe shows them only
+ * transiently over the content, and the window keeps the full screen meanwhile. */
+#define CANLIN_ANDROID_UI_IMMERSIVE                                                   \
+    (CANLIN_ANDROID_UI_HIDE_NAVIGATION | CANLIN_ANDROID_UI_FULLSCREEN |                \
+     CANLIN_ANDROID_UI_LAYOUT_STABLE | CANLIN_ANDROID_UI_LAYOUT_HIDE_NAVIGATION |      \
+     CANLIN_ANDROID_UI_LAYOUT_FULLSCREEN | CANLIN_ANDROID_UI_IMMERSIVE_STICKY)
 
 /* ---- input (§6.1) ---- */
 

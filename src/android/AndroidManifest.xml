@@ -29,6 +29,8 @@
             android:windowSoftInputMode="stateAlwaysHidden"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|locale|fontScale">
             <meta-data android:name="android.app.lib_name" android:value="canlin" />
+            <!-- CanLin's entry wraps the glue's (immersive mode on the UI thread, §7). -->
+            <meta-data android:name="android.app.func_name" android:value="canlin_onCreate" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

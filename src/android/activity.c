@@ -1,6 +1,6 @@
 /* CanLin Android device layer (canlin#72): NativeActivity through android_native_app_glue.
  *
- * Contract: docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md §3–§6.1.
+ * Contract: docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md §3–§6.1, §7.
  * The glue thread runs android_main and is CanLin's owner thread: it runs canlin_loop with
  * the Android wait below. Glue commands and input are drained by a loop source in step 3
  * (bounded), never inside a Lua callback. What is decided here beyond the Android calls
@@ -16,6 +16,11 @@
  * so a reused fd number would then fail ALooper_addFd. The private set is ours to keep
  * straight: every descriptor is re-armed before each wait (MOD, ADD on ENOENT), which also
  * covers a closed-and-reused number.
+ *
+ * Immersive sticky mode (§7) is the one thing done on the Android UI thread: the entry
+ * canlin_onCreate (named by the manifest's android.app.func_name) runs the glue's
+ * ANativeActivity_onCreate and then wraps its onResume and onWindowFocusChanged callbacks,
+ * which NativeActivity calls on the UI thread. See "immersive" below.
  */
 #define _POSIX_C_SOURCE 200809L
 #include <android/configuration.h>
@@ -28,6 +33,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <jni.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <string.h>
@@ -452,7 +458,99 @@ static int droid_wait(void *ctx, struct pollfd *fds, size_t n, int timeout_ms)
     return ready;
 }
 
+/* ---- immersive sticky mode (§7), on the Android UI thread ----
+ *
+ * View.setSystemUiVisibility must run on the UI thread (ViewRootImpl.checkThread throws
+ * otherwise), and without Java code nothing can be posted to it. NativeActivity calls the
+ * ANativeActivity callbacks on that thread with activity->env valid, so the flags are set
+ * from wrappers around the glue's onResume and onWindowFocusChanged: the same places the
+ * Android documentation names for immersive mode. The wrappers call the glue first, so the
+ * owner thread sees RESUME / GAINED_FOCUS exactly as before; the owner itself has nothing
+ * to do for immersive mode (CANLIN_ANDROID_DO_IMMERSIVE). The window growing to the full
+ * screen arrives on the owner thread as APP_CMD_WINDOW_RESIZED (§5 resize path). The
+ * LAYOUT_* flags keep the window at full size while the bars show transiently after an
+ * edge swipe, so a swipe does not resize the output. */
+
+static void (*glue_on_resume)(ANativeActivity *a);
+static void (*glue_on_focus)(ANativeActivity *a, int focused);
+
+/* 1 and the exception cleared if the last JNI call threw. */
+static int jni_threw(JNIEnv *env)
+{
+    if (!(*env)->ExceptionCheck(env))
+        return 0;
+    (*env)->ExceptionClear(env);
+    return 1;
+}
+
+/* activity.getWindow().getDecorView().setSystemUiVisibility(CANLIN_ANDROID_UI_IMMERSIVE) */
+static void apply_immersive(ANativeActivity *a, const char *when)
+{
+    JNIEnv *env = a->env;
+    jclass cls;
+    jmethodID m;
+    jobject win, view;
+    int ok = 0;
+
+    if ((*env)->PushLocalFrame(env, 8) != 0) {
+        (void)jni_threw(env);
+        LOGW("immersive (%s): no JNI local frame", when);
+        return;
+    }
+    cls = (*env)->GetObjectClass(env, a->clazz);
+    m = (*env)->GetMethodID(env, cls, "getWindow", "()Landroid/view/Window;");
+    if (m == NULL || jni_threw(env))
+        goto out;
+    win = (*env)->CallObjectMethod(env, a->clazz, m);
+    if (win == NULL || jni_threw(env))
+        goto out;
+    cls = (*env)->GetObjectClass(env, win);
+    m = (*env)->GetMethodID(env, cls, "getDecorView", "()Landroid/view/View;");
+    if (m == NULL || jni_threw(env))
+        goto out;
+    view = (*env)->CallObjectMethod(env, win, m);
+    if (view == NULL || jni_threw(env))
+        goto out;
+    cls = (*env)->GetObjectClass(env, view);
+    m = (*env)->GetMethodID(env, cls, "setSystemUiVisibility", "(I)V");
+    if (m == NULL || jni_threw(env))
+        goto out;
+    (*env)->CallVoidMethod(env, view, m, (jint)CANLIN_ANDROID_UI_IMMERSIVE);
+    ok = !jni_threw(env);
+out:
+    (void)jni_threw(env); /* never return to Java with an exception pending */
+    (*env)->PopLocalFrame(env, NULL);
+    if (ok)
+        LOGI("immersive (%s): system UI flags 0x%x", when, (unsigned)CANLIN_ANDROID_UI_IMMERSIVE);
+    else
+        LOGW("immersive (%s): setting the system UI flags failed; bars stay", when);
+}
+
+static void ui_on_resume(ANativeActivity *a)
+{
+    glue_on_resume(a);
+    apply_immersive(a, "resume");
+}
+
+static void ui_on_focus(ANativeActivity *a, int focused)
+{
+    glue_on_focus(a, focused);
+    if (focused)
+        apply_immersive(a, "focus");
+}
+
 /* ---- entry ---- */
+
+/* NativeActivity's entry (manifest meta-data android.app.func_name), on the UI thread. */
+JNIEXPORT void canlin_onCreate(ANativeActivity *a, void *saved, size_t saved_size);
+JNIEXPORT void canlin_onCreate(ANativeActivity *a, void *saved, size_t saved_size)
+{
+    ANativeActivity_onCreate(a, saved, saved_size);
+    glue_on_resume = a->callbacks->onResume;
+    glue_on_focus = a->callbacks->onWindowFocusChanged;
+    a->callbacks->onResume = ui_on_resume;
+    a->callbacks->onWindowFocusChanged = ui_on_focus;
+}
 
 /* After a failed start or loop: let the activity finish and serve the glue until it
  * destroys us, so its UI thread never waits on a dead owner. */

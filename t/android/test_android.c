@@ -122,6 +122,58 @@ static int is_motion(const canlin_ui_input *in, int x, int y)
     return in->type == CANLIN_UI_IN_MOTION && in->x == x && in->y == y;
 }
 
+/* ---- immersive mode (§7) ---- */
+
+/* The flag set is View.SYSTEM_UI_FLAG_* of API 19, and the command sequence recorded on the
+ * A7600-H (k74) when the flags land only at focus gain: the window is created at 1280x752
+ * and grows to 1280x800 behind a WINDOW_RESIZED. Every step keeps the output presentable
+ * and the grow asks for new metrics plus a full present; each focus gain (also after the
+ * notification shade took it) asks for immersive mode again. Touch clamping follows the
+ * size the device layer reads. */
+static void test_immersive(void)
+{
+    canlin_android_life l;
+    canlin_android_touch t;
+    canlin_ui_input in;
+    canlin_android_motion m;
+
+    CHECK(CANLIN_ANDROID_UI_IMMERSIVE == 0x1706);
+    CHECK((CANLIN_ANDROID_UI_IMMERSIVE & 0x0800) == 0); /* not plain IMMERSIVE */
+
+    canlin_android_life_init(&l);
+    canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_START);
+    canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_RESUME);
+    canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_INPUT_CHANGED);
+    CHECK(canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_INIT_WINDOW) ==
+          (CANLIN_ANDROID_DO_WINDOW | CANLIN_ANDROID_DO_PRESENT));
+    CHECK(canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_WINDOW_RESIZED) ==
+          (CANLIN_ANDROID_DO_METRICS | CANLIN_ANDROID_DO_PRESENT));
+    CHECK(canlin_android_life_presentable(&l));
+    CHECK(canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_GAINED_FOCUS) ==
+          CANLIN_ANDROID_DO_IMMERSIVE);
+    CHECK(canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_WINDOW_REDRAW_NEEDED) ==
+          CANLIN_ANDROID_DO_PRESENT);
+    CHECK(canlin_android_life_presentable(&l));
+    /* notification shade: focus goes and comes back, the output stays presentable */
+    CHECK(canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_LOST_FOCUS) == 0);
+    CHECK(canlin_android_life_presentable(&l));
+    CHECK(canlin_android_life_cmd(&l, CANLIN_ANDROID_CMD_GAINED_FOCUS) ==
+          CANLIN_ANDROID_DO_IMMERSIVE);
+
+    /* a touch in the former navigation bar area reaches the grown output */
+    canlin_android_touch_init(&t, 1280, 752);
+    {
+        int32_t id[1] = {0};
+        float x[1] = {100.0f}, y[1] = {790.0f};
+        m = mv(CANLIN_ANDROID_ACTION_DOWN, 0, 1, id, x, y);
+        CHECK(canlin_android_touch_map(&t, &m, &in) == 1 && in.y == 751);
+        canlin_android_touch_release(&t, &in);
+        t.w = 1280; /* what read_metrics sets after the grow */
+        t.h = 800;
+        CHECK(canlin_android_touch_map(&t, &m, &in) == 1 && is_btn(&in, 1, 100, 790));
+    }
+}
+
 static void test_touch(void)
 {
     canlin_android_touch t;
@@ -411,6 +463,7 @@ static void test_blit(void)
 int main(void)
 {
     test_life();
+    test_immersive();
     test_touch();
     test_keys();
     test_dpi();

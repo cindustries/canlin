@@ -55,12 +55,13 @@ $(ACTIVITY_OBJ): override CPPFLAGS += -isystem $(GLUE_DIR) -isystem third_party/
 	-Ithird_party/lua/src
 $(ACTIVITY_OBJ): $(ANDROID_HDR) $(APP_HDR) include/canlin/loop.h
 
-# -u keeps the glue's ANativeActivity_onCreate (the only entry NativeActivity looks up).
+# -u keeps canlin_onCreate, the entry NativeActivity looks up by the manifest's
+# android.app.func_name; it calls the glue's ANativeActivity_onCreate.
 .SECONDEXPANSION:
 $(ANDROID_SO): $(ACTIVITY_OBJ) $(GLUE_OBJ) $(ANDROID_PURE_OBJ) $$(APP_LINK_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared -Wl,-soname,libcanlin.so -Wl,--no-undefined \
-		-u ANativeActivity_onCreate $^ -o $@ -landroid -llog -lm
+		-u canlin_onCreate $^ -o $@ -landroid -llog -lm
 
 $(APK_KEYSTORE):
 	@mkdir -p $(dir $@)
