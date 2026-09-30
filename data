@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-30T05:15:06Z
+id: 79
+priority: high
+status: done
+tags:
+- net
+- security
+- tls
+title: 'Fix: TLS entropy read blocking /dev/random on bionic/musl'
+updated: 2026-09-30T05:15:06Z
+---
+
+Found in k71 on the A7600-H: Mbed TLS reads /dev/random outside glibc, which blocked the owner thread's DRBG seeding on kernel 3.4. Fixed in ccb8077: MBEDTLS_PLATFORM_DEV_RANDOM=/dev/urandom, regression test test_entropy_source. Follow-up k77.
