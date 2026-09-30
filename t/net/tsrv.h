@@ -2,7 +2,7 @@
  *
  * A forked child serves listeners on 127.0.0.1: plain HTTP, TLS with each fixture
  * certificate (t/net/fixtures), a "stall" listener that accepts and never answers and a
- * "backlog" listener whose accept queue is full (connect stays pending). The child uses
+ * "backlog" listener whose accept queue is kept full (connect stays pending). The child uses
  * the same Mbed TLS build as the client (server side) and reports every request it read,
  * verbatim, to the parent, so tests can check what went over the wire.
  *
@@ -24,7 +24,7 @@ enum {
     TS_SELF,     /* self-signed */
     TS_OTHER,    /* leaf from an untrusted CA */
     TS_STALL,    /* accepts, never reads or writes */
-    TS_BACKLOG,  /* accept queue full: connects stay pending */
+    TS_BACKLOG,  /* accept queue kept full (also on Linux 3.4): connects stay pending */
     TS_N
 };
 

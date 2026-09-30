@@ -657,6 +657,28 @@ static unsigned closed_port(void)
     return p;
 }
 
+/* Start a GET against the backlog listener and spin until the stream sits in the connect
+ * phase. The listener keeps its accept queue full, but Linux 3.4 (Android 4.4) answers a
+ * SYN whenever fewer than two young requests wait in its SYN queue, which happens for a
+ * few ms around each SYN-ACK retransmit (~1 s). A stream that got through that window has
+ * left the connect phase (a fixture miss, not a transport result), so it is closed and
+ * started again. The claim is unchanged: the phase must be CONNECT and stay there until
+ * the timeout or the cancel; a transport that never sits in the connect phase fails
+ * after all attempts. */
+static void go_backlog(canlin_http *h, rec *r)
+{
+    int attempt;
+    for (attempt = 0; attempt < 8; attempt++) {
+        go(h, r, "GET", U(0, "http", "localhost", TS_BACKLOG, "/"), NULL, NULL);
+        spin(h, 100);
+        if (canlin_http_stream_phase(r->s) == CANLIN_HTTP_PH_CONNECT)
+            return;
+        rec_free(r);
+    }
+    go(h, r, "GET", U(0, "http", "localhost", TS_BACKLOG, "/"), NULL, NULL);
+    spin(h, 100);
+}
+
 static void test_timeouts(void)
 {
     canlin_http *h = mk(tsrv_ca_file(), test_resolve);
@@ -699,8 +721,7 @@ static void test_timeouts(void)
     rec_free(&r);
 
     /* connect stall (full accept queue): per-address connect timeout */
-    go(h, &r, "GET", U(0, "http", "localhost", TS_BACKLOG, "/"), NULL, NULL);
-    spin(h, 200);
+    go_backlog(h, &r);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_CONNECT, "connect phase %d",
           canlin_http_stream_phase(r.s));
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_CONNECT_TIMEOUT_MS);
@@ -762,8 +783,7 @@ static void test_cancel(void)
     CHECK(r.calls == 0 && st.dns_jobs == 0, "dns cancel: calls %d jobs %u", r.calls, st.dns_jobs);
 
     /* during connect */
-    go(h, &r, "GET", U(0, "http", "localhost", TS_BACKLOG, "/"), NULL, NULL);
-    spin(h, 100);
+    go_backlog(h, &r);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_CONNECT, "connect phase");
     r_close(&r);
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_CONNECT_TIMEOUT_MS * 2);

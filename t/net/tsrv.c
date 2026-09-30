@@ -436,26 +436,46 @@ out:
 }
 
 #define STALL_MAX 64
+#define BL_RING 8
+#define BL_TICK_MS 2
+
+/* Replace the oldest held connect to the backlog listener with a fresh nonblocking one. */
+static void bl_refill(int ring[BL_RING], int *at, const struct sockaddr_in *a)
+{
+    int fd;
+    if (ring[*at] >= 0)
+        close(ring[*at]);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd >= 0) {
+        fcntl(fd, F_SETFL, O_NONBLOCK);
+        (void)connect(fd, (const struct sockaddr *)a, sizeof *a);
+    }
+    ring[*at] = fd;
+    *at = (*at + 1) % BL_RING;
+}
 
 static void child(int lfd[TS_N], unsigned port_backlog, int ctl, int rep)
 {
-    int stalled[STALL_MAX], nst = 0, pre[2], k;
+    int stalled[STALL_MAX], nst = 0, pre[BL_RING], pre_at = 0, k;
     struct sockaddr_in a;
 
     signal(SIGPIPE, SIG_IGN);
     if (c_tls_init() != 0)
         _exit(3);
-    /* Fill the backlog listener's accept queue (listen(fd, 0)): later SYNs are dropped,
-     * so a client connect stays pending. */
+    /* Keep the backlog listener's accept queue full (listen(fd, 0)) and its SYN queue
+     * "young", so a client connect stays pending. Kernels since 2017 drop a SYN on a full
+     * accept queue; Linux 3.4 (Android 4.4) drops it only while more than one young
+     * (never retransmitted, ~1 s) request waits, else it answers and the client reaches
+     * ESTABLISHED. Hence BL_RING/2 connects up front, then one fresh connect per 2 ms tick that
+     * replaces the oldest, so young requests never run out. */
     memset(&a, 0, sizeof a);
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     a.sin_port = htons((unsigned short)port_backlog);
-    for (k = 0; k < 2; k++) {
-        pre[k] = socket(AF_INET, SOCK_STREAM, 0);
-        fcntl(pre[k], F_SETFL, O_NONBLOCK);
-        connect(pre[k], (struct sockaddr *)&a, sizeof a);
-    }
+    for (k = 0; k < BL_RING; k++)
+        pre[k] = -1;
+    for (k = 0; k < BL_RING / 2; k++)
+        bl_refill(pre, &pre_at, &a);
     for (;;) {
         struct pollfd p[TS_N + 1];
         int n = 0, i;
@@ -469,11 +489,12 @@ static void child(int lfd[TS_N], unsigned port_backlog, int ctl, int rep)
         p[n].events = POLLIN;
         p[n].revents = 0;
         n++;
-        if (poll(p, (nfds_t)n, -1) < 0) {
+        if (poll(p, (nfds_t)n, BL_TICK_MS) < 0) {
             if (errno == EINTR)
                 continue;
             _exit(2);
         }
+        bl_refill(pre, &pre_at, &a);
         if (p[TS_N].revents)
             c_ctl(ctl);
         for (i = 0; i < TS_N; i++) {
