@@ -21,6 +21,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "mbedtls/platform.h"
+
 static int failures, checks;
 
 #define CHECK(c, ...) do { checks++; if (!(c)) { failures++; \
@@ -322,6 +324,16 @@ static int err_is(const rec *r, const char *prefix)
 }
 
 /* ---- tests ---- */
+
+/* HTTP transport spec §5: entropy is getrandom() or /dev/urandom. Without glibc (bionic,
+ * musl) Mbed TLS reads mbedtls_platform_dev_random, whose default "/dev/random" blocks on
+ * kernels before 5.6 while the entropy estimate is low: the owner thread's DRBG seed and
+ * the test server's TLS stalled on the Android 4.4 tablet. The configuration pins it. */
+static void test_entropy_source(void)
+{
+    CHECK(strcmp(mbedtls_platform_dev_random, "/dev/urandom") == 0,
+          "platform entropy file is '%s'", mbedtls_platform_dev_random);
+}
 
 static void test_basic(void)
 {
@@ -898,6 +910,7 @@ int main(void)
     }
     wall_now = at(2030, 6, 1);
     clk.now = 1000;
+    test_entropy_source();
     test_basic();
     test_sse_bytes();
     test_backpressure();

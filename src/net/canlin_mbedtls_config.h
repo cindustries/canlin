@@ -27,6 +27,11 @@
 #define MBEDTLS_FS_IO               /* trust bundle file */
 #define MBEDTLS_DEPRECATED_REMOVED
 #define MBEDTLS_ENTROPY_C           /* platform entropy: getrandom() / /dev/urandom */
+/* Mbed TLS calls getrandom() only when built against glibc; on bionic and musl it reads
+ * this file, and its default "/dev/random" blocks on kernels before 5.6 whenever the
+ * entropy estimate is low (seen on the Android 4.4 tablet: kernel 3.4, TLS stalled).
+ * The DRBG is seeded on the owner thread, so the fallback must never block. */
+#define MBEDTLS_PLATFORM_DEV_RANDOM "/dev/urandom"
 #define MBEDTLS_CTR_DRBG_C
 
 /* ---- PSA (TLS 1.3 key schedule) ---- */
