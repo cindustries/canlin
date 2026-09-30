@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-30T06:07:43Z
+id: 85
+priority: medium
+status: backlog
+tags:
+- shell
+- android
+- touch
+title: 'Shell: top-edge swipe to reveal Android bars also opens the switcher'
+updated: 2026-09-30T06:07:43Z
+---
+
+Found in k74 on the A7600-H (immersive-17): in immersive sticky mode the top-edge swipe that reveals the system bars also reaches CanLin, so the shell's 'swipe from the bar' gesture (shell spec §3) opens the switcher at the same time. Decide in the shell spec: ignore bar swipes that start within N px of the top edge on Android, require a different gesture, or accept it.
