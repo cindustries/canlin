@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h> /* IPPROTO_TCP: bionic's netdb.h does not pull it in */
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,7 +61,8 @@ static int resolve_gai(void *ctx, const char *host, unsigned port, canlin_net_ad
     if (getaddrinfo(host, serv, &hints, &res) != 0 || res == NULL)
         return -1;
     for (ai = res; ai && n < max; ai = ai->ai_next) {
-        if (ai->ai_addrlen > sizeof out[n].sa ||
+        /* socklen_t is signed on bionic: a negative length becomes huge and is skipped */
+        if ((size_t)ai->ai_addrlen > sizeof out[n].sa ||
             (ai->ai_family != AF_INET && ai->ai_family != AF_INET6))
             continue;
         memset(&out[n], 0, sizeof out[n]);

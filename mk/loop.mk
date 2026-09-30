@@ -10,7 +10,7 @@ LOOP_OBJ := $(BUILD)/src/loop/loop.o
 LOOP_HTTP_OBJ := $(BUILD)/src/loop/loop_http.o
 LOOP_LLM_OBJ := $(BUILD)/src/loop/loop_llm.o
 LOOP_SHELL_OBJ := $(BUILD)/src/loop/loop_shell.o
-LOOP_LIBS := -lpthread
+LOOP_LIBS := $(PTHREAD_LIBS)
 LIBOBJ += $(LOOP_OBJ) $(LOOP_HTTP_OBJ) $(LOOP_LLM_OBJ) $(LOOP_SHELL_OBJ)
 
 LOOP_TEST := $(BUILD)/t/loop/test_loop

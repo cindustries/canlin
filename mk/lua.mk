@@ -30,3 +30,10 @@ $(LUA_LSTR_OBJ): $(LUA_LSTR_C)
 # Vendored code is not held to our warning set. 'override' so this also
 # applies when CFLAGS is given on the command line.
 $(LUA_OBJ): override CFLAGS += -w -Wno-error
+
+# bionic has no localeconv() before API 21, which luaconf.h's default
+# lua_getlocaledecpoint() calls. CanLin never calls setlocale(), so the radix
+# character is the C locale's '.' on every target; Android gets it as a constant.
+ifeq ($(TARGET),android-armv7)
+$(LUA_OBJ): override CPPFLAGS += "-Dlua_getlocaledecpoint()='.'"
+endif

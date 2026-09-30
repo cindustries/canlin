@@ -17,7 +17,7 @@ HTTP_HDR := include/canlin/http.h $(NET_HDR) include/canlin/ev.h src/net/net_int
 	src/net/canlin_mbedtls_config.h
 HTTP_OBJ := $(BUILD)/src/net/http.o $(BUILD)/src/net/sock.o $(BUILD)/src/net/dns.o \
 	$(BUILD)/src/net/tls.o
-HTTP_LIBS := -lpthread
+HTTP_LIBS := $(PTHREAD_LIBS)
 LIBOBJ += $(HTTP_OBJ)
 
 $(HTTP_OBJ): $(HTTP_HDR)
