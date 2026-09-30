@@ -73,6 +73,9 @@ subset.
   ≤ 100 wakeups/s and ≤ 10 ms extra latency while a stream is live, on desktop/mobile
   hardware only (the P2 uses rawfb). A helper thread that polls and posts an SDL user
   event is the upgrade path if this proves too slow or too costly; not in v1.
+- **Android (NativeActivity):** `ALooper_pollOnce(timeout)` on the owner thread, with the
+  loop's descriptors registered via `ALooper_addFd` — see the
+  [Android adapter](2026-09-30-canlin-android-adapter-design.md) §3.
 - **Test:** a wait function that advances the fake clock to the computed timeout and
   reports which scripted descriptors are ready.
 

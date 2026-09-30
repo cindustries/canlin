@@ -53,7 +53,7 @@ Principles that decide every later question:
 | Pentium II laptop | rawfb + evdev | canlin-os image, initramfs in RAM, syslinux | canlin-os |
 | x86 tablet (Bay Trail / Surface era) | rawfb + evdev, touch via i2c-hid | canlin-os image, UEFI | canlin-os |
 | Desktop (development, kiosks) | SDL2 | binary | CanLin |
-| Android tablet, phone | SDL2 + NDK | sideloaded APK | CanLin |
+| Android tablet, phone | NativeActivity + NDK (amended 2026-09-30, see [Android adapter](2026-09-30-canlin-android-adapter-design.md)) | sideloaded APK | CanLin |
 | iPad, iPhone | SDL2 + Xcode | signed app (TestFlight or 7-day dev signing) | CanLin |
 | Browser | Emscripten + SDL2/Canvas, browser I/O adapters | WASM + loader + assets over HTTPS | CanLin |
 
