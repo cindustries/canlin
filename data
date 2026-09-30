@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-30T06:07:30Z
+claimed_by: canlin
+class: standard
+created: 2026-09-30T04:46:24Z
+depends_on:
+- 72
+id: 74
+priority: low
+status: backlog
+tags:
+- android
+- appliance
+title: 'Android appliance mode without root: home app, immersive sticky, operator
+  setup'
+updated: 2026-09-30T06:07:30Z
+---
+
+Phase 3 of docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md §7: manifest MAIN+HOME+DEFAULT, immersive sticky re-applied on focus gain, operator setup doc (screen lock none, CanLin as home, Wi-Fi), escape hatches (trusted 'Android settings' action, adb). Check whether shell may pm disable-user the stock launcher com.lenovo.launcherhd. No root in v1.
+
+2026-09-30 05:57 k74 immersive-only slice started (worker): entry canlin_onCreate via android.app.func_name wraps glue onResume/onWindowFocusChanged (UI thread) to set View.setSystemUiVisibility(0x1706) via JNI; no Java.
+
+2026-09-30 06:05 Immersive slice verified on A7600-H (shots build/android-armv7/shots/immersive-*.png): flags 0x1706 set from UI-thread onResume/onWindowFocusChanged wrappers; window 1280x800 from first layout; edge swipe shows bars transiently over content, no resize; power cycle, Home+am start, notification shade all return fullscreen; idle 1 tick/30 s. Findings: Android's one-time immersive confirmation cling eats touches until OK (and is re-armed by a power off/on within ~5 s, Android 'panic' rule); top-edge swipe also reaches CanLin and opens the shell switcher (shell swipe-from-bar gesture collides with the bar reveal); Back does not close an open switcher.
+
+2026-09-30 06:06 Immersive slice ready for review (not handed off; dispatcher decides). Files: src/android/activity.c, include/canlin/android.h, src/android/AndroidManifest.xml, mk/android.mk, t/android/test_android.c. Host: test_android 140/0, test_app 74/0; full make test NOT run (loadguard refused, heavy slots busy). Device probe (flags at focus only, reverted) exercised 752->800 grow: WINDOW_RESIZED, relayout, full present, no stripe. Side effect: tapped OK on Android's immersive confirmation, which sets Settings.Secure immersive_mode_confirmations=industries.conflict.canlin. Proposals: shell top-swipe vs bar reveal collision; Back closing the switcher; spec §3/§4/§5/§6.1/§7 wording updates.
+
+Immersive sticky committed 73e9b54, spec c433f9e. Orchestrator verified host make test green, screenshot 1280x800 with keyboard. Device state: Settings.Secure immersive_mode_confirmations set by tapping OK (undo: adb shell settings delete secure immersive_mode_confirmations). Minor: transient nav bar overlays the keyboard's bottom row for ~3 s (expected sticky behaviour). Remaining k74: HOME filter, operator setup doc, pm disable-user check.
