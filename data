@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-30T05:54:23Z
+id: 83
+priority: low
+status: backlog
+tags:
+- android
+- input
+title: 'Android: text from hardware keyboards via JNI character mapping'
+updated: 2026-09-30T05:54:23Z
+---
+
+Found in k72: key codes from a hardware/Bluetooth keyboard are mapped, text is not. Needs KeyCharacterMap via JNI (AKeyEvent gives no Unicode). Low priority while the device is touch-only.
