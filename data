@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-30T04:45:37Z
+id: 70
+priority: medium
+status: done
+tags:
+- android
+- hardware
+title: 'Android device inventory: Lenovo A10-70 (A7600-H)'
+updated: 2026-09-30T04:45:37Z
+---
+
+Phase 0 of docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md (§9). Read over adb on stock firmware, nothing changed. Result recorded in the spec's 'Phase 0 result' table: Android 4.4.2/API 19 already installed, kernel 3.4.67, Cortex-A7 NEON/VFPv4, 976 MB RAM (~600 MB free idle), 1280x800 density 160, RGBA_8888/RGBX_8888 surfaces, ISRG Root X1 missing from the system CA store, MTK wmt_loader/6620_launcher Wi-Fi bring-up. Open: whether shell may pm disable-user the stock launcher (untested, changes the device).
