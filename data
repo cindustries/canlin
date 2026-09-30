@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-30T05:15:00Z
+claimed_by: canlin
+class: standard
+completed: 2026-09-30T05:15:00Z
+created: 2026-09-30T04:45:43Z
+id: 71
+priority: high
+started: 2026-09-30T05:15:00Z
+status: done
+tags:
+- android
+- arm
+- test
+- build
+title: 'ARM gate: portable test suites built with NDK r25c, run on the Android device'
+updated: 2026-09-30T05:15:00Z
+---
+
+docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md §9 evidence table, row 2. make TARGET=android-armv7 builds the portable test binaries (no backend code) with NDK r25c clang for armeabi-v7a, API 19; a make target pushes them to /data/local/tmp over adb, runs each with a timeout and collects exit codes like 'make test'. Expected new failure classes: unsigned char on ARM EABI, unaligned LDRD/LDM/VFP, bionic API gaps hidden by the NDK at API 19. Done when every portable suite passes on the A7600-H, or each failure is a card. Report device evidence separately from host evidence.
+
+2026-09-30 04:50 Build: make TARGET=android-armv7 builds all 19 test binaries after 3 build fixes: (1) src/net/dns.c used IPPROTO_TCP via netdb.h only (bionic needs <netinet/in.h>); (2) dns.c ai_addrlen > sizeof compare warns under clang/bionic where socklen_t is signed int; (3) Lua's default lua_getlocaledecpoint() calls localeconv(), absent from bionic before API 21 -> configured by flag in mk/lua.mk for android only. NDK has no libpthread: -lpthread routed through PTHREAD_LIBS. Runner: tools/android-test.sh via make TARGET=android-armv7 test-device. Device run next.
+
+2026-09-30 05:08 Device run 1 (A7600-H, before TLS fix): 16/19 pass; test_llm_http, test_loop_native, http_test fail+timeout, all via TLS to the forked tsrv. Root cause: Mbed TLS only uses getrandom() under __GLIBC__; on bionic (and musl) it reads MBEDTLS_PLATFORM_DEV_RANDOM, default /dev/random, which blocks on kernel 3.4 while entropy_avail < read_wakeup_threshold (57 < 64 on the idle tablet). wchan of both the test process (client DRBG seed = owner thread in the runtime) and the tsrv child = random_read. Contradicts HTTP transport spec §5 ('getrandom()/ /dev/urandom'). Fix: MBEDTLS_PLATFORM_DEV_RANDOM "/dev/urandom" in src/net/canlin_mbedtls_config.h + regression check test_entropy_source in t/net/http_test.c (red on host before the fix). A/B on device with entropy drained by a background /dev/random reader: pre-fix binary blocks in random_read, fixed binaries pass.
+
+2026-09-30 05:08 Device run 2: 18/19 pass. Remaining: t/net/http_test.c:705/708/767 (connect-stall and connect-cancel via full accept queue of tsrv's listen(fd,0) backlog listener). Cause: Linux 3.4 tcp_v4_conn_request drops a SYN on a full accept queue only when >1 young request is in the SYN queue, so the client still gets SYN-ACK and reaches ESTABLISHED (device /proc/net/tcp: pre-connect client 01 while server side 03 SYN_RECV). Newer kernels drop the SYN outright. Test-fixture portability, not a transport bug; not fixed here -> card proposal (test-writer lane).
+
+2026-09-30 05:11 Final (tree commit-ready, not committed): device make TARGET=android-armv7 test-device -> 18/19 pass, http_test 3 of 1147 checks fail (backlog fixture, card proposal). Host make test ALL TESTS PASSED; make TARGET=i686 test (musl static on the x86-64 host) ALL TESTS PASSED. Not run: canlin-os qemu pentium2 harness (entropy config change also reaches the musl/i686 runtime), qemu-arm. No unsigned-char, alignment or VFP failures seen on the device. Results returned to dispatcher; card left in-progress per instruction.
+
+Committed ccb8077 (entropy fix) and b0b4a2e (android-armv7 build + test-device). Verified by orchestrator: host make test green; device run 18/19 pass, http_test 3/1147 fail = k76 (fixture on kernel 3.4). Follow-ups k76, k77, k78, canlin-os k5.
