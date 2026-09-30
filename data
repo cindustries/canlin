@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-09-30T05:12:54Z
+id: 78
+priority: low
+status: backlog
+tags:
+- build
+title: 'Build: object files do not track flag changes per target'
+updated: 2026-09-30T05:12:54Z
+---
+
+Found in k71: after changing Lua's CPPFLAGS for android-armv7 the stale build/android-armv7 Lua objects had to be removed by hand. Make should rebuild when a target's flags change (e.g. a flags stamp file per BUILD dir). Also decide whether lua_getlocaledecpoint()='.' should apply on every target for determinism (today only android-armv7).
