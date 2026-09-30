@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-09-30T04:46:18Z
+depends_on:
+- 72
+id: 73
+priority: medium
+status: backlog
+tags:
+- android
+- platform
+- security
+title: Platform services interface (include/canlin/platform.h) + Android implementation
+updated: 2026-09-30T04:46:18Z
+---
+
+Phase 2 of docs/superpowers/specs/2026-09-30-canlin-android-adapter-design.md §6.2: power (battery), screen (keep awake, brightness via window attribute), net status, Wi-Fi scan/connect/forget, open Android settings. JNI from the owner thread, bounded per call, no BroadcastReceiver (bounded polling on a core timer instead). Hostile-module review: Lua sees only canlin.sys battery level/charging and online/offline; SSIDs/scan lists and Wi-Fi config only in trusted settings. canlin-os implements the same interface later (sysfs, wpa_supplicant).
