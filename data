@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-30T05:12:49Z
+id: 77
+priority: medium
+status: backlog
+tags:
+- net
+- security
+- tls
+title: 'TLS entropy: getrandom syscall with /dev/urandom fallback on non-glibc Linux'
+updated: 2026-09-30T05:12:49Z
+---
+
+Follow-up of the k71 entropy fix (MBEDTLS_PLATFORM_DEV_RANDOM pinned to /dev/urandom, because /dev/random blocked the owner thread on kernel 3.4). /dev/urandom never blocks but may be predictable early after boot if unseeded. Use getrandom via syscall where the kernel has it (>= 3.17), fall back to /dev/urandom; or propose upstream that Mbed TLS uses getrandom on bionic/musl. third_party stays read-only: own entropy source via mbedtls_entropy_add_source or a patch file + ticket.
