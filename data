@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-30T05:54:15Z
+id: 82
+priority: low
+status: backlog
+tags:
+- ui
+- memory
+- android
+title: 'UI: release unpinned font sizes on low memory'
+updated: 2026-09-30T05:54:15Z
+---
+
+Found in k72: APP_CMD_LOW_MEMORY only logs because canlin_ui has no call to release unpinned font atlases. Add one and call it from the Android adapter (and any other platform low-memory signal).
