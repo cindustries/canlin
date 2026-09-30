@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-30T05:54:30Z
+id: 84
+priority: low
+status: backlog
+tags:
+- android
+- decision
+title: 'Android adapter: package name for the APK'
+updated: 2026-09-30T05:54:30Z
+---
+
+The APK uses the placeholder package industries.conflict.canlin (k72). Changing it later is a new app identity and loses the app's local data, so the owner decides before k74/first real use.
