@@ -55,3 +55,7 @@ config.yml
 build/
 /canlin
 /canlin-i686
+
+# skilletor: Config und Ignore-Block committen
+!.claude/skilletor.json
+!.claude/.gitignore
