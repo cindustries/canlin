@@ -14,28 +14,24 @@ force-loaded via `briefing.skills` — this file is for the orchestrating main a
 3. **Goal-driven execution** — define success criteria, loop until verified.
 4. **Surface conflicts, don't average them** — contradicting patterns: pick one (more
    recent / more tested), explain why, flag the other. Don't blend.
-5. **Read before you write** — the spec under `docs/superpowers/specs/` and the seam's
-   callers first. "Looks orthogonal" is dangerous in a runtime where every subsystem meets
-   in the event loop.
+5. **Read before you write** — the spec under `docs/superpowers/specs/` and the seam's callers
+   first; "looks orthogonal" is dangerous when every subsystem meets in the event loop.
 6. **Tests verify intent, not just behavior** — reproduce a bug before fixing it; leave a
    regression test behind.
 7. **A red test is a claim before it is a failure** — before changing code to turn a test
    green, say what the test asserts and whether your fix keeps that claim or replaces it.
-8. **Checkpoint and fail loud** — summarize done / verified / left after each significant
-   step. Separate host, P2-QEMU, WASM/backend and real-device evidence; a skipped gate is
-   named, not implied green. No host run proves target instructions or browser durability.
+8. **Checkpoint and fail loud** — done / verified / left after each significant step; separate
+   host, P2-QEMU, WASM/backend and real-device evidence — a skipped gate is named, not implied
+   green. No host run proves target instructions or browser durability.
 9. **Match the codebase's conventions, even if you disagree** — conformance > taste.
 
 ## Delegation
 
-Depends on whether the Agent/Task tool is available to you.
-
-- **You can spawn subagents** (orchestrating main agent): do NOT touch behavior-relevant
-  code yourself — delegate. Your lane: coordinate, inspect, plan, review diffs, run tests,
-  write and edit specs and prose docs. When in doubt, delegate. Why: only the
-  `canlin-*` agents get their skills force-loaded via `briefing.skills`; you get no briefing
-  and would touch the sandbox, the storage stack or the render loop with too little
-  context.
+- **You can spawn subagents** (orchestrating main agent): do NOT touch behavior-relevant code
+  yourself — delegate. Your lane: coordinate, inspect, plan, review diffs, run tests, write and
+  edit specs and prose docs. When in doubt, delegate — only the `canlin-*` agents get their skills
+  force-loaded via `briefing.skills`; you get no briefing and would touch the sandbox, the
+  storage stack or the render loop with too little context.
 
   | Task | Agent |
   |---|---|
@@ -81,13 +77,11 @@ go-ahead.
   never edited in place — patch file plus ticket, or a ticket on `libbee`.
 - **The sandbox is the security boundary.** Modules arrive from a server; any new
   `canlin.*` API is reviewed for what a hostile module could do with it before it ships.
-- **Hardlinked skills.** `.claude/skills/` files shared with canlin-os and libbee are the
-  same inode everywhere; `Edit`/`Write` detaches them. Use `cat > file <<'EOF'` and commit
-  such a change on its own.
+- **Hardlinked skills.** `.claude/skills/` files shared with canlin-os and libbee are the same
+  inode everywhere; `Edit`/`Write` detaches them — use `cat > file <<'EOF'`, commit alone.
 
 ## Architecture — reference, don't restate
 
-The thin-client model, hardware floor, storage stack, theme and responsive rules live in
-skill `canlin-core`; the file format in `beepack-format`; repo ownership in
-`canlin-coordination` (force-loaded per lane via `briefing.skills`). Do not duplicate that
-content here.
+The thin-client model, hardware floor, storage stack, theme and responsive rules live in skill
+`canlin-core`; the file format in `beepack-format`; repo ownership in `canlin-coordination`
+(force-loaded per lane via `briefing.skills`). Do not duplicate that content here.
