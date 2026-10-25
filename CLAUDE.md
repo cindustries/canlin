@@ -16,7 +16,8 @@ an existing Makefile.
 ## Delegation
 
 Delegate behavior-relevant code to the right agent instead of touching it yourself —
-principle and lane are in `.claude/rules/canlin-rules.md`.
+principle in the shared house rules (skilletor bundle `getty-house@getty`), lanes in
+`.claude/rules/canlin-rules.md`.
 
 | Task | Agent |
 |---|---|

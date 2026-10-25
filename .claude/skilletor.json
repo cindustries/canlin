@@ -20,6 +20,9 @@
       "kanban-issues-karr-coordination@karr",
       "kanban-issues-karr-ticket@karr",
       "beepack-format@libbee"
+    ],
+    "bundles": [
+      "getty-house@getty"
     ]
   },
   "targets": [
