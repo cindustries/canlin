@@ -29,6 +29,7 @@ principle in the shared house rules (skilletor bundle `getty-house@getty`), lane
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/` —
 `canlin-core` (architecture and invariants) and `canlin-coordination` (family ownership) are
-owned here and hardlinked into `canlin-os`; `canlin-vendoring` (vendoring procedure) is
-owned here, canlin only; `beepack-format` is owned by `libbee`. Work is
+owned here, and `canlin-os` installs them with skilletor (source `canlin`);
+`canlin-vendoring` (vendoring procedure) is owned here, canlin only; `beepack-format` comes
+from `libbee` through skilletor. Work is
 tracked on the local `karr` board.

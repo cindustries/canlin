@@ -35,10 +35,10 @@ invent a remote, create the repo or implement its side locally without explicit 
 Client/service contract work needs both owners; a fixture does not silently decide the
 service protocol. Direct-provider client work belongs to CanLin, not automatically the server.
 
-`canlin-core` and `canlin-coordination` are owned by `canlin` and hardlinked into canlin-os.
-`beepack-format` is owned by libbee and linked into consumers. In-place truncating writes
-(`cat > … <<'EOF'`) preserve shared inodes; Edit/Write do not. Check pre/post inode/link
-counts and keep any eventual shared-skill commit separate from other changes.
+`canlin-core` and `canlin-coordination` are owned by `canlin`; canlin-os installs them with
+skilletor (source `canlin`). `beepack-format` is owned by libbee and reaches its consumers the
+same way (source `libbee`). A shared skill changes in its owning repo, in a commit of its own;
+consumers pick it up with their next `skilletor sync`.
 
 ## One board writer
 
