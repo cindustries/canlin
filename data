@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-14T20:42:13Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T20:42:13Z
+created: 2026-11-14T20:34:31Z
+id: 119
+priority: low
+started: 2026-11-14T20:34:55Z
+status: done
+tags:
+- ui
+- render
+- limits
+- docs
+title: 'UI: the font size bound''s comment says the atlas carries three faces in a
+  bound of four'
+updated: 2026-11-14T20:42:13Z
+---
+
+include/canlin/ui_limits.h:29-31 says CANLIN_UI_FONT_SIZES_MAX 4u is 'its atlas carries the body and both heading sizes' - three faces in a bound of four, the same wording error canlin#105 fixed in render_limits.h. The constant is the UI's own array bound, not the render atlas bound (CANLIN_RENDER_FONT_SIZES), so it needs its own correct wording rather than the same fix. Found by the 2026-11-14 work on k105.
+
+2026-11-14 (canlin-worker-ui): include/canlin/ui_limits.h:29-31 comment corrected - CANLIN_UI_FONT_SIZES_MAX is the bound of the UI's own font cache (src/ui/ui.c:38, font_entry fonts[]), one entry per distinct em px size; the three faces (body, H1, H2) live inside one atlas per size and are not what the bound counts. The value stays 4u. Wording is its own, not the render_limits.h wording of k105 (CANLIN_RENDER_FONT_SIZES is the render atlas's size array bound). Comments only: no behaviour change, so no new test - a comment cannot fail a check; the suites were rebuilt and rerun to show the header change breaks nothing (all pass in build/ui4, except t/module/test_module, which does not compile from another lane's in-flight edit).
+
+Ready for review: the comment on CANLIN_UI_FONT_SIZES_MAX now says what the constant bounds (the UI's font cache, one entry per em px size) and that the three faces are not counted. Value unchanged (4u), comments only, no new test; the suites pass in build/ui4 except the other lane's t/module/test_module.
+
+2026-11-14 20:42 Review 2026-11-14: fixed and reviewed. include/canlin/ui_limits.h now says what the constant bounds - the UI's own font cache, one entry per distinct em px size - and states that the three faces are not what is counted, in its own wording rather than the render_limits.h wording of k105. Value unchanged. No new test, and that is right: a comment cannot fail a check, so a test here would assert nothing about behaviour; the suites were rebuilt and rerun to show the header change breaks nothing. Committed as 0dff5ef.
