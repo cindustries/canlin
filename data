@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T03:41:20Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:36:52Z
+created: 2026-09-23T02:17:20Z
+id: 15
+priority: low
+started: 2026-09-23T03:36:53Z
+status: done
+tags:
+- sandbox
+- module
+title: Charge payload marshalling against the callback budget
+updated: 2026-11-14T06:36:52Z
+---
+
+Building payload tables costs memory but no instructions; bounded by MARSHAL_* but uncharged. Use the canlin#8 charging helper. From canlin#9.
+
+Merged (e4ed879, 8c1bd36). Host + ASan/UBSan green. i686 skipped.
+
+2026-11-14 06:36 Review 2026-11-14: claim holds. push_args (src/module/module.c:386) charges value_cost through canlin_sandbox_charge (src/sandbox/sandbox.c:321) before the Lua values are built, inside the receiving callback after its budget reset; value_cost is CANLIN_SB_COST_ELEM per table entry plus len / CANLIN_SB_COST_BYTES_PER_UNIT per string, exactly the formula core API spec §6 records. A payload that does not fit faults the scope like any other budget fault. Test test_marshal_budget (t/module/test_module.c:1044). Host make test green; ASan/UBSan green.
