@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T19:14:20Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T19:14:20Z
+created: 2026-11-14T18:43:43Z
+id: 103
+priority: medium
+started: 2026-11-14T18:44:46Z
+status: done
+tags:
+- ui
+- limits
+- docs
+title: 'UI: CANLIN_UI_OUTPUT_ID_MAX means 64 in the header and 63 B in the spec'
+updated: 2026-11-14T19:14:20Z
+---
+
+include/canlin/ui_limits.h:58 defines CANLIN_UI_OUTPUT_ID_MAX 64u; the UI spec §8 table (docs/superpowers/specs/2026-09-23-canlin-ui-design.md:348) says '| CANLIN_UI_OUTPUT_ID_MAX | 63 B | stable output identity |'. The effective limit is 1..63 bytes and matches the spec, because the constant is used as an exclusive upper bound (src/ui/ui.c:290) and as the buffer size (:45). The trap: anyone aligning the constant to the spec table without changing the check silently drops the effective limit to 62 bytes. Decide one meaning and make the header, the check and the spec table say it - either the constant becomes the max length with the check changed to '>', or the spec table says 64 B with the effective limit spelled out. Found by the 2026-11-14 limits sweep.
+
+Worker: the constant now means one thing - the maximum length of the stable output identity - and the buffer that holds it has its own size. include/canlin/ui_limits.h: CANLIN_UI_OUTPUT_ID_MAX 64u -> 63u (matches the spec table §8 '63 B'), new CANLIN_UI_OUTPUT_ID_BUF (MAX + 1u = 64) for the buffer. src/ui/ui.c: the id buffer is now CANLIN_UI_OUTPUT_ID_BUF, and the check changed from '>=' to '>' (idlen > CANLIN_UI_OUTPUT_ID_MAX), so the effective limit stays 1..63 bytes. include/canlin/ui.h: the desc comment now says '1..CANLIN_UI_OUTPUT_ID_MAX bytes' (was 'MAX-1'), and the scale field points at CANLIN_UI_SCALE_STEP_*. The spec table needs no change. New test t/ui/test_ui.c test_output_id_limit pins MAX == 63 and BUF == 64, takes a 63-byte identity and refuses a 64-byte one; the trap the card names (constant aligned, check left as '>') was tried and the test fails on it (the 63-byte identity is refused), so the test catches it. make BUILD=build/ui2 test: ALL TESTS PASSED. Also clean under SAN=asan (ui/theme/shell, no report); note the SAN target itself comes from another agent's in-flight Makefile change. Ready for review.
+
+Ready for review: CANLIN_UI_OUTPUT_ID_MAX is 63 (the spec table's 63 B), the buffer has its own constant CANLIN_UI_OUTPUT_ID_BUF (64), the check is now '>', and the effective limit is unchanged at 1..63 bytes. The new test catches the trap the card names. make BUILD=build/ui2 test: ALL TESTS PASSED; SAN=asan run of ui/theme/shell clean.
+
+2026-11-14 19:14 Review 2026-11-14: fixed and reviewed, in the same commit as k101 because the changes sit in the same files. CANLIN_UI_OUTPUT_ID_MAX is now 63u - exactly the spec's 63 B - and the buffer has its own constant CANLIN_UI_OUTPUT_ID_BUF (64, for the terminator); the check became idlen > CANLIN_UI_OUTPUT_ID_MAX. The effective limit stays 1..63 bytes. The trap the card named was tried, not just reasoned about: with the constant aligned to 63 and the check left as >=, the new test_output_id_limit fails with 'the 63-byte identity is refused'. The spec table stays as it is, so no doc-writer change is needed. The header comment above the output constants was corrected as well - it said 'Not in the §8 table' although CANLIN_UI_DPI_MIN/_MAX and CANLIN_UI_OUTPUT_ID_MAX are rows of that table.
