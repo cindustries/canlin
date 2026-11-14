@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-14T18:21:57Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T18:21:57Z
+created: 2026-09-22T19:40:34Z
+id: 10
+priority: high
+started: 2026-09-23T05:06:42Z
+status: done
+tags:
+- spec
+title: 'Core API spec: numeric limits, C/Lua signatures, cancel semantics'
+updated: 2026-11-14T18:21:57Z
+---
+
+Collect from #4/#5/#6: CANCELLED delivery, retiring reservations vs quota, suspension clock policy, JSON NUL policy, SSE UTF-8, per-dialect parser limits, memory fault = scope death, restricted coroutines.
+
+Draft: docs/superpowers/specs/2026-09-23-canlin-core-api-design.md (decisions D1-D8, budgets §7). Needs Getty review.
+
+2026-11-14 06:38 Review 2026-11-14: the spec answers all eight collected points - D1 CANCELLED is never delivered to Lua, D2 retiring work counts against its slot, D3 next-turn delivery, D4 suspension clock, D5 text encoding (JSON NUL and SSE byte-transparency), D6 a memory fault kills the scope, D7 no coroutines in v1, D8 Lua patterns budgeted - plus the §7 budget table and the per-dialect parser limits, which the spec delegates to the LLM spec where include/canlin/llm_limits.h holds them. The card's own open item stands: it needs Getty review, and the file still reads 'Status: draft for review' with no ratification recorded in the repo. All 14 specs carry that status, so this is the house state, not a defect of this card. The numbers every other card hard-codes come from this unratified spec.
+
+2026-11-14 18:21 Review 2026-11-14: closed by the owner's decision of 2026-11-14. The spec is now marked 'implemented for canlin#4-#16 (2026-11-14)' in the house pattern of the HTTP transport and native loop specs, with the direction named explicitly: where code and spec disagreed, the code was aligned to the spec (canlin#14 moved the sandbox constants onto the §7 values). A review of 2026-11-14 checked every §7 constant in the include/canlin/*_limits.h headers value by value and found them in agreement, the doc-writer checked the 21 rows of the table a second time and confirmed it. The numbers stay v1 estimates to be calibrated on P2 (canlin#13, blocked on the canlin-os QEMU harness) and the sandbox cost factors stay provisional - the marking says the spec is the implemented basis, not that the numbers are final. Committed as 8abc2ba. Two stale spots deeper in the document are left for a maintainer and are not fixed by this card: §6 at lines 134 and 149 still reads forward-looking ('The slice adds one module object', 'Inside the sandbox this needs canlin_sandbox_call(...)') although both are implemented, and §7 at line 201 points at canlin#3 for re-measurement where the limits headers point at canlin#13 - now k100.
