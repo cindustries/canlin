@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-14T19:57:17Z
+id: 114
+priority: medium
+status: backlog
+tags:
+- ui
+- assistant
+title: 'UI: the module''s own question field sits inside the shell''s model-view frame'
+updated: 2026-11-14T19:57:17Z
+---
+
+The built-in assistant module's question field is a module widget, but the assistant view is attached to that same ui view, so the shell frames the whole thing as the model-generated area with its submit boundary - the user's own input appears inside a frame labelled as model-generated. UI spec §4 says a model view sits in a frame labelled as model-generated and that module and model views cannot imitate the trusted chrome; the reverse - a module widget inside the model frame - is the same confusion seen from the other side. Related to k112, which is the identity-space half of the same root cause: the module's own widgets and the model view's widgets share one ui view. Found by the 2026-11-14 work on k109.
