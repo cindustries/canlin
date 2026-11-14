@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-14T21:46:02Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-14T21:46:02Z
+created: 2026-11-14T21:30:22Z
+id: 122
+priority: high
+started: 2026-11-14T21:30:44Z
+status: done
+tags:
+- platform
+- assistant
+- security
+title: 'Platform: the assistant reads an op-complete payload without checking the
+  tag'
+updated: 2026-11-14T21:46:02Z
+---
+
+src/app/assistant.c:369 (route_done) reads d->payload as a const canlin_module_result * without checking the tag that canlin#88 just introduced. It compiles and behaves correctly today because the layout is shared, but it is the same hole the module layer was just closed against: a payload of another shape would be read as a module result. Apply the same guard - check the tag and the size before any field of the body is read. Found by the 2026-11-14 work on k88.
+
+Guard written in src/app/assistant.c: route_done now reads the tag (CANLIN_MODULE_RESULT_TAG) and the size of the payload before any field of the body, and refuses a completion of another shape the way the module layer does (ok=false, code 'unavailable', message 'result is not a module result'). Test first: t/app/test_assistant.c got three cases (foreign payload with another tag -> the gate must refuse it; the same completion through the app's scheduler -> the assistant survives and the next turn still works; a payload of foreign bytes -> the words are not followed as pointers). Red before the fix (the gate recorded a success; the foreign bytes segfaulted), green after. Host: make BUILD=build/plat3 test -> ALL TESTS PASSED (app assistant: 220 checks). i686/QEMU gate not available on this host (no i686-linux-musl-gcc).
+
+Done. The guard: src/app/assistant.c got a local op_result_ok() (the tag CANLIN_MODULE_RESULT_TAG and the size, read before any field of the body) and route_done now refuses a completion of another shape the way the module layer does: the gate fails with code 'unavailable' and message 'result is not a module result', and the foreign payload is never read. A NULL payload keeps the old path (no result). Test first: t/app/test_assistant.c got three cases - a foreign payload with another tag (the gate must refuse it, the foreign words must not become the result), the same completion through the app's scheduler (the assistant survives it and the next turn still works: the provider is asked, the tool call is acted on, the tool result goes back), and a payload of foreign bytes (the words are not followed as pointers). Red before the fix (the gate recorded a success; the foreign bytes segfaulted), green after. Gates: host 'make BUILD=build/plat3 test' -> ALL TESTS PASSED (app assistant: 220 checks); ASAN+UBSAN 'make SAN=asan BUILD=build/plat3 test' -> ALL SANITIZER TESTS PASSED, app suite 220 checks with no report and no leak; android-armv7 compiles (make TARGET=android-armv7 ... test_assistant). Not run: i686/QEMU (no i686-linux-musl-gcc on this host) and the device gate (no device attached). Drift, not fixed here (another lane): src/app/assistant.c route_done and src/module/module.c map_op still judge two cases differently - an oversize completion (the module layer: 'full'/'result exceeded its reserved size', the app: 'unavailable'/'') and a failure code outside the known list (the module layer checks known_code(), the app passes the code of a tagged payload through). Also: the working tree carried another agent's deliberate mutation in src/llm/llm.c (k124) during my runs; I verified against the committed llm.c.
+
+2026-11-14 21:46 Review 2026-11-14: fixed and reviewed. route_done now checks the tag and the size of the payload before any field of the body is touched, and refuses a completion of another shape the way the module layer refuses it: the gate fails with code=unavailable, message='result is not a module result', so the held tool calls are discarded instead of dispatched on foreign words. A NULL payload keeps the old path and a tagged payload is read exactly as before. The red proof is the strongest of the two payload cards: before the fix the gate recorded a SUCCESS for the foreign payload, and the case with 0xff bytes ended in a segmentation fault - the foreign words followed as pointers. Three cases, written before the fix: a payload with another tag, the same completion through the app's real scheduler (the assistant survives it and the next turn still works end to end), and the 0xff bytes. Committed as 849eb25. The worker ran host and sanitizer green (220 checks, no report, no leak) and the android-armv7 compile. Two drift findings are not fixed by this card and are now on the board: the module layer and the app judge an oversize completion differently - the module fails it 'full' with 'result exceeded its reserved size', the app sees the NULL payload and fails 'unavailable' with an empty message - and the app passes the code of a tagged payload straight through while the module layer only takes a code after known_code().
