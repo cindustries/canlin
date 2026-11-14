@@ -1,0 +1,57 @@
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":107,"ts":"2026-11-14T18:44:18Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":56,"ts":"2026-11-14T18:44:23Z"}
+{"action":"move","agent":"canlin-worker-ui","detail":"in-progress","task_id":101,"ts":"2026-11-14T18:44:41Z"}
+{"action":"move","agent":"canlin-worker-ui","detail":"in-progress","task_id":103,"ts":"2026-11-14T18:44:46Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":108,"ts":"2026-11-14T18:45:47Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":109,"ts":"2026-11-14T18:45:58Z"}
+{"action":"edit","agent":"canlin","detail":"backlog","task_id":40,"ts":"2026-11-14T18:46:04Z"}
+{"action":"move","agent":"canlin-worker-netllm","detail":"in-progress","task_id":108,"ts":"2026-11-14T18:46:22Z"}
+{"action":"edit","agent":"canlin-worker-ui","detail":"in-progress","task_id":101,"ts":"2026-11-14T19:01:42Z"}
+{"action":"handoff","agent":"canlin-worker-ui","detail":"review","task_id":101,"ts":"2026-11-14T19:01:51Z"}
+{"action":"edit","agent":"canlin-worker-ui","detail":"in-progress","task_id":103,"ts":"2026-11-14T19:10:40Z"}
+{"action":"handoff","agent":"canlin-worker-ui","detail":"review","task_id":103,"ts":"2026-11-14T19:10:49Z"}
+{"action":"edit","agent":"canlin-worker-ui","detail":"done","task_id":101,"ts":"2026-11-14T19:14:15Z"}
+{"action":"edit","agent":"canlin-worker-ui","detail":"done","task_id":103,"ts":"2026-11-14T19:14:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":110,"ts":"2026-11-14T19:14:35Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":111,"ts":"2026-11-14T19:14:40Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":105,"ts":"2026-11-14T19:14:45Z"}
+{"action":"move","agent":"canlin-worker-ui","detail":"in-progress","task_id":111,"ts":"2026-11-14T19:14:58Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"in-progress","task_id":108,"ts":"2026-11-14T19:15:03Z"}
+{"action":"move","agent":"canlin-worker-ui","detail":"in-progress","task_id":107,"ts":"2026-11-14T19:15:03Z"}
+{"action":"move","agent":"canlin-worker-ui","detail":"in-progress","task_id":105,"ts":"2026-11-14T19:15:14Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"in-progress","task_id":108,"ts":"2026-11-14T19:16:36Z"}
+{"action":"handoff","agent":"canlin-worker-netllm","detail":"review","task_id":108,"ts":"2026-11-14T19:18:00Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"done","task_id":108,"ts":"2026-11-14T19:19:58Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":112,"ts":"2026-11-14T19:20:03Z"}
+{"action":"move","agent":"canlin-worker-platform","detail":"in-progress","task_id":109,"ts":"2026-11-14T19:20:10Z"}
+{"action":"edit","agent":"canlin-worker-platform","detail":"in-progress","task_id":109,"ts":"2026-11-14T19:54:39Z"}
+{"action":"handoff","agent":"canlin-worker-platform","detail":"review","task_id":109,"ts":"2026-11-14T19:54:49Z"}
+{"action":"edit","agent":"canlin-worker-platform","detail":"done","task_id":109,"ts":"2026-11-14T19:57:02Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":113,"ts":"2026-11-14T19:57:12Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":114,"ts":"2026-11-14T19:57:17Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":115,"ts":"2026-11-14T19:57:22Z"}
+{"action":"edit","agent":"orchestrator","detail":"done","task_id":40,"ts":"2026-11-14T19:57:33Z"}
+{"action":"move","agent":"canlin-worker-netllm","detail":"in-progress","task_id":104,"ts":"2026-11-14T19:57:51Z"}
+{"action":"move","agent":"canlin-worker-platform","detail":"in-progress","task_id":106,"ts":"2026-11-14T19:57:56Z"}
+{"action":"move","agent":"canlin-worker-platform","detail":"in-progress","task_id":110,"ts":"2026-11-14T19:58:02Z"}
+{"action":"edit","agent":"canlin-worker-platform","detail":"in-progress","task_id":106,"ts":"2026-11-14T20:05:56Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"in-progress","task_id":104,"ts":"2026-11-14T20:08:52Z"}
+{"action":"handoff","agent":"canlin-worker-netllm","detail":"review","task_id":104,"ts":"2026-11-14T20:12:56Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"done","task_id":104,"ts":"2026-11-14T20:13:45Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":62,"ts":"2026-11-14T20:13:50Z"}
+{"action":"handoff","agent":"canlin-worker-platform","detail":"review","task_id":106,"ts":"2026-11-14T20:17:00Z"}
+{"action":"edit","agent":"canlin-worker-ui","detail":"in-progress","task_id":111,"ts":"2026-11-14T20:17:59Z"}
+{"action":"handoff","agent":"canlin-worker-ui","detail":"review","task_id":111,"ts":"2026-11-14T20:18:08Z"}
+{"action":"edit","agent":"canlin-worker-platform","detail":"in-progress","task_id":110,"ts":"2026-11-14T20:20:52Z"}
+{"action":"handoff","agent":"canlin-worker-platform","detail":"review","task_id":110,"ts":"2026-11-14T20:21:30Z"}
+{"action":"edit","agent":"canlin-worker-platform","detail":"done","task_id":106,"ts":"2026-11-14T20:21:54Z"}
+{"action":"edit","agent":"canlin-worker-platform","detail":"done","task_id":110,"ts":"2026-11-14T20:22:00Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":116,"ts":"2026-11-14T20:22:09Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":117,"ts":"2026-11-14T20:22:14Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":118,"ts":"2026-11-14T20:22:34Z"}
+{"action":"move","agent":"canlin-worker-netllm","detail":"in-progress","task_id":118,"ts":"2026-11-14T20:22:49Z"}
+{"action":"edit","agent":"canlin-worker-ui","detail":"in-progress","task_id":107,"ts":"2026-11-14T20:23:09Z"}
+{"action":"handoff","agent":"canlin-worker-ui","detail":"review","task_id":107,"ts":"2026-11-14T20:23:18Z"}
+{"action":"move","agent":"canlin-worker-netllm","detail":"in-progress","task_id":118,"ts":"2026-11-14T20:27:11Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"in-progress","task_id":118,"ts":"2026-11-14T20:27:59Z"}
+{"action":"edit","agent":"canlin-worker-netllm","detail":"in-progress","task_id":118,"ts":"2026-11-14T20:28:13Z"}
