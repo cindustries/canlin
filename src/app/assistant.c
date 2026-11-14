@@ -375,24 +375,6 @@ static int op_result_ok(const canlin_ev_delivery *d)
     return tag == CANLIN_MODULE_RESULT_TAG;
 }
 
-/* The code set of core API spec §3.1. The module layer takes a failure code only when
- * it is one of these (module.c) and falls back to "unavailable" otherwise; the
- * assistant judges the same completion and must judge it the same way, so a code the
- * module would never pass on does not reach the user. */
-static const char *const result_codes[] = {"full", "invalid", "unsupported", "denied",
-                                           "unavailable", "stale", NULL};
-
-static int known_code(const char *code)
-{
-    const char *const *p;
-    if (code == NULL)
-        return 0;
-    for (p = result_codes; *p; p++)
-        if (strcmp(*p, code) == 0)
-            return 1;
-    return 0;
-}
-
 /* The module's "done": the turn ends. The gate dispatches the held tool calls only
  * when the turn ended ok.
  *
@@ -453,8 +435,11 @@ static void route_done(canlin_app_session *s, const canlin_ev_delivery *d)
         } else {
             canlin_assistant_response_finish(s->gate, s->av, 1, NULL, NULL);
         }
-    } else if (typed && known_code(r->code)) {
-        /* A code of the spec's set: the module layer passes it on with its message. */
+    } else if (typed && canlin_module_code_known(r->code)) {
+        /* A code of the spec's set (core API spec §3.1): the module layer passes it on
+         * with its message. The set lives in the module layer - canlin_module_code_known
+         * in module.h - so both layers judge one delivery the same way, and a code the
+         * module would never pass on does not reach the user. */
         canlin_assistant_response_finish(s->gate, s->av, 0, r->code,
                                           r->message ? r->message : "");
     } else {

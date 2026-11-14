@@ -692,6 +692,31 @@ static void test_fifo_and_rotation(void)
     h_done(&h);
 }
 
+/* ---- the spec §7 ceilings of the limits (core API spec §7, k102) ----
+ *
+ * Each limit has a compile-time maximum; configuration may lower a limit, never raise
+ * it past its maximum. The ceilings are constants of their own, pinned here to the
+ * spec's "max" column, and every limit in force stays inside its ceiling. */
+
+static void test_limit_ceilings(void)
+{
+    CHECK(CANLIN_EV_MAX_MODULES_CEILING == 32u);
+    CHECK(CANLIN_EV_MOD_MAX_ITEMS_CEILING == 256u);
+    CHECK(CANLIN_EV_MOD_MAX_BYTES_CEILING == (1024u * 1024u));
+    CHECK(CANLIN_EV_PROC_MAX_ITEMS_CEILING == 2048u);
+    CHECK(CANLIN_EV_PROC_MAX_BYTES_CEILING == (16u * 1024u * 1024u));
+    CHECK(CANLIN_EV_MOD_MAX_OPS_CEILING == 128u);
+    CHECK(CANLIN_EV_MOD_MAX_TIMERS_CEILING == 64u);
+
+    CHECK(CANLIN_EV_MAX_MODULES <= CANLIN_EV_MAX_MODULES_CEILING);
+    CHECK(CANLIN_EV_MOD_MAX_ITEMS <= CANLIN_EV_MOD_MAX_ITEMS_CEILING);
+    CHECK(CANLIN_EV_MOD_MAX_BYTES <= CANLIN_EV_MOD_MAX_BYTES_CEILING);
+    CHECK(CANLIN_EV_PROC_MAX_ITEMS <= CANLIN_EV_PROC_MAX_ITEMS_CEILING);
+    CHECK(CANLIN_EV_PROC_MAX_BYTES <= CANLIN_EV_PROC_MAX_BYTES_CEILING);
+    CHECK(CANLIN_EV_MOD_MAX_OPS <= CANLIN_EV_MOD_MAX_OPS_CEILING);
+    CHECK(CANLIN_EV_MOD_MAX_TIMERS <= CANLIN_EV_MOD_MAX_TIMERS_CEILING);
+}
+
 /* ---- staged reload: stage / commit / abort (core API §6, canlin#16) ---- */
 
 static void test_stage_commit_abort(void)
@@ -827,6 +852,7 @@ int main(void)
     test_peek();
     test_motion_coalescing_preserves_button_edges();
     test_fifo_and_rotation();
+    test_limit_ceilings();
     if (failures) {
         fprintf(stderr, "test_ev: %d check(s) failed\n", failures);
         return 1;

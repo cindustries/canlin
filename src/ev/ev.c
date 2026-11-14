@@ -4,6 +4,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Every limit here has a compile-time maximum (core API spec §7): configuration may
+ * lower a limit, never raise it past its maximum. Nothing is configurable yet, so the
+ * limits are the constants of ev_limits.h - and they are clamped by their ceilings, so
+ * a limit raised past its ceiling does not build. A configurable limit needs the same
+ * clamp at runtime (as the sandbox does for its memory and budget,
+ * src/sandbox/sandbox.c). */
+_Static_assert(CANLIN_EV_MAX_MODULES <= CANLIN_EV_MAX_MODULES_CEILING,
+               "the module slot count exceeds the spec §7 ceiling");
+_Static_assert(CANLIN_EV_MOD_MAX_ITEMS <= CANLIN_EV_MOD_MAX_ITEMS_CEILING,
+               "the per-module queue bound exceeds the spec §7 ceiling");
+_Static_assert(CANLIN_EV_MOD_MAX_BYTES <= CANLIN_EV_MOD_MAX_BYTES_CEILING,
+               "the per-module byte bound exceeds the spec §7 ceiling");
+_Static_assert(CANLIN_EV_PROC_MAX_ITEMS <= CANLIN_EV_PROC_MAX_ITEMS_CEILING,
+               "the process-wide item bound exceeds the spec §7 ceiling");
+_Static_assert(CANLIN_EV_PROC_MAX_BYTES <= CANLIN_EV_PROC_MAX_BYTES_CEILING,
+               "the process-wide byte bound exceeds the spec §7 ceiling");
+_Static_assert(CANLIN_EV_MOD_MAX_OPS <= CANLIN_EV_MOD_MAX_OPS_CEILING,
+               "the per-module operation bound exceeds the spec §7 ceiling");
+_Static_assert(CANLIN_EV_MOD_MAX_TIMERS <= CANLIN_EV_MOD_MAX_TIMERS_CEILING,
+               "the per-module timer bound exceeds the spec §7 ceiling");
+
 typedef struct item {
     canlin_ev_kind kind;       /* EVENT, OP or TIMER */
     int latest;                /* latest-state (coalescable) event */

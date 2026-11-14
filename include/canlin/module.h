@@ -83,6 +83,20 @@ typedef struct canlin_module_result {
     const char *message;        /* FAILURE: diagnostic text, may be NULL */
 } canlin_module_result;
 
+/* ---- the code set of core API spec §3.1 ---- */
+
+/* Is `code` one of the codes of core API spec §3.1 - full, invalid, unsupported,
+ * denied, unavailable, stale? Returns 1 for one of them, 0 for anything else.
+ *
+ * This is the one place that knows the set. The module layer takes a failure code
+ * only when this says yes and falls back to "unavailable" otherwise; the assistant
+ * judges the same completion and must judge it the same way, so a code the module
+ * would never pass on does not reach the user.
+ *
+ * NULL is refused. A string that is not NUL-terminated within CANLIN_MODULE_CODE_MAX
+ * bytes is refused without being read past its end. */
+int canlin_module_code_known(const char *code);
+
 /* canlin_ev_post source whose payload is a canlin_module_event, delivered to Lua as
  * M.event(name, payload). Events of every other source are consumed by the core (input is
  * routed to UI state, never to M.event; spec §5.2). */

@@ -69,6 +69,15 @@ struct canlin_module {
 
 /* ---- values ---- */
 
+/* The byte budget of a marshalled payload has a compile-time maximum (core API spec
+ * §7): it may be lowered, never raised past that maximum. Nothing is configurable
+ * here yet, so the budget is the constant of module_limits.h - and it is clamped by
+ * its ceiling, so a budget raised past the ceiling does not build. A configurable
+ * budget needs the same clamp at runtime (as the sandbox does for its memory and
+ * budget, src/sandbox/sandbox.c). */
+_Static_assert(CANLIN_MARSHAL_MAX_BYTES <= CANLIN_MARSHAL_MAX_BYTES_CEILING,
+               "the marshalling byte budget exceeds the spec §7 ceiling");
+
 static int check_rec(const canlin_value *v, unsigned depth, size_t *entries, size_t *bytes)
 {
     size_t k;
@@ -411,13 +420,16 @@ static int push_args(lua_State *L, void *ud)
     return 2;
 }
 
+/* The code set of core API spec §3.1: full, invalid, unsupported, denied,
+ * unavailable, stale. One list, exported through canlin_module_code_known(), so the
+ * module layer and the assistant judge one delivery the same way (k127). */
 static const char *const result_codes[] = {"full", "invalid", "unsupported", "denied",
                                            "unavailable", "stale", NULL};
 
-static int known_code(const char *code)
+int canlin_module_code_known(const char *code)
 {
     const char *const *p;
-    if (code == NULL || bounded_len(code, 16) < 0)
+    if (code == NULL || bounded_len(code, CANLIN_MODULE_CODE_MAX) < 0)
         return 0;
     for (p = result_codes; *p; p++)
         if (strcmp(*p, code) == 0)
@@ -475,7 +487,7 @@ static void map_op(canlin_module *m, const canlin_ev_delivery *d, call_args *a)
             a->kind = ARG_DONE_OK;
             a->v = v;
         }
-    } else if (typed && known_code(r->code)) {
+    } else if (typed && canlin_module_code_known(r->code)) {
         done_fail(a, r->code, r->message);
     } else {
         done_fail(a, "unavailable", "operation failed");

@@ -1262,6 +1262,39 @@ static void test_control_consumed(void)
     h_done(&h);
 }
 
+/* The code set of core API spec §3.1: one list, exported, so the module layer and the
+ * assistant judge one delivery the same way (k127). A code outside the set is refused,
+ * and a string that is not NUL-terminated within the bound is refused without reading
+ * past its end. */
+static void test_result_code_set(void)
+{
+    static const char *const codes[] = {"full", "invalid", "unsupported", "denied",
+                                        "unavailable", "stale"};
+    char unterminated[CANLIN_MODULE_CODE_MAX + 8];
+    size_t i;
+
+    for (i = 0; i < sizeof codes / sizeof codes[0]; i++)
+        CHECK(canlin_module_code_known(codes[i]) == 1);
+    CHECK(canlin_module_code_known(NULL) == 0);
+    CHECK(canlin_module_code_known("") == 0);
+    CHECK(canlin_module_code_known("ful") == 0);
+    CHECK(canlin_module_code_known("full ") == 0);
+    CHECK(canlin_module_code_known("Full") == 0);
+    CHECK(canlin_module_code_known("unavailable_now") == 0);
+    /* Not NUL-terminated within the bound: refused, and not read past its end. */
+    memset(unterminated, 'x', sizeof unterminated);
+    CHECK(canlin_module_code_known(unterminated) == 0);
+}
+
+/* The spec §7 ceiling of the marshalling byte budget (core API spec §7, k102): the
+ * budget has a compile-time maximum, and configuration may lower it, never raise it
+ * past that maximum. */
+static void test_marshal_ceiling(void)
+{
+    CHECK(CANLIN_MARSHAL_MAX_BYTES_CEILING == (1024u * 1024u));
+    CHECK(CANLIN_MARSHAL_MAX_BYTES <= CANLIN_MARSHAL_MAX_BYTES_CEILING);
+}
+
 int main(void)
 {
     test_timer_rearm();
@@ -1283,6 +1316,8 @@ int main(void)
     test_marshal_budget();
     test_isolation();
     test_control_consumed();
+    test_result_code_set();
+    test_marshal_ceiling();
     if (failures) {
         fprintf(stderr, "test_module: %d of %d checks failed\n", failures, checks);
         return 1;
