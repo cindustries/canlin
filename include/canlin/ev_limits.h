@@ -27,12 +27,17 @@
 #define CANLIN_EV_PROC_MAX_BYTES     (4u * 1024u * 1024u)
 
 /* Finite operations (timers included) — per module and process-wide (op table size).
- * The spec table has no process-wide op/timer row; these are chosen as half the sum of
- * the module bounds, like PROC_MAX_ITEMS. Ceiling: CANLIN_EV_MOD_MAX_OPS_CEILING. */
+ * Spec §7 rows: CANLIN_EV_MOD_MAX_OPS (32, max 128) and CANLIN_EV_PROC_MAX_OPS (256,
+ * no max) — the process-wide row is noted "half the sum of module op limits", so the
+ * 16 module slots at 32 each give 512, and half of that is 256.
+ * Ceiling: CANLIN_EV_MOD_MAX_OPS_CEILING. */
 #define CANLIN_EV_MOD_MAX_OPS        32u
 #define CANLIN_EV_PROC_MAX_OPS       256u
 
 /* One-shot timers, a subset of the operation bounds above.
+ * Spec §7 rows: CANLIN_EV_MOD_MAX_TIMERS (16, max 64) and CANLIN_EV_PROC_MAX_TIMERS
+ * (128, no max) — the process-wide value is half the sum of the module timer bounds
+ * (16 slots at 16 each), the relation the op row above carries in the spec.
  * Ceiling: CANLIN_EV_MOD_MAX_TIMERS_CEILING. */
 #define CANLIN_EV_MOD_MAX_TIMERS     16u
 #define CANLIN_EV_PROC_MAX_TIMERS    128u
