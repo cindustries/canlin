@@ -263,7 +263,7 @@ In the order the slice needs them:
    system design §5, the view-model limits and the `submit` action (LLM/UI §5).
 2. **LLM slice** — first dialect, its parser limits, `"llm"` stream events, credential
    handle API, fixture endpoint.
-3. **Store and db** — BeePack lookup over libbee (after canlin#2), SQLite authorizer and
-   per-module quotas, persistence barrier and its completion codes.
+3. **Store and db** — BeePack lookup over libbee, SQLite authorizer and per-module quotas,
+   persistence barrier and its completion codes.
 4. **Process-wide memory accounting** across transport, SQLite and render buffers.
 5. Sync, MQTT, audio and serial as in system design §13.

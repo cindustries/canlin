@@ -95,8 +95,9 @@ Order of work:
 
 ## 4. The core
 
-Vendored, read-only under `third_party/`: Nuklear, Lua 5.4, cmp, stb_truetype, libbee,
-SQLite amalgamation + sqlite-vec, mbedtls, monocypher (Ed25519 for module signatures).
+Third-party code lives read-only under `third_party/`: Nuklear, Lua 5.4, cmp, stb_truetype,
+SQLite amalgamation + sqlite-vec, mbedtls and monocypher (Ed25519 for module signatures) are
+vendored; libbee is a git submodule, pinned per libbee release.
 The P2 build cannot depend on optional SIMD paths. A browser transport uses the browser's
 HTTP, WebSocket and TLS facilities rather than tunnelling the native socket/TLS stack.
 
@@ -439,6 +440,8 @@ create a speculative server implementation in canlin or make up a remote reposit
   fragment; QEMU is not a driver or performance substitute.
 - canlin-os owns the musl i686 toolchain and QEMU harness; the same toolchain serves libbee's
   `test32`. Toolchain availability is an early dependency, not a presumed host feature.
-- libbee consumption (submodule versus pinned snapshot) remains canlin#2.
+- libbee consumption is settled (decided 2026-09-23, owner): CanLin consumes libbee as a git
+  submodule at `third_party/libbee` (url `../libbee`), pinned to a libbee commit and bumped per
+  libbee release. Nothing inside the submodule is edited in place.
 - Licence for `canlin` and `canlin-os`: libbee is Perl (Artistic/GPL, like BeePack); the runtime
   and images remain undecided.

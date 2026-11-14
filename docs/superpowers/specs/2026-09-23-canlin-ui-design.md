@@ -253,7 +253,7 @@ Graph colours are derived, not extra keys: node panel = `surface`, edges and gri
 
 At startup and on explicit reload the core resolves each key through a key/value source
 interface: `theme/local/` override, then `theme/theme.bee`, then the built-in theme
-compiled into the binary. Until libbee is consumed (canlin#2), the source is an
+compiled into the binary. Until the libbee-backed key/value source exists, the source is an
 in-memory table in tests and the built-in theme on devices. Each key is validated on its
 own: an invalid or oversized value falls back to the next layer for that key only and
 logs one line naming the key. Sizes are checked before decoding or allocation. A theme

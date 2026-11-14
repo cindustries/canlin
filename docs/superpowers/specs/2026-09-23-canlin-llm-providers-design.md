@@ -68,8 +68,8 @@ end (EOF, error, other stop reasons) stays a failure.
 
 ## 3. Presets
 
-Shipped as data in the binary (a C table now; a `providers.bee` pack once libbee is
-consumed, canlin#2), with a local override in `system/local/` for adding or correcting
+Shipped as data in the binary (a C table now; a `providers.bee` pack once the runtime reads
+packs through libbee), with a local override in `system/local/` for adding or correcting
 presets without a release.
 
 | field | meaning |
