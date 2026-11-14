@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-11-14T20:22:00Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-14T20:22:00Z
+created: 2026-11-14T19:14:35Z
+id: 110
+priority: low
+started: 2026-11-14T19:58:02Z
+status: done
+tags:
+- platform
+- android
+- ui
+- limits
+title: 'Platform: the default UI scale 100 is hard-coded in the app and the Android
+  adapter'
+updated: 2026-11-14T20:22:00Z
+---
+
+src/app/app.c:185 and src/android/activity.c:614 hard-code the default UI scale 100, while include/canlin/ui_limits.h now names the steps as CANLIN_UI_SCALE_STEP_75/100/125/150/200 (k101). The platform lane reads the header the same way the ui lane now does. Found by the 2026-11-14 work on k101.
+
+2026-11-14 20:20 Working: the app and the Android adapter now read the default step from include/canlin/ui_limits.h instead of the literal 100. src/app/app.c:218 'od.scale = cfg->scale ? cfg->scale : CANLIN_UI_SCALE_STEP_100' and src/android/activity.c:615 'ac.scale = CANLIN_UI_SCALE_STEP_100'; both files include canlin/ui_limits.h for it. include/canlin/app.h:47 (the config field) now names the constant too: '0 = CANLIN_UI_SCALE_STEP_100'. mk/app.mk lists ui_limits.h in APP_HDR so the app object rebuilds when the header changes. The value is still 100 - no behaviour change.
+
+Also found while checking: nothing in the suites asserted the app's default scale. I mutated the default to CANLIN_UI_SCALE_STEP_125, forced a rebuild, and test_app still passed - the default path was unguarded. Added test_default_scale to t/app/test_app.c: a scale of 0 in the config yields the output's scale CANLIN_UI_SCALE_STEP_100, and a scale given in the config is the one the output carries (125). The same mutation now fails the test (t/app/test_app.c:236), and the restored tree passes again.
+
+2026-11-14 20:21 Done: the default UI scale comes from include/canlin/ui_limits.h, the value stays 100.
+
+- src/app/app.c:218: 'od.scale = cfg->scale ? cfg->scale : CANLIN_UI_SCALE_STEP_100' (was the literal 100); the file includes canlin/ui_limits.h.
+- src/android/activity.c:615: 'ac.scale = CANLIN_UI_SCALE_STEP_100' (was the literal 100); the file includes canlin/ui_limits.h.
+- include/canlin/app.h:47: the config field comment now names the constant ('0 = CANLIN_UI_SCALE_STEP_100') instead of repeating the number.
+- mk/app.mk: include/canlin/ui_limits.h added to APP_HDR, so the app object rebuilds when the header changes.
+- t/app/test_app.c: new test_default_scale. Nothing asserted the app's default scale before: I mutated the default to CANLIN_UI_SCALE_STEP_125, forced a rebuild, and test_app still passed. The new test asserts the output's scale for a config scale of 0 (the spec's 100 % step) and for a scale given in the config; the same mutation now fails at t/app/test_app.c:236, and the restored tree passes (78 checks, 0 failures).
+
+No behaviour change: the value is 100 before and after.
+
+Verified: 'make BUILD=build/plat2 test' -> ALL TESTS PASSED (all 23 suites, including t/module/test_module) on a pristine copy of HEAD plus this change. In the shared tree the same run stops at t/module/test_module.c, which does not compile because of another agent's in-flight k88 edit - unrelated to this card; every other suite passes there too. The Android target was built as well: 'make TARGET=android-armv7 BUILD=build/plat2and apk' -> canlin.apk, no warnings under -Wall -Wextra -Werror, so src/android/activity.c compiles for the device. The i686/P2 gate was not run: i686-linux-musl-gcc is not installed on this host.
+
+2026-11-14 20:22 Review 2026-11-14: fixed and reviewed, and the card found more than it asked for. src/app/app.c:218 and src/android/activity.c:615 read CANLIN_UI_SCALE_STEP_100 from ui_limits.h now, the value is 100 before and after, and mk/app.mk adds ui_limits.h to APP_HDR so the app object rebuilds when the header changes. The worker also found that nothing asserted the app's default scale: it mutated the default to 125, forced a rebuild, and test_app still passed - the default path was unguarded. The new test_default_scale in t/app/test_app.c covers the default and the configured scale, and the same mutation now fails at t/app/test_app.c:236. Committed as 2a605ec. Verified by the worker on a pristine HEAD plus its six files: all 23 suites pass, and the android-armv7 APK builds without warnings. The i686/P2 gate and the device run are not reproducible on this host and are named as skipped.
