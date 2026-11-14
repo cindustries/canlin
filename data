@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-14T19:57:33Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T19:57:33Z
+created: 2026-09-23T05:13:41Z
+id: 40
+priority: high
+started: 2026-11-14T19:57:33Z
+status: done
+tags:
+- llm
+- assistant
+title: 'LLM step 3: built-in assistant module with set_view tool loop'
+updated: 2026-11-14T19:57:33Z
+---
+
+LLM providers spec §10.3; UI spec §7; needs #20.
+
+Needs privileged host binding for the built-in assistant (canlin_assistant_view_draw, submission pickup), granted only to compiled-in modules; sandbox review. From canlin#20.
+
+Owner 2026-09-24: dropped/cut-off answers per LLM/UI spec §4 (text kept + marked abgebrochen/gekürzt, history without dropped calls, view unchanged + one-line note).
+
+2026-11-14 18:46 2026-11-14: split into two cards by lane, as the rules require one card per owner. k108 is the mechanism - the privileged assistant-view binding (model-view rendering and submission pickup) plus its install, the netllm lane. k109 is the product - the compiled-in assistant module with the set_view tool loop and the app wiring that feeds it, the platform lane, depends on k108. What the review established about the state: the C pieces are complete (canlin_assistant_view and canlin_assistant_response in src/assistant/), but no product code calls them - grep for canlin_assistant_response in src/ finds only src/assistant/response.c itself - and the trusted loader callback that installs canlin.llm (canlin_module_source.assistant, include/canlin/module.h:101) is never set by anything yet. The dropped/cut-off rule is decided in the llm-ui design §4 (2026-09-24) and implemented nowhere. This card stays open as the umbrella until both parts are done.
+
+2026-11-14 19:57 2026-11-14: both parts are done. k108 (the privileged assistant-view binding) in 66c7f11, k109 (the built-in assistant module and the app wiring) in 776f72f. The C pieces that existed before are now reached by product code: grep for canlin_assistant_response in src/ no longer finds only src/assistant/response.c, and the trusted loader callback that installs canlin.llm is set for the assistant module and left NULL for every other module, so no other module sees canlin.llm, canlin.view or canlin.session. The dropped/cut-off rule of llm-ui design §4 is implemented in the module: the text is kept and marked 'abgebrochen' or 'gekürzt', the dropped tool calls never enter the history, the view stays and one short line says it did not change. The limits and the loose ends are on their own cards: k112 (the model view and the module's widgets share one identity space), k113 (the history is not trimmed), k114 (the module's question field sits inside the model-view frame), k115 (the module serialises the form values to JSON in Lua). The assistant runs against the fixture transport; no live provider was called and the P2/i686 gate was not runnable on this host.
