@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T04:49:40Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:50:41Z
+created: 2026-09-23T04:10:25Z
+id: 27
+priority: high
+started: 2026-09-23T04:49:40Z
+status: done
+tags:
+- ui
+- input
+- events
+title: Route input through canlin_ev into UI views
+updated: 2026-11-14T07:50:41Z
+---
+
+Latest-state motion, ordered edges, INPUT_OVERFLOW -> view input reset. Today canlin_module_input is called directly. From canlin#18.
+
+Merged 8ea901d (67143d7). ui 6879 / graph 9876 checks, host + ASan/UBSan green, 3 mutants caught. i686 skipped. Spec core API §6 updated.
+
+2026-11-14 07:50 Review 2026-11-14: claim holds. canlin_module_input is gone from the tree and replaced by canlin_module_post_input (src/module/module.c:989); motion and scroll are latest-state (:1003, :1017) with scroll posted as a cumulative position so the coalescing keeps the summed distance, while buttons, keys and text are ordered edges drawing a slot from the fixed per-module pool and stamped with the scheduler clock at post time (:1033), so a long press measures user timing and not queueing. A refused edge returns CANLIN_MODULE_EFULL, bumps in_epoch and signals CANLIN_EV_CTL_INPUT_OVERFLOW (:984-985); delivery drops the input queued before the gap by epoch (:775) and the latch resets the view (:756-760); a stopped generation returns CANLIN_MODULE_ESTALE (:999). Core API spec §6 documents the canlin#27 input contract verbatim. The card's check counts reproduce exactly (6879 ui and 9876 graph checks at that commit). The card's '3 mutants caught' is not reproducible (k89). Its i686 skip still stands and is not reproducible on this host. Host make test green.
