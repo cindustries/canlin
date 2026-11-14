@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T04:37:41Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:38:03Z
+created: 2026-09-23T04:12:32Z
+id: 29
+priority: high
+started: 2026-09-23T04:37:41Z
+status: done
+tags:
+- spec
+- shell
+- ui
+title: 'Shell spec: view arrangement modes (full-screen, tiled, floating windows)'
+updated: 2026-11-14T06:38:03Z
+---
+
+Decide which arrangement modes the shell offers and how they are chosen per output (size in em, pointer vs touch), independent of platform names. Modules stay unaware. Input from Getty: desktop with windows is wanted often, but not possible on phones.
+
+Draft spec docs/superpowers/specs/2026-09-23-canlin-shell-design.md. No floating windows in v1 (Getty).
+
+2026-11-14 06:38 Review 2026-11-14: the shell spec answers every point the card raises. Arrangement follows the output, not the platform: the mode is picked from the output width in em after DPI and UI scale and from the input class (touch, pointer, keyboard-only), and the spec says it never branches on Android or desktop. Two modes in v1, full-screen and tiled; free floating windows are explicitly out of v1 and tracked as k34. Modules stay unaware in substance rather than by the word: the shell decides the target before posting (§4) and a module only ever sees its rectangle (§5). The spec is 2026-09-23-canlin-shell-design.md.
