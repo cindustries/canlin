@@ -18,6 +18,10 @@
 #include "canlin/shell.h"
 #include "canlin/ui.h"
 
+/* The session the loader owns: the gate, the view and the assistant module. The gate is
+ * the app's own judgement of a completion, so it is where a refused payload shows. */
+#include "../../src/app/app_int.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +46,7 @@ typedef struct harness {
     canlin_loop_fake_wait fw;
     canlin_app *a;
     canlin_loop *l;
+    canlin_ev *ev; /* the app's scheduler (the loop config hands it out) */
     canlin_llm *llm;
     canlin_llm_fixture *fx;
     char log[LOGMAX];
@@ -120,6 +125,7 @@ static void h_init(harness *h)
 
     memset(&lc, 0, sizeof lc);
     canlin_app_loop_config(h->a, &lc);
+    h->ev = lc.ev;
     lc.wait = canlin_loop_fake_wait_poll;
     lc.wait_ctx = &h->fw;
     lc.pump = canlin_loop_llm_pump;
@@ -398,6 +404,234 @@ static void test_cut_off_answer(void)
     h_done(&h);
 }
 
+/* ---- the session the loader owns ---- */
+
+/* The test drives the session the way src/app/app.c wires it: the scheduler delivers
+ * to the session, the session routes the delivery into the gate and into the module.
+ * The gate is the app's own judgement of a completion, so it is where a refused
+ * payload shows. */
+typedef struct session {
+    canlin_ev_fake_clock clock;
+    canlin_ev *ev;
+    canlin_llm_fixture *fx;
+    canlin_app_session *s;
+    char log[LOGMAX];
+    size_t loglen;
+} session;
+
+static void session_log(void *ud, const char *msg, size_t len)
+{
+    session *h = ud;
+    if (h->loglen + len + 2 < sizeof h->log) {
+        memcpy(h->log + h->loglen, msg, len);
+        h->loglen += len;
+        h->log[h->loglen++] = '\n';
+        h->log[h->loglen] = 0;
+    }
+}
+
+static int session_has(const session *h, const char *needle)
+{
+    return strstr(h->log, needle) != NULL;
+}
+
+static void session_deliver(void *ud, canlin_ev *ev, const canlin_ev_delivery *d)
+{
+    session *h = ud;
+    (void)ev;
+    if (h->s)
+        canlin_app_assistant_deliver(h->s, d);
+}
+
+static void session_init(session *h)
+{
+    canlin_ev_callbacks cb;
+    canlin_ev_clock clk;
+    canlin_app_config ac;
+    canlin_ev_turn_result tr;
+    int err = 0;
+
+    memset(h, 0, sizeof *h);
+    h->clock.now = 1000;
+    clk = canlin_ev_fake_clock_bind(&h->clock);
+    cb.deliver = session_deliver;
+    h->ev = canlin_ev_new(&clk, &cb, h);
+    CHECK(h->ev != NULL);
+    h->fx = canlin_llm_fixture_new();
+    CHECK(h->fx != NULL);
+    if (h->ev == NULL || h->fx == NULL)
+        exit(1);
+    memset(&ac, 0, sizeof ac);
+    ac.llm_transport = canlin_llm_fixture_transport(h->fx);
+    ac.assistant_profile = "p";
+    h->s = canlin_app_assistant_new(h->ev, &ac, session_log, h, &err);
+    CHECK(h->s != NULL && err == CANLIN_APP_OK);
+    if (h->s == NULL)
+        exit(1);
+    canlin_ev_turn(h->ev, &tr); /* the module runs: its init */
+}
+
+static void session_done(session *h)
+{
+    canlin_app_assistant_free(h->s);
+    canlin_ev_free(h->ev);
+    canlin_llm_fixture_free(h->fx);
+}
+
+/* Another producer's payload: the layout of a module result, another tag and its own
+ * words. A reader that takes it for a result gets the foreign words instead of the
+ * refusal. */
+static void foreign_payload(canlin_module_result *r, canlin_value *value,
+                            canlin_value_pair *pair)
+{
+    pair->key.type = CANLIN_VALUE_STR;
+    pair->key.s = "stop";
+    pair->key.len = 4;
+    pair->val.type = CANLIN_VALUE_STR;
+    pair->val.s = "stop";
+    pair->val.len = 4;
+    value->type = CANLIN_VALUE_TABLE;
+    value->pairs = pair;
+    value->n = 1;
+    r->tag = 0x444f4e45u; /* "DONE": not CANLIN_MODULE_RESULT_TAG */
+    r->value = value;
+    r->code = "foreign-code";
+    r->message = "a foreign payload is not a result";
+}
+
+/* A completion of another shape: the assistant refuses it. The words of the payload
+ * are never read: the gate holds the module layer's refusal and the assistant
+ * survives it. */
+static void test_foreign_payload(void)
+{
+    session h;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh;
+    canlin_ev_turn_result tr;
+    canlin_module_result foreign;
+    canlin_value value;
+    canlin_value_pair pair;
+    const canlin_ar_outcome *o;
+
+    session_init(&h);
+    foreign_payload(&foreign, &value, &pair);
+
+    /* the completion reaches the session the way a producer's does */
+    gen = canlin_module_gen(h.s->m);
+    CHECK(gen != 0);
+    CHECK(canlin_ev_op_begin(h.ev, gen, sizeof foreign, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_SUCCESS, &foreign, sizeof foreign,
+                                 NULL) == CANLIN_EV_OK);
+    canlin_ev_turn(h.ev, &tr);
+
+    /* the gate refused it: the turn failed with the module layer's refusal */
+    o = canlin_assistant_response_outcome(h.s->gate);
+    CHECK(o != NULL);
+    if (o != NULL) {
+        CHECK(o->state == CANLIN_AR_FAILED);
+        CHECK(strcmp(o->code, "unavailable") == 0);
+        CHECK(strcmp(o->message, "result is not a module result") == 0);
+        /* the foreign words were not taken for the result */
+        CHECK(strstr(o->code, "foreign") == NULL);
+        CHECK(strstr(o->message, "foreign") == NULL);
+        CHECK(o->dispatched == 0);
+    }
+    /* the module layer refused the same completion */
+    CHECK(session_has(&h, "refused: result is not a module result"));
+    /* the assistant survives: the module runs and has no error */
+    CHECK(canlin_module_get_state(h.s->m) == CANLIN_MODULE_RUNNING);
+    CHECK(canlin_module_errors(h.s->m) == 0);
+
+    session_done(&h);
+}
+
+/* A completion of another shape reaches the app's scheduler: the assistant refuses it,
+ * survives it, and the next turn still works. */
+static void test_foreign_payload_survives(void)
+{
+    harness h;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh;
+    canlin_module_result foreign;
+    canlin_value value;
+    canlin_value_pair pair;
+
+    h_init(&h);
+    foreign_payload(&foreign, &value, &pair);
+
+    /* the assistant is opened by the shell */
+    CHECK(canlin_app_open_assistant(h.a) == CANLIN_APP_OK);
+    settle(&h);
+
+    /* the completion reaches the app the way a producer's does */
+    gen = canlin_module_gen(canlin_app_assistant(h.a));
+    CHECK(gen != 0);
+    CHECK(canlin_ev_op_begin(h.ev, gen, sizeof foreign, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_SUCCESS, &foreign, sizeof foreign,
+                                 NULL) == CANLIN_EV_OK);
+    settle(&h);
+
+    /* the assistant survives the refusal */
+    CHECK(canlin_module_get_state(canlin_app_assistant(h.a)) == CANLIN_MODULE_RUNNING);
+    CHECK(canlin_module_errors(canlin_app_assistant(h.a)) == 0);
+    CHECK(has(&h, "refused: result is not a module result"));
+
+    /* the next turn still works: the provider is asked and the model view is set */
+    push_body(&h, BODY_FORM);
+    push_body(&h, BODY_TEXT);
+    press(&h, find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0));
+    press(&h, key(&h, 'h'));
+    press(&h, key(&h, 'i'));
+    press(&h, find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0));
+    settle(&h);
+    /* the question went out and the tool loop continued with the tool result */
+    CHECK(canlin_llm_fixture_records(h.fx) == 2);
+    CHECK(strstr(record_body(&h, 0), "hi") != NULL);
+    CHECK(strstr(record_body(&h, 1), "call_A") != NULL);
+    /* the model's form is in the assistant's view: the tool call was acted on */
+    CHECK(find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 1) != NULL);
+
+    CHECK(h.errors == 0);
+    if (h.errors)
+        fprintf(stderr, "log:\n%s", h.log);
+    h_done(&h);
+}
+
+/* The payload of another producer's bytes: the words of it are not pointers and must
+ * not be followed as such. The assistant refuses the completion and lives. */
+static void test_foreign_bytes(void)
+{
+    session h;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh;
+    canlin_ev_turn_result tr;
+    unsigned char foreign[64];
+    const canlin_ar_outcome *o;
+
+    session_init(&h);
+    memset(foreign, 0xff, sizeof foreign);
+
+    /* the completion reaches the session the way a producer's does */
+    gen = canlin_module_gen(h.s->m);
+    CHECK(gen != 0);
+    CHECK(canlin_ev_op_begin(h.ev, gen, sizeof foreign, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_SUCCESS, foreign, sizeof foreign,
+                                 NULL) == CANLIN_EV_OK);
+    canlin_ev_turn(h.ev, &tr);
+
+    /* the gate refused it and the assistant lives */
+    o = canlin_assistant_response_outcome(h.s->gate);
+    CHECK(o != NULL);
+    if (o != NULL) {
+        CHECK(o->state == CANLIN_AR_FAILED);
+        CHECK(strcmp(o->message, "result is not a module result") == 0);
+    }
+    CHECK(canlin_module_get_state(h.s->m) == CANLIN_MODULE_RUNNING);
+    CHECK(canlin_module_errors(h.s->m) == 0);
+
+    session_done(&h);
+}
+
 /* Without a transport the app has no assistant: the module without the capability is
  * the only one. */
 static void test_no_transport(void)
@@ -424,7 +658,10 @@ int main(void)
     test_conversation();
     test_failed_answer();
     test_cut_off_answer();
+    test_foreign_payload();
+    test_foreign_payload_survives();
     test_no_transport();
+    test_foreign_bytes();
     if (failures) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;

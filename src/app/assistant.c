@@ -362,15 +362,38 @@ static void route_event(canlin_app_session *s, const canlin_ev_delivery *d)
     }
 }
 
+/* The payload of an OP completion is opaque bytes: the tag says whether they are a
+ * module result (module.h). The module layer checks the tag and the size before a
+ * single field of the body is read; the app reads the same payload and does the same:
+ * a completion of another shape is refused, its words are never followed as pointers. */
+static int op_result_ok(const canlin_ev_delivery *d)
+{
+    uint32_t tag;
+    if (d->payload == NULL || d->bytes < sizeof(canlin_module_result))
+        return 0;
+    memcpy(&tag, d->payload, sizeof tag);
+    return tag == CANLIN_MODULE_RESULT_TAG;
+}
+
 /* The module's "done": the turn ends. The gate dispatches the held tool calls only
  * when the turn ended ok. */
 static void route_done(canlin_app_session *s, const canlin_ev_delivery *d)
 {
-    const canlin_module_result *r = d->payload;
+    const canlin_module_result *r = NULL;
     const char *stop;
     size_t stop_len;
+    int typed = op_result_ok(d);
 
     open_response(s, d->handle);
+    if (d->payload != NULL && !typed) {
+        /* A completion of another shape: the turn fails the way the module layer
+         * fails it, the words of a foreign payload are not read. */
+        canlin_assistant_response_finish(s->gate, s->av, 0, "unavailable",
+                                          "result is not a module result");
+        return;
+    }
+    if (typed)
+        r = d->payload; /* the payload is a module result: its fields may be read */
     if (d->status == CANLIN_EV_SUCCESS) {
         stop = r ? value_str(r->value, "stop", &stop_len) : NULL;
         if (stop != NULL && stop_len == 6 && memcmp(stop, "length", 6) == 0) {
