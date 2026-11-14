@@ -144,14 +144,13 @@ static void h_profile(harness *h)
     CHECK(canlin_llm_profile_set_key(h->llm, "p", KEY, strlen(KEY)) == CANLIN_LLM_OK);
 }
 
-/* Load the assistant module mod_tpl (openai_fixtures.h) with `setup`. */
-static int h_load(harness *h, int i, const char *setup, int assistant)
+/* Load a module with the given source; the assistant hook is the trusted one for the
+ * built-in assistant only (the one that gets canlin.llm). */
+static int h_load_src(harness *h, int i, const char *src, int assistant)
 {
     canlin_module_source s;
     canlin_sandbox_config cfg;
-    static char src[8192];
     int err = 1;
-    snprintf(src, sizeof src, mod_tpl, setup);
     memset(&s, 0, sizeof s);
     memset(&cfg, 0, sizeof cfg);
     s.name = assistant ? "assistant" : "other";
@@ -167,6 +166,14 @@ static int h_load(harness *h, int i, const char *setup, int assistant)
     h->m[i] = canlin_module_load(h->ev, &s, &cfg, &err);
     CHECK(err == CANLIN_MODULE_OK);
     return err;
+}
+
+/* Load the assistant module mod_tpl (openai_fixtures.h) with `setup`. */
+static int h_load(harness *h, int i, const char *setup, int assistant)
+{
+    static char src[8192];
+    snprintf(src, sizeof src, mod_tpl, setup);
+    return h_load_src(h, i, src, assistant);
 }
 
 /* Drive fixture, pump and scheduler until everything is idle. */
@@ -492,6 +499,97 @@ static void test_length_tools(void)
                 "\"function\":{\"name\":\"set_view\",\"arguments\":\"{\\\"a\"}}]}}]}\n\n"
                 "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
                 req_tools, "done fail\tunavailable\topenai-chat protocol error: stream ended before [DONE]");
+}
+
+/* ---- the result crosses the seam (k124) ---- */
+
+/* The module that watches for its own done event. It prints the whole payload, so the
+ * test sees what the module layer handed to Lua: the handle of the request, the ok
+ * flag and every field of the value. */
+static const char done_watch[] =
+    "local M = {}\n"
+    "local H = nil\n"
+    "local N = 0\n"
+    "function M.init()\n"
+    "  H = canlin.llm.request('p', {messages = {{role = 'user', text = 'hi'}}})\n"
+    "  print('req', tostring(H))\n"
+    "end\n"
+    "function M.event(name, p)\n"
+    "  if name == 'llm' then return end\n"
+    "  if name ~= 'done' then print('unexpected', name) return end\n"
+    "  N = N + 1\n"
+    "  print('done', tostring(N), p.handle == H and 'same' or 'other', tostring(p.ok))\n"
+    "  if p.ok then\n"
+    "    local ks = {}\n"
+    "    for k in pairs(p.result) do ks[#ks + 1] = tostring(k) end\n"
+    "    table.sort(ks)\n"
+    "    print('keys', table.concat(ks, ','))\n"
+    "    for _, k in ipairs(ks) do print('value', k, type(p.result[k]), tostring(p.result[k])) end\n"
+    "  else\n"
+    "    print('failure', tostring(p.code), tostring(p.message))\n"
+    "  end\n"
+    "end\n"
+    "return M\n";
+
+/* One run of the watching module against one provider answer. */
+static void run_watch(harness *h, const char *body)
+{
+    h_init(h, 0);
+    h_profile(h);
+    push_sse(h, 200, body, 0, 0);
+    h_load_src(h, 0, done_watch, 1);
+    h_run(h);
+}
+
+/* The producer's result crosses the scheduler and reaches the module as a done event
+ * with its value.
+ *
+ * The LLM side completes the operation with a stamped module result, the scheduler
+ * carries the payload as opaque bytes and the module layer reads the tag before it
+ * reads a field of the body. The module must see what it was promised: the handle of
+ * its own request, the ok flag and the whole value - the stop reason of the answer
+ * and, for a cut-off answer, the number of the dropped tool calls.
+ *
+ * The stamp is the producer's own. If the producer stops stamping the result, the
+ * module layer refuses the payload ("unavailable", "result is not a module result") and
+ * every check below goes red. */
+static void test_result_reaches_the_module(void)
+{
+    harness h;
+
+    /* A plain answer: the value is the stop reason. */
+    run_watch(&h, text_stream);
+    if (!has(&h.log, "done\t1\tsame\ttrue"))
+        fprintf(stderr, "log:\n%s\n", h.log.buf);
+    CHECK(has(&h.log, "done\t1\tsame\ttrue")); /* one done event, our handle, ok */
+    CHECK(count(&h.log, "done\t") == 1);        /* and only that one */
+    CHECK(has(&h.log, "keys\tstop"));           /* the whole value, nothing more */
+    CHECK(has(&h.log, "value\tstop\tstring\tend"));
+    CHECK(!has(&h.log, "failure"));
+    CHECK(!has(&h.log, "unexpected"));
+    h_done(&h);
+
+    /* A cut-off answer: the value carries the dropped tool count as well. */
+    run_watch(&h, oa_len_mixed);
+    if (!has(&h.log, "done\t1\tsame\ttrue"))
+        fprintf(stderr, "log:\n%s\n", h.log.buf);
+    CHECK(has(&h.log, "done\t1\tsame\ttrue"));
+    CHECK(count(&h.log, "done\t") == 1);
+    CHECK(has(&h.log, "keys\tdropped_tools,stop"));
+    CHECK(has(&h.log, "value\tstop\tstring\tlength"));
+    CHECK(has(&h.log, "value\tdropped_tools\tnumber\t1"));
+    h_done(&h);
+
+    /* A failed answer: the module sees the failure the producer reported. */
+    run_watch(&h, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"part\"}}]}\n\n"
+                  "data: {\"error\":{\"message\":\"overloaded\",\"type\":\"server_error\"}}\n\n");
+    if (!has(&h.log, "done\t1\tsame\tfalse"))
+        fprintf(stderr, "log:\n%s\n", h.log.buf);
+    CHECK(has(&h.log, "done\t1\tsame\tfalse"));
+    CHECK(count(&h.log, "done\t") == 1);
+    CHECK(has(&h.log, "failure\tunavailable\tprovider error: overloaded"));
+    CHECK(!has(&h.log, "keys\t"));
+    h_done(&h);
 }
 
 static void test_http_status(void)
@@ -1855,6 +1953,7 @@ int main(void)
     test_failures();
     test_no_partial_tool();
     test_length_tools();
+    test_result_reaches_the_module();
     test_http_status();
     test_oversize();
     test_cancel_late();
