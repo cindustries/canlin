@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T06:12:29Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:43:08Z
+created: 2026-09-23T06:02:26Z
+id: 55
+priority: medium
+started: 2026-09-23T06:02:27Z
+status: done
+tags:
+- ui
+- font
+title: Switch built-in font to Inter 4.1
+updated: 2026-11-14T06:43:08Z
+---
+
+Owner decision 2026-09-23 after comparing DejaVu/Inter/Atkinson/Plex.
+
+Merged 5b15c51. Host, ASan/UBSan and i686 native run green. Subset 23.8 KB (-15 KB). mkfont.py now deterministic.
+
+2026-11-14 06:43 Review 2026-11-14: claim holds. third_party/fonts/inter/ holds exactly Inter-Regular.ttf, LICENSE and VERSION; the sha256 pins in VERSION match the files on disk; the licence is the full SIL Open Font License 1.1, and docs/THIRD-PARTY.md:14 lists Inter 4.1 Regular as SIL OFL with the note that the licence text must accompany every copy. DejaVu is really gone: the directory was deleted in 1cc88a6 and only one historical mention in the UI spec remains. The subset is 23,792 bytes against DejaVu's 38,804 (src/render/font_builtin.c:3, :34); U+00AD and U+0149 are excluded and the replacement box is present (tools/mkfont.py). mkfont.py is deterministic by construction (recalcTimestamp=False, opt.recalc_timestamp = False) and the committed subset carries the source's own head.modified timestamp, so no generation timestamp is stamped. Not verified: a full rerun of mkfont.py byte for byte - fontTools 4.65.0 is not installed here and there is no network. The card names only 5b15c51; the font was vendored in 1cc88a6 and the spec updated in 1ee63ee. Host make test green (render, ui 12464 checks); ASan/UBSan green; the card's i686 native run is not reproducible on this host.
