@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T23:57:32Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T23:57:32Z
+created: 2026-11-14T20:42:24Z
+id: 121
+priority: low
+started: 2026-11-14T23:35:20Z
+status: done
+tags:
+- ui
+- theme
+- limits
+title: 'UI: the theme''s colour blend divides by a literal 100'
+updated: 2026-11-14T23:57:32Z
+---
+
+src/ui/theme.c:329-330 divides by a literal 100 for a mix percentage. Same digit, different meaning than CANLIN_UI_SCALE_BASE_PERCENT (the scale's base) - so it needs its own name if it gets one. Found by the 2026-11-14 work on k116.
+
+Named the mix's base: CANLIN_THEME_MIX_BASE_PERCENT (100) in include/canlin/ui_limits.h, beside the other theme numbers, with a comment that it is its own base apart from the scale's (the same digit, a different meaning). src/ui/theme.c mix() divides by that constant now, not by a literal 100 of its own. Test first: t/ui/test_theme.c test_mix_base pins the constant (value 100) and builds the expected hover colour (the surface with a quarter of the accent) from it; before the fix it did not compile (the constant was undeclared), and with the implementation off the header (literal 100 while the header said 128) four of its checks fail. Evidence: make BUILD=build/ui5 test - ALL TESTS PASSED (theme: all passed, ui: 12719 checks passed, shell: 3893 checks passed).
+
+The mix's base has a name of its own: CANLIN_THEME_MIX_BASE_PERCENT in include/canlin/ui_limits.h, used by src/ui/theme.c's mix(); t/ui/test_theme.c test_mix_base pins it against the hover colour. make BUILD=build/ui5 test: ALL TESTS PASSED. Ready for review.
+
+2026-11-15 review (main): read and correct - mix() divides by CANLIN_THEME_MIX_BASE_PERCENT instead of a literal of its own; the constant sits with the other theme numbers in ui_limits.h and says that it is its own base apart from the scale's. The new test pins the constant and builds the expected hover colour from it, so a literal in the implementation that drifts from the header fails. Committed as 438d987.
