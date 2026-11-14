@@ -823,6 +823,34 @@ static void test_stale_click(void)
     vh_done(&h);
 }
 
+/* A replaced view drops its pending submission: the values it carries are gone with
+ * that view (UI spec §7: the submit belongs to the view it was made in). */
+static void test_replaced_submission(void)
+{
+    vh h;
+    const canlin_ui_rect *b;
+    canlin_av_submission s;
+    int x, y;
+    vh_init(&h, 600, 400);
+    vh_set(&h, BTN_A);
+    pump(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (b == NULL) {
+        vh_done(&h);
+        return;
+    }
+    cx(b, &x, &y);
+    click(&h, x, y);
+    CHECK(canlin_assistant_view_pending(h.av));
+    /* the model sets a new view: the pending submission of the old one is gone */
+    vh_set(&h, BTN_B);
+    CHECK(canlin_assistant_view_revision(h.av) == 2);
+    CHECK(!canlin_assistant_view_pending(h.av));
+    CHECK(canlin_assistant_view_take(h.av, &s) == 0);
+    vh_done(&h);
+}
+
 static const char *FORM =
     "{\"title\":\"Form\",\"widgets\":["
     "{\"type\":\"heading\",\"text\":\"Order\"},"
@@ -1156,6 +1184,7 @@ int main(void)
     test_limits();
     test_calls();
     test_stale_click();
+    test_replaced_submission();
     test_submit();
     test_multiline_render();
     test_graph_round_trip();

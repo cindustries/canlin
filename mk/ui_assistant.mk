@@ -35,3 +35,21 @@ $(AR_TEST): $(BUILD)/t/assistant/test_response.o $(AR_OBJ) $(AV_OBJ) $(LLM_OBJ) 
 		$(LUA_OBJ)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm
+
+# Assistant-view binding (canlin#40): the module-facing Lua surface of the assistant-view
+# capability (module roles spec §3). Its test runs the module in the real sandbox.
+AB_HDR := include/canlin/assistant_binding.h $(AV_HDR) $(MODULE_HDR)
+AB_OBJ := $(BUILD)/src/assistant/binding.o
+LIBOBJ += $(AB_OBJ)
+
+AB_TEST := $(BUILD)/t/assistant/test_binding
+TESTS += $(AB_TEST)
+
+$(AB_OBJ) $(BUILD)/t/assistant/test_binding.o: override CPPFLAGS += $(NK_CPPFLAGS) $(LUA_CPPFLAGS)
+$(AB_OBJ) $(BUILD)/t/assistant/test_binding.o: $(AB_HDR)
+
+$(AB_TEST): $(BUILD)/t/assistant/test_binding.o $(AB_OBJ) $(AV_OBJ) $(BUILD)/src/net/json.o \
+		$(SHELL_OBJ) $(MODULE_OBJ) $(EV_OBJ) $(SANDBOX_OBJ) $(UI_OBJ) $(RENDER_OBJ) $(NK_OBJ) \
+		$(LUA_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm

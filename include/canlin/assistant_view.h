@@ -48,7 +48,8 @@
  * Submit: pressing a submit button produces exactly one pending submission
  * {revision, action, values} (JSON) with the input widgets of that view only. Typing,
  * toggling, choosing and graph edits stay local. While one submission is pending, further
- * presses are ignored (counted); the conversation layer takes it.
+ * presses are ignored (counted); the conversation layer takes it. A submission of a
+ * replaced view is dropped: the values it carries are gone with that view.
  */
 #ifndef CANLIN_ASSISTANT_VIEW_H
 #define CANLIN_ASSISTANT_VIEW_H
@@ -253,6 +254,14 @@ void canlin_av_submission_free(canlin_av_submission *s);
 /* Submit presses not turned into a submission: ignored while one was pending, or
  * refused because the values exceeded CANLIN_AV_SUBMIT_MAX. */
 unsigned canlin_assistant_view_submit_refused(const canlin_assistant_view *av);
+
+/* The pending submission as a Lua table {revision = N, action = "id", values = {...}}:
+ * the values of the input widgets of that view, exactly as the submission's JSON
+ * carries them (the graph value is {nodes, edges}). The table is on the stack.
+ *
+ * CANLIN_AV_OK: the table was pushed. CANLIN_AV_ESTALE: no submission waits.
+ * CANLIN_AV_EINVALID: the submission could not be read; nothing is on the stack. */
+int canlin_assistant_view_take_lua(canlin_assistant_view *av, struct lua_State *L);
 
 #ifdef __cplusplus
 }
