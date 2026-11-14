@@ -9,10 +9,11 @@ API shapes, numeric budgets and open semantics that the
 [system design](2026-09-22-canlin-system-design.md) §13 defer to "the core API spec", for
 the first runtime slice (system design §3, step 2). It is written against the code that
 exists on `main` (`src/ev`, `src/net`, `src/sandbox`). It is now the implemented basis;
-the numbers are not final — they stay v1 estimates to be calibrated on P2 (canlin#13,
-blocked on the canlin-os QEMU harness), and the cost factors in
-`include/canlin/sandbox_limits.h` stay provisional. Subsystems not needed by the slice
-are listed in §9 with their own follow-ups.
+the numbers are not final — the `CANLIN_SB_*` budgets stay v1 estimates to be calibrated
+on P2 (canlin#13, blocked on the canlin-os QEMU harness), the other §7 values stay sized
+for the 1 GB P2 floor until they are measured on the hardware (canlin#3), and the cost
+factors in `include/canlin/sandbox_limits.h` stay provisional. Subsystems not needed by
+the slice are listed in §9 with their own follow-ups.
 
 ## 1. Scope
 
@@ -138,9 +139,8 @@ new generation. Other modules are unaffected.
 
 ## 6. C seam between scheduler and sandbox
 
-The existing `canlin_sandbox_run` only executes a chunk. The slice adds one module
-object that owns a sandbox and a scheduler generation, so no other code has to keep them
-in step:
+One module object owns a sandbox and a scheduler generation, so no other code has to keep
+them in step (`include/canlin/module.h`):
 
 ```c
 typedef struct canlin_module canlin_module;
@@ -153,12 +153,16 @@ int  canlin_module_reload(canlin_module *m, const canlin_module_source *src);
 void canlin_module_stop(canlin_module *m);
 ```
 
-Inside the sandbox this needs `canlin_sandbox_call(sb, field, nargs, push_fn, ud)`: look up
+Inside the sandbox this is `canlin_sandbox_call(sb, field, nargs, push_fn, ud)`: look up
 `field` in the stored module table, let the host push at most `CANLIN_MARSHAL_MAX_ARGS`
 arguments through `push_fn` under the same memory limit, and call it as one budgeted
-callback. The budget is reset per callback, not per turn. `canlin_module_source` supplies
-`lua#main` and the require resolver; where the source comes from (verified bundle or
-operator-enabled local override) is decided by the loader, not by this seam.
+callback. The budget is reset per callback, not per turn; a draw runs with the smaller
+budget of `canlin_sandbox_call_budget(sb, field, budget, …)`, which is
+`CANLIN_SB_BUDGET_DRAW`. The module table comes from `canlin_sandbox_load_main`, which
+loads `lua#main` and stores its single result; `canlin_sandbox_run` stays the sandbox's
+bare-chunk entry. `canlin_module_source` supplies `lua#main` and the require resolver;
+where the source comes from (verified bundle or operator-enabled local override) is
+decided by the loader, not by this seam.
 
 `canlin_module_deliver` is the only path into Lua, and it runs only from
 `canlin_ev_turn`, so the no-nesting rule of the event runtime holds by construction.
@@ -167,10 +171,20 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
 
 - **Payloads** are a core-owned value tree `canlin_value` (nil, bool, integer, byte
   string, table with integer or string keys). An operation result is
-  `canlin_module_result {value | code, message}`; a module event is
+  `canlin_module_result {tag, value | code, message}`; a module event is
   `canlin_module_event {name, value}`. `CANLIN_MARSHAL_*` apply to the result value,
   not to the `{handle, ok, …}` wrapper; `canlin_value_check` lets a producer check
   before completing. A failure with an unknown or missing code arrives as `unavailable`.
+- **The result rides in the producer's blob (canlin#88).** The payload of a completion
+  is opaque bytes to the scheduler: it is the producer's own block, whose first bytes
+  are the `canlin_module_result`. The struct begins with the type tag
+  `CANLIN_MODULE_RESULT_TAG` ("MRES"), and the tag is checked before a single field of
+  the body is read. A producer stamps it; a payload of another shape is not a result
+  and arrives as `ok=false, code="unavailable"` — its words are never followed as
+  pointers. The block may carry the producer's own data behind the result, because the
+  pointers in the result must stay valid until the delivery. The built-in assistant
+  reads the same payload and applies the same rule, so both sides judge one completion
+  the same way.
 - **Marshalling is charged** to the receiving callback: the budget is reset, the payload
   cost (`CANLIN_SB_COST_ELEM` per entry, bytes / `CANLIN_SB_COST_BYTES_PER_UNIT` per
   string) is charged, then values are built and the callback runs. Host functions use
@@ -205,9 +219,13 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
 
 ## 7. Numeric budgets
 
-Initial values for the v1 slice, sized for the 1 GB P2 floor and to be re-measured on
-real hardware (canlin#3). Each has a compile-time maximum; configuration can lower, never
-raise, a value beyond its maximum.
+Initial values for the v1 slice, sized for the 1 GB P2 floor. The `CANLIN_EV_*`,
+`CANLIN_MODULE_*`, `CANLIN_TIMER_*` and `CANLIN_MARSHAL_*` values are re-measured against
+the real hardware of a P2 (canlin#3); the `CANLIN_SB_*` budgets are calibrated on
+P2-QEMU (canlin#13, blocked on the canlin-os QEMU harness), and the cost factors in
+`include/canlin/sandbox_limits.h` stay provisional until that calibration lands. Each has
+a compile-time maximum; configuration can lower, never raise, a value beyond its
+maximum.
 
 | constant | v1 value | max | notes |
 |---|---|---|---|
