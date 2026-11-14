@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:49:04Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:37:05Z
+created: 2026-09-23T05:13:40Z
+id: 38
+priority: high
+started: 2026-09-23T05:13:53Z
+status: done
+tags:
+- llm
+title: 'LLM step 1: dialect interface, fixture transport, openai-chat, canlin.llm,
+  presets/profiles'
+updated: 2026-11-14T06:37:05Z
+---
+
+LLM providers spec 2026-09-23 §10.1.
+
+Merged (2052ee9). Host + ASan/UBSan green; i686 musl build of all suites green (native 32-bit run, no xmm in disassembly); QEMU pentium2 not run.
+
+2026-11-14 06:37 Review 2026-11-14: claim holds. The merge 2052ee9 is the one that brought the LLM step-1 code onto main (the content commit is 6ec2b1c); include/canlin/llm_limits.h matches the spec table verbatim, the preset table is in src/llm/llm.c:38-79, and the assistant-only hook in src/module/module.c:334 keeps canlin.llm away from every other module. The card's i686 evidence could not be reproduced here. Host make test green (test_llm 250337 checks); ASan/UBSan green.
