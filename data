@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T20:22:14Z
+id: 117
+priority: low
+status: backlog
+tags:
+- test
+- ui
+- limits
+title: 'Test: the test fixtures set the UI scale 100 as a literal'
+updated: 2026-11-14T20:22:14Z
+---
+
+t/ui/test_ui.c, t/ui/test_graph.c, t/shell/test_shell.c, t/ui/test_kbd.c, t/loop/test_loop_native.c:539, t/assistant/test_binding.c and t/assistant/test_view.c set d.scale = 100 as a literal in their fixtures, while include/canlin/ui_limits.h names the step as CANLIN_UI_SCALE_STEP_100. The fixtures should read the constant, so a change of the steps does not leave the tests asserting a stale number. Found by the 2026-11-14 work on k110.
