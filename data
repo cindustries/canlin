@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T18:02:44Z
+id: 99
+priority: low
+status: backlog
+tags:
+- ui
+- theme
+- docs
+title: 'UI: canlin_theme_resolve counts a warning even when the log callback is NULL'
+updated: 2026-11-14T18:02:44Z
+---
+
+canlin_theme_resolve (src/ui/theme.c) increments its line counter for a contrast warning even when the log callback is NULL, so the return value is not the number of log lines emitted - which is what include/canlin/theme.h promises for the return. The k94 fix kept that behaviour. Either count only what was logged, or change the header's contract; the first is the smaller change and matches the name. Found by the 2026-11-14 review of k92.
