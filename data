@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T18:02:19Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T18:02:19Z
+created: 2026-11-14T06:41:42Z
+id: 92
+priority: medium
+started: 2026-11-14T17:50:39Z
+status: done
+tags:
+- ui
+- font
+title: 'UI: a font slot freed in the nk_init_default failure path does not wake EFONT
+  waiters'
+updated: 2026-11-14T18:02:19Z
+---
+
+canlin_ui_view_new's nk_init_default failure path calls font_release(NULL, v->fe) (src/ui/ui.c:536). font_release calls font_wake only when the ui is non-NULL (src/ui/ui.c:240-245), so the slot drops to zero refs and no view waiting on EFONT is woken - even though v->ui was already assigned at ui.c:527 and can be passed. Every other release path passes the ui (canlin_ui_view_free ui.c:559, canlin_ui_view_bind ui.c:580) and wakes correctly. Only reachable when nk_init_default fails (ENOMEM), but it is exactly the mechanism k30 added. Found by the 2026-11-14 review of k30.
+
+Fixed: the ENOMEM path of canlin_ui_view_new now releases the font slot with its ui (font_release(v->ui, v->fe), src/ui/ui.c:555), so the slot going back to zero refs wakes the views waiting on EFONT, like every other release path. Test first: t/ui/test_ui.c test_font_cache_wake_init_fail failed with the old call (1 of 12474 checks failed: the waiter was not woken), green after the fix. The host cannot fail a Nuklear init or a font acquire on its own, so two test hooks were added (canlin_ui_test_fail_next in include/canlin/ui.h) - see the note on the handoff. Host suite green (make test: ALL TESTS PASSED).
+
+Done: canlin_ui_view_new's Nuklear-init failure path releases the font slot with its ui, so the release wakes the EFONT waiters (canlin#30) instead of dropping the slot silently. Regression test: t/ui/test_ui.c test_font_cache_wake_init_fail - red first with the old font_release(NULL, ...), green after the fix (ui: 12474 checks passed). Two test hooks were added because the host cannot fail these steps on demand: canlin_ui_test_fail_next(ui, CANLIN_UI_TEST_FAIL_ACQUIRE|CANLIN_UI_TEST_FAIL_INIT) in include/canlin/ui.h, inert unless a test calls it. Host: make + make test green; ./build/host/t/ui/test_ui green. Findings for the board, not fixed here: (1) nk_init_default() in the vendored Nuklear always returns 1 (third_party/nuklear/nuklear.h:19658), so the ENOMEM path is unreachable today - a real out-of-memory leaves ctx->memory.memory.ptr == NULL and the view is created with a broken context; (2) a view waits for a slot only while every slot is pinned, and then a new view cannot take one at all, so without the hooks the waiter and the failing view cannot meet - the defect was latent, the fix makes every release path uniform.
+
+2026-11-14 18:02 Review 2026-11-14: fixed and reviewed. canlin_ui_view_new's nk_init_default failure path now gives the font slot back with its ui (src/ui/ui.c:555), so font_wake runs and the views waiting on EFONT are woken, like every other release path. The fix needed two opt-in test hooks (canlin_ui_test_fail_next, include/canlin/ui.h:68) because the vendored nk_init_default always succeeds and the host cannot fail a font acquire on demand; they follow the convention of canlin_ui_font_stats in the same header and are inert unless a test calls them. The test was red first (t/ui/test_ui.c:2279 failed with the old code) and is test_font_cache_wake_init_fail. Committed as c9a0181. Host make test green (ui 12474 checks); android-armv7 cross-build green; the i686/P2 gate and the on-device run are not reproducible on this host and are named as skipped. Two findings came out of the card and are not fixed by it: the vendored nk_init() returns 1 unconditionally, so this ENOMEM path is unreachable today and a real out-of-memory leaves a broken Nuklear context - now k98; and canlin_theme_resolve counts a warning even when the log callback is NULL, while include/canlin/theme.h calls the return the number of log lines emitted - now k99.
