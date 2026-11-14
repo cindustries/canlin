@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T19:14:15Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T19:14:15Z
+created: 2026-11-14T18:43:27Z
+id: 101
+priority: medium
+started: 2026-11-14T18:44:41Z
+status: done
+tags:
+- ui
+- shell
+- limits
+title: 'UI: spec-stated limits live as literals in src/ instead of in the limits headers'
+updated: 2026-11-14T19:14:15Z
+---
+
+The limits headers say 'Nothing outside this header may hard-code them', but these spec-stated numbers sit as literals in src/. All values match the spec, so no behaviour changes today - the defect is that they are unnamed, untunable and not greppable as limits. Move each into its own header. (1) Theme value ranges: theme#font#size 10-40 px (src/ui/theme.c:91), theme#spacing 0.25-4.0 em (:181), theme#radius 0.0-2.0 em (:183) - include/canlin/ui_limits.h covers only the format bounds of these values, not the ranges. (2) The UI scale steps 75, 100, 125, 150, 200 % (src/ui/ui.c:282) - ui_limits.h says the steps are 'fixed by the spec' and then leaves them out. (3) The em spacing unit = theme#spacing x 0.25 em (ui-design.md:41), the 2-unit view padding and widget gap and the 4-unit column gap - the factor 0.25f appears six times (src/ui/ui.c:813, 1137, 1272, 1298, 1404 and src/ui/theme.c:363). (4) Widget limits: ui:area opts.rows 2-20 (src/ui/ui.c:1920), the ui:toggle box 1.25 em (:2025), the ui:meter clamp 0.0-1.0 (:2150). (5) The shell pane minimum of 2 panes (src/shell/shell.c:653) - shell_limits.h has PANES_MAX but no lower bound. Found by the 2026-11-14 limits sweep.
+
+Worker: moved the spec-stated UI/shell numbers into the limits headers. ui_limits.h gained CANLIN_THEME_FONT_SIZE_MIN/MAX (10-40), CANLIN_THEME_SPACING_MIN/MAX (0.25-4.0), CANLIN_THEME_RADIUS_MIN/MAX (0.0-2.0), CANLIN_UI_UNIT_SCALE (0.25), CANLIN_UI_PAD_UNITS/GAP_UNITS (2), CANLIN_UI_COL_GAP_UNITS (4), CANLIN_UI_SCALE_STEP_75/100/125/150/200, CANLIN_UI_AREA_ROWS_MIN/MAX (2-20), CANLIN_UI_TOGGLE_BOX_EM (1.25), CANLIN_UI_METER_MIN/MAX (0.0-1.0); shell_limits.h gained CANLIN_SHELL_PANES_MIN (2). src/ui/theme.c, src/ui/ui.c and src/shell/shell.c now read them. No value and no behaviour changed: the theme font-size log line stays 'out of range 10-40' (verified byte-identical) and the Lua area error stays 'opts.rows must be 2-20'. New tests pin the constants to the spec and build the boundary cases from the header (t/ui/test_ui.c test_limits, t/ui/test_theme.c test_value_ranges, t/shell/test_shell.c test_panes_min); the existing scale/toggle tests now read the header too. make BUILD=build/ui2 test: ALL TESTS PASSED. Ready for review.
+
+Ready for review: the spec-stated numbers now live in include/canlin/ui_limits.h and include/canlin/shell_limits.h, and src/ui + src/shell read them from there. No behaviour change (the theme log line and the Lua error text are byte-identical). make BUILD=build/ui2 test: ALL TESTS PASSED.
+
+2026-11-14 19:14 Review 2026-11-14: fixed and reviewed. Fourteen new constants in include/canlin/ui_limits.h and one in shell_limits.h, each with the spec's own wording in the comment: the theme value ranges (font size 10-40 px, spacing 0.25-4.0 em, radius 0.0-2.0 em), the em spacing unit 0.25 and the unit gaps 2 and 4, the widget limits (area rows 2-20, toggle box 1.25 em, meter clamp 0.0-1.0), the UI scale steps 75/100/125/150/200 and the shell pane minimum 2. The six copies of the 0.25 factor now read one constant. No value and no behaviour changed: the two messages that were literals are derived from the constants and stay byte-identical. Tests pin the constants to the spec (test_limits in t/ui/test_ui.c, test_value_ranges in t/ui/test_theme.c, test_panes_min in t/shell/test_shell.c), and the existing scale and toggle tests now read the header, so they fail if the code stops following it. Committed as 6d5b78b. Verified by the main agent in an isolated build dir: ui 12634 checks, theme all passed, shell 3635 checks.
