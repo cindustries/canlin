@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-11-14T20:28:13Z
+claimed_by: canlin-worker-netllm
+class: standard
+created: 2026-11-14T20:22:34Z
+id: 118
+priority: low
+started: 2026-11-14T20:22:49Z
+status: in-progress
+tags:
+- assistant
+- limits
+- docs
+title: 'Net/LLM: the assistant limits header misattributes two of its constants'
+updated: 2026-11-14T20:28:13Z
+---
+
+The part of canlin#105 that belongs to the assistant lane. include/canlin/assistant_limits.h:15-16 marks CANLIN_AV_ID_MAX 32u and CANLIN_AV_CALLS_MAX 16u as 'chosen for canlin#20 (provisional, to be checked on P2)'. Both are the spec's values: the id pattern [a-z0-9_-]{1,32} and 'Recorded results per turn: at most 16' (docs/superpowers/specs/2026-09-23-canlin-ui-design.md:305 and :315). The values are right, the attribution is wrong - same shape as the transport header (canlin#104) and the loop header (canlin#106). Comments only: no value, no macro, no code path. The rest of canlin#105 (render_limits.h and ui_limits.h) is in the ui lane and is not this card.
+
+2026-11-14 20:29 Done: include/canlin/assistant_limits.h - the preamble no longer lumps every value under canlin#20. CANLIN_AV_ID_MAX and CANLIN_AV_CALLS_MAX now carry the UI spec 7 wording (id pattern "[a-z0-9_-]{1,32}", unique within the view; "Recorded results per turn: at most 16"); the remaining values keep the canlin#20 attribution. The values did match the spec, so nothing was changed there. Comments only: the preprocessed header is byte-identical to HEAD (gcc -E diff clean) - no value, macro or code path touched. Verified: make BUILD=build/llm3 test - 21 of 23 suites pass, including assistant/test_view, assistant/test_response, assistant/test_binding, app/test_assistant, llm/test_llm, llm/test_llm_http. t/module/test_module and t/ui/test_ui do not compile because the module and ui lanes are mid-edit in this tree (t/module/test_module.c:920 canlin_module_result initializer; t/ui/test_ui.c:2401 CANLIN_UI_GRAPH_MAX_PER_VIEW undeclared) - not caused by this card. No i686/P2 evidence: not checkable here. Proposed commit subject: Attribute the assistant view limits to the spec 7 values they came from (k118)
