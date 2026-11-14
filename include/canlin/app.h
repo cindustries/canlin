@@ -44,7 +44,7 @@ typedef struct canlin_app_config {
     const char *output_id;          /* stable platform identity, e.g. "android:main" */
     int w, h;                       /* output px, > 0 */
     float dpi;                      /* platform DPI factor */
-    int scale;                      /* UI scale step, 0 = 100 */
+    int scale;                      /* UI scale step, 0 = CANLIN_UI_SCALE_STEP_100 */
     unsigned input;                 /* CANLIN_SHELL_IN_* of the output */
     canlin_shell_clock_fn wall;     /* status bar clock, NULL = none (canlin_app_local_clock) */
     void *wall_ud;

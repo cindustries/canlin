@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "canlin/theme.h"
+#include "canlin/ui_limits.h"
 
 /* The built-in demo module: enough widgets to prove present, touch and the on-screen
  * keyboard (field focus on a touch output). print() goes to the backend's log. The
@@ -214,7 +215,7 @@ canlin_app *canlin_app_new(const canlin_app_config *cfg, int *err)
     od.w = cfg->w;
     od.h = cfg->h;
     od.dpi = cfg->dpi;
-    od.scale = cfg->scale ? cfg->scale : 100;
+    od.scale = cfg->scale ? cfg->scale : CANLIN_UI_SCALE_STEP_100;
     a->out = a->ui ? canlin_ui_output_new(&od, &rc) : NULL;
     memset(&sc, 0, sizeof sc);
     sc.ui = a->ui;

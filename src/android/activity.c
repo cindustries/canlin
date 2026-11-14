@@ -44,6 +44,7 @@
 #include "canlin/app.h"
 #include "canlin/loop.h"
 #include "canlin/shell.h"
+#include "canlin/ui_limits.h"
 
 #define TAG "canlin"
 #define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__))
@@ -611,7 +612,7 @@ void android_main(struct android_app *app)
     ac.w = w;
     ac.h = h;
     ac.dpi = dpi;
-    ac.scale = 100;
+    ac.scale = CANLIN_UI_SCALE_STEP_100;
     ac.input = CANLIN_SHELL_IN_TOUCH;
     ac.wall = canlin_app_local_clock;
     ac.present = on_present;

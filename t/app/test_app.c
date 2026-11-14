@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "canlin/android.h"
+#include "canlin/ui_limits.h"
 
 static int failures, checks;
 
@@ -212,6 +213,40 @@ static void test_demo(void)
     canlin_app_free(h.a);
 }
 
+/* The default UI scale of the assembly: the app takes the step from ui_limits.h, so a
+ * scale of 0 in the config means the spec's default step (UI §2.1) and a scale given in
+ * the config is the one the output carries. */
+static void test_default_scale(void)
+{
+    canlin_app_config ac;
+    canlin_app *a;
+    int err = 0;
+
+    memset(&ac, 0, sizeof ac);
+    ac.clock = canlin_loop_clock_monotonic();
+    ac.output_id = "test:scale";
+    ac.w = 64;
+    ac.h = 48;
+    ac.dpi = 1.0f;
+    ac.input = CANLIN_SHELL_IN_TOUCH;
+
+    a = canlin_app_new(&ac, &err);
+    CHECK(a != NULL && err == CANLIN_APP_OK);
+    if (a != NULL) {
+        CHECK(canlin_ui_output_scale(canlin_app_output(a)) == CANLIN_UI_SCALE_STEP_100);
+        canlin_app_free(a);
+    }
+
+    /* A scale in the config is the one the output carries, not the default. */
+    ac.scale = CANLIN_UI_SCALE_STEP_125;
+    a = canlin_app_new(&ac, &err);
+    CHECK(a != NULL && err == CANLIN_APP_OK);
+    if (a != NULL) {
+        CHECK(canlin_ui_output_scale(canlin_app_output(a)) == CANLIN_UI_SCALE_STEP_125);
+        canlin_app_free(a);
+    }
+}
+
 static void test_bad_config(void)
 {
     canlin_app_config ac;
@@ -231,6 +266,7 @@ static void test_bad_config(void)
 int main(void)
 {
     test_demo();
+    test_default_scale();
     test_bad_config();
     printf("test_app: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

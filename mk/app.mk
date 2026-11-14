@@ -5,7 +5,8 @@
 # expansion (APP_LINK_OBJ is expanded only there).
 APP_HDR := include/canlin/app.h src/app/app_int.h include/canlin/loop.h \
 	include/canlin/loop_limits.h include/canlin/shell.h include/canlin/shell_limits.h \
-	include/canlin/module.h include/canlin/ui.h include/canlin/render.h \
+	include/canlin/module.h include/canlin/ui.h include/canlin/ui_limits.h \
+	include/canlin/render.h \
 	include/canlin/theme.h include/canlin/ev.h include/canlin/llm.h \
 	include/canlin/llm_limits.h
 APP_OBJ := $(BUILD)/src/app/app.o
