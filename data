@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T07:49:05Z
+id: 95
+priority: low
+status: backlog
+tags:
+- vendor
+- third_party
+- docs
+title: 'Vendor: third_party/nuklear/VERSION still says ProggyClean is used'
+updated: 2026-11-14T07:49:05Z
+---
+
+third_party/nuklear/VERSION:15 states that ProggyClean.ttf is 'used through NK_INCLUDE_DEFAULT_FONT'. That became false in k22 (1e49a2b): include/canlin/nk.h:13 lists NK_INCLUDE_DEFAULT_FONT under 'Deliberately absent', so the default font is not linked and the built-in subset is used instead. third_party/ is read-only per the house rules, so this is a vendor-lane item: correct the manifest entry there (or record the deviation in CanLin's own docs) rather than editing the vendored tree. Found by the 2026-11-14 review of k22.
