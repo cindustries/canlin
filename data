@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T23:52:52Z
+id: 139
+priority: medium
+status: backlog
+tags:
+- test
+- app
+- assistant
+title: 'Test: the app''s assistant test does not pin the submission''s values'
+updated: 2026-11-14T23:52:52Z
+---
+
+t/app/test_assistant.c:341 checks that the second request body contains "Milch". That string is satisfied by the set_view tool-call arguments in the request body, not by the submission - so the check passes even when the module sends action=nil values=null, which is exactly the state k137 leaves behind. The test must look at the submission's own JSON in the request body (the message text carries it escaped, so the escaped form is what is searched for) and pin the values it carries. Found by the 2026-11-15 review of k115.
