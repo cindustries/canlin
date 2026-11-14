@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T22:27:25Z
+claimed_by: canlin-worker-runtime
+class: standard
+completed: 2026-11-14T22:27:25Z
+created: 2026-11-14T22:03:48Z
+id: 127
+priority: medium
+started: 2026-11-14T22:03:57Z
+status: done
+tags:
+- runtime
+- module
+- api
+title: 'Runtime: the code set of core API spec §3.1 exists in two files and can drift'
+updated: 2026-11-14T22:27:25Z
+---
+
+Since canlin#126 the set of codes of core API spec §3.1 lives twice: src/module/module.c:414 and src/app/assistant.c:382, each with its own known_code(). The two can drift, and the assistant's whole point in canlin#126 was that the two layers judge a delivery the same way. A single exported helper - canlin_module_result_code() in include/canlin/module.h, or a table the app includes - would make the agreement structural instead of a convention. Found by the 2026-11-14 work on k126.
+
+Worker start: the two known_code() copies differ already - module.c:417 refuses a code that is not NUL-terminated within 16 bytes (bounded_len), the assistant's copy at assistant.c:385 has no such bound. Plan: one exported helper in include/canlin/module.h, used by both layers; test first.
+
+Done: one exported helper canlin_module_code_known() in include/canlin/module.h, implemented in src/module/module.c (the code set lives there, once). src/app/assistant.c:382-394 (its private result_codes[]/known_code()) deleted; its one call site at src/app/assistant.c:442 now calls canlin_module_code_known(r->code) - that file is the platform lane's, the change is named here exactly. The helper also closes a real gap: the assistant's copy had no length bound (the module layer's had bounded_len(code,16)), so the assistant now refuses a code string that is not NUL-terminated within CANLIN_MODULE_CODE_MAX=16 bytes (new constant in include/canlin/module_limits.h) instead of strcmp-ing into it. Set unchanged: full, invalid, unsupported, denied, unavailable, stale. Test first (t/module/test_module.c:test_result_code_set): a code outside the set, NULL, an empty string, a wrong case and an unterminated string are refused; the six are known. Red run before the fix was the compile error (helper and constant missing). 'make BUILD=build/rt2 test': ALL TESTS PASSED (module 2764 checks, assistant 286 checks). Tree uncommitted.
+
+2026-11-14 22:27 Review 2026-11-14: fixed and reviewed. The codes of core API spec §3.1 now live once: canlin_module_code_known() in include/canlin/module.h, with the six codes in src/module/module.c and the bound CANLIN_MODULE_CODE_MAX 16 in module_limits.h. The assistant's private copy is deleted and it calls the exported helper. The refactoring found a drift that had ALREADY happened: the module layer refused a code that is not NUL-terminated within 16 bytes, the assistant's copy had no such bound and would have strcmp'd into it - the shared helper closes that hole and the assistant inherits the bound. The test was red first (the helper and the constant did not exist) and refuses NULL, the empty string, near misses ('ful', 'full ', 'Full', 'unavailable_now') and an unterminated string. Committed as 0e31654, together with k102 - the same files. Verified by the main agent: module 2766 checks, ev all checks, assistant 286 checks. The app-lane hunk (two hunks in src/app/assistant.c) was named by the worker and is included here.
