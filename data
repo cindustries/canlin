@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-14T22:03:42Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-14T22:03:42Z
+created: 2026-11-14T21:46:12Z
+id: 126
+priority: medium
+started: 2026-11-14T21:46:26Z
+status: done
+tags:
+- platform
+- module
+- assistant
+title: 'Platform: the assistant passes an unknown failure code through, the module
+  layer does not'
+updated: 2026-11-14T22:03:42Z
+---
+
+A failure code outside the fixed set of core API spec §3.1 is handled differently by the two layers: the module layer only takes the code after known_code() (src/module/module.c:414 and :478), and falls back to 'unavailable' otherwise; the assistant passes the code of a tagged payload straight through (src/app/assistant.c:409). A provider or a future producer could therefore put a code in front of the user that the module would never pass on. Found by the 2026-11-14 work on k122.
+
+Decision: the assistant refuses the codes the module refuses - the module layer stays the contract. Core API spec §3.1 fixes the code set (full, invalid, unsupported, denied, unavailable, stale) and the seam note of that spec (a failure with an unknown or missing code arrives as unavailable) is what the module layer implements (module.c:414 known_code, :478). Letting both pass unknown codes through would widen the core API's code set, which is a spec change and not this card's business, so an unknown code has to end up as one of the known ones: unavailable. Fixed in src/app/assistant.c: route_done takes the failure code only when known_code() accepts it - the same six codes the module layer accepts - and falls back to unavailable / 'operation failed', the module layer's fallback, otherwise. A code of the set still passes on unchanged with the producer's message. Tests written before the fix in t/app/test_assistant.c: test_unknown_failure_code (the producer's code 'boom' never reaches the gate) and test_known_failure_code (the guard: 'denied' still passes on). Before the fix the gate recorded 'boom' and the producer's message. make BUILD=build/plat4 test: ALL TESTS PASSED (app assistant 286 checks, test_module 2751 checks). No change in src/module/module.c: the module layer already refused it.
+
+The assistant now refuses a failure code outside the set of core API spec §3.1 the way the module layer refuses it: unknown or missing code becomes unavailable / 'operation failed' on both sides, a code of the set still passes on unchanged. Fixed in src/app/assistant.c only; src/module/module.c needed no change. Tests written before the fix in t/app/test_assistant.c (test_unknown_failure_code, test_known_failure_code). make BUILD=build/plat4 test: ALL TESTS PASSED.
+
+2026-11-14 22:03 Review 2026-11-14: fixed and reviewed. The code set of core API spec §3.1 now lives in the app too, and the failure code is taken only when known_code() accepts it; an unknown or missing code falls back to 'unavailable' with 'operation failed', the module layer's fallback. The worker chose refuse over pass through and said why: passing unknown codes on would widen the core API's code set, which is a spec change and not this card's business. A code of the set still passes on unchanged with the producer's message. The test was red first - the gate had recorded the producer's code 'boom' - and a guard test holds that a known code ('denied') still passes. Committed as 7f91332. One proposal left open and not done: the §3.1 code set now exists in two files, src/module/module.c:414 and src/app/assistant.c:382, and the two can drift; a single exported helper in include/canlin/module.h would make the agreement structural - that is the runtime lane's file, so it is a proposal and not scope. Now k127.
