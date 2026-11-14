@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-09-23T02:13:06Z
+id: 13
+priority: medium
+status: backlog
+tags:
+- sandbox
+- p2
+title: Calibrate sandbox cost factors and budgets on P2-QEMU/hardware
+updated: 2026-11-14T17:50:52Z
+---
+
+Charge factors (COST_ELEM, BYTES_PER_UNIT, LOAD_BYTE, pattern step) and CANLIN_SB_BUDGET_* are guesses. Needs canlin-os QEMU harness and real P2 timing (#3). Also: in-test alarm() watchdog needs a WASM alternative later.
+
+2026-11-14 17:50 2026-11-14: the blocker is on the canlin-os board, not here. The QEMU pentium2 harness this calibration needs is canlin-os k2 ('QEMU pentium2 test harness (test/)') and the i686 no-SSE musl toolchain it needs is canlin-os k1 ('Buildroot external tree skeleton with an i686 no-SSE musl toolchain'); both are still in backlog there and the canlin-os checkout has no tree yet. Until they land there is no way to measure a cost factor on this machine: no i686-linux-musl-gcc, no 32-bit headers, no image to boot. The cost factors in include/canlin/sandbox_limits.h (CANLIN_SB_COST_ELEM, _COST_BYTES_PER_UNIT, _COST_LOAD_BYTE, _HOOK_STRIDE) stay provisional until then. This card stays in backlog and is not promotable here.
