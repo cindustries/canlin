@@ -777,14 +777,18 @@ static void test_validation(void)
     /* too many graphs in one draw */
     {
         harness h;
-        h_init(&h, 1.0f,
-               "local M = {}\n"
-               "function M.draw(ui)\n"
-               "  for i = 1, 9 do ui:graph({ nodes = {} }, { id = 'g' .. i, height = 5 }) end\n"
-               "end\n"
-               "return M\n",
-               800, 600);
-        CHECK(has(&h, "more than 8 graphs in one draw"));
+        char src[256], needle[64];
+        snprintf(src, sizeof src,
+                 "local M = {}\n"
+                 "function M.draw(ui)\n"
+                 "  for i = 1, %d do ui:graph({ nodes = {} }, { id = 'g' .. i, height = 5 }) end\n"
+                 "end\n"
+                 "return M\n",
+                 (int)CANLIN_UI_GRAPH_MAX_PER_DRAW + 1);
+        snprintf(needle, sizeof needle, "more than %d graphs in one draw",
+                 (int)CANLIN_UI_GRAPH_MAX_PER_DRAW);
+        h_init(&h, 1.0f, src, 800, 600);
+        CHECK(has(&h, needle));
         h_done(&h);
     }
 }

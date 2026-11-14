@@ -6,7 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The theme's decimal values are parsed in 1/10000 em (parse_decimal). */
+/* The theme's decimal values are parsed in 1/10000 em (parse_decimal): the unit is
+ * 10^CANLIN_THEME_FRAC_DIGITS_MAX, one unit per fraction digit. */
 #define THEME_UNITS 10000
 
 static const char *const key_names[CANLIN_THEME_KEYS] = {
@@ -101,9 +102,10 @@ static const char *parse_size(const unsigned char *v, size_t len, int *out, char
     return NULL;
 }
 
-/* "D[.DDDD]" -> value in 1/10000 units. No sign, exponent or locale. */
+/* "D[.DDDD]" -> value in 1/10000 units. No sign, exponent or locale. The fraction
+ * digits are bounded by CANLIN_THEME_FRAC_DIGITS_MAX. */
 static const char *parse_decimal(const unsigned char *v, size_t len, long lo, long hi,
-                                 float *out)
+                                 float *out, char *msg, size_t msglen)
 {
     long ip = 0, fp = 0, scale = THEME_UNITS;
     size_t i = 0, nd = 0;
@@ -119,8 +121,11 @@ static const char *parse_decimal(const unsigned char *v, size_t len, long lo, lo
         if (v[i++] != '.')
             return "not a decimal number";
         for (; i < len && v[i] >= '0' && v[i] <= '9'; i++, fd++) {
-            if (fd == 4)
-                return "more than 4 fraction digits";
+            if (fd == CANLIN_THEME_FRAC_DIGITS_MAX) {
+                snprintf(msg, msglen, "more than %u fraction digits",
+                         CANLIN_THEME_FRAC_DIGITS_MAX);
+                return msg;
+            }
             scale /= 10;
             fp += (v[i] - '0') * scale;
         }
@@ -188,10 +193,12 @@ static const char *take(canlin_theme *t, int key, const unsigned char *v, size_t
         return parse_size(v, len, &t->font_size, msg, msglen);
     case CANLIN_THEME_KEY_SPACING:
         return parse_decimal(v, len, (long)(CANLIN_THEME_SPACING_MIN * THEME_UNITS),
-                             (long)(CANLIN_THEME_SPACING_MAX * THEME_UNITS), &t->spacing);
+                             (long)(CANLIN_THEME_SPACING_MAX * THEME_UNITS), &t->spacing,
+                             msg, msglen);
     case CANLIN_THEME_KEY_RADIUS:
         return parse_decimal(v, len, (long)(CANLIN_THEME_RADIUS_MIN * THEME_UNITS),
-                             (long)(CANLIN_THEME_RADIUS_MAX * THEME_UNITS), &t->radius);
+                             (long)(CANLIN_THEME_RADIUS_MAX * THEME_UNITS), &t->radius,
+                             msg, msglen);
     case CANLIN_THEME_KEY_FONT_BODY:
         if (!(err = check_font(v, len)))
             t->font_body = b;

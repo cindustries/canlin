@@ -391,7 +391,7 @@ static void layout_pane(canlin_shell *sh, shell_out *so, int i)
     if (v.h < 1)
         v.h = 1;
     so->view[i] = v;
-    bw = ceil_px(10.0f * so->em);
+    bw = ceil_px(CANLIN_SHELL_RESTART_WIDTH * so->em);
     if (bw > v.w)
         bw = v.w;
     so->restart[i] = mkrect(v.x + (v.w - bw) / 2, v.y + v.h / 2, bw, rowh);
@@ -1268,14 +1268,15 @@ static void draw_pane(canlin_shell *sh, shell_out *so, struct nk_command_buffer 
         text_in(so, cv, so->label[p], "Model-generated view", role(sh, CANLIN_THEME_TEXT), 0);
     }
     if (k < 0) {
-        text_in(so, cv, mkrect(v.x, v.y, v.w, ceil_px(2.5f * so->em)),
+        text_in(so, cv, mkrect(v.x, v.y, v.w, ceil_px(CANLIN_SHELL_ROW_HEIGHT * so->em)),
                 "Empty pane: open Modules", role(sh, CANLIN_THEME_MUTED), 0);
     } else if (mod_state(sh, k) != CANLIN_MODULE_RUNNING) {
         char line[96];
         snprintf(line, sizeof line, "Module %s", state_name(mod_state(sh, k)));
-        text_in(so, cv, mkrect(v.x, v.y, v.w, ceil_px(2.5f * so->em)), line,
-                role(sh, CANLIN_THEME_DANGER), 0);
-        text_in(so, cv, mkrect(v.x, v.y + ceil_px(2.5f * so->em), v.w, ceil_px(2.5f * so->em)),
+        text_in(so, cv, mkrect(v.x, v.y, v.w, ceil_px(CANLIN_SHELL_ROW_HEIGHT * so->em)),
+                line, role(sh, CANLIN_THEME_DANGER), 0);
+        text_in(so, cv, mkrect(v.x, v.y + ceil_px(CANLIN_SHELL_ROW_HEIGHT * so->em), v.w,
+                               ceil_px(CANLIN_SHELL_ROW_HEIGHT * so->em)),
                 canlin_module_errmsg(sh->mods[k].m), role(sh, CANLIN_THEME_TEXT), 0);
         if (mod_state(sh, k) == CANLIN_MODULE_FAULTED) {
             nk_fill_rect(cv, nkr(so->restart[p]), 0, role(sh, CANLIN_THEME_ACCENT));

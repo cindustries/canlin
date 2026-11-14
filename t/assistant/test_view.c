@@ -476,6 +476,7 @@ static void test_limits(void)
     canlin_av_result r;
     canlin_av_call c;
     size_t len, i;
+    char path[32];
     canlin_assistant_view_set_scope(av, 1, 1);
 
     seps(CANLIN_UI_TOOL_MAX_WIDGETS);
@@ -509,9 +510,9 @@ static void test_limits(void)
         canlin_av_model_free(m);
     }
 
-    /* more graphs than one draw may hold */
+    /* more graphs than one view may hold */
     strcpy(big, "{\"widgets\":[");
-    for (i = 0; i <= CANLIN_UI_GRAPH_MAX_PER_DRAW; i++) {
+    for (i = 0; i <= CANLIN_UI_GRAPH_MAX_PER_VIEW; i++) {
         char w[96];
         snprintf(w, sizeof w, "%s{\"type\":\"graph\",\"id\":\"g%u\",\"nodes\":[],\"edges\":[]}",
                  i ? "," : "", (unsigned)i);
@@ -519,7 +520,8 @@ static void test_limits(void)
     }
     strcat(big, "]}");
     CHECK(setv(av, "g9", big, &r) == CANLIN_AV_EINVALID);
-    CHECK_STR(r.err.path, "$.widgets[8]");
+    snprintf(path, sizeof path, "$.widgets[%u]", (unsigned)CANLIN_UI_GRAPH_MAX_PER_VIEW);
+    CHECK_STR(r.err.path, path);
 
     /* too many ports on one node */
     strcpy(big, "{\"widgets\":[{\"type\":\"graph\",\"id\":\"g\",\"nodes\":[{\"id\":\"a\",\"x\":0,"

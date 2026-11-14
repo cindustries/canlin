@@ -2395,6 +2395,12 @@ static void test_limits(void)
     CHECK(CANLIN_UI_TOGGLE_BOX_EM == 1.25f);
     CHECK(CANLIN_UI_METER_MIN == 0.0f && CANLIN_UI_METER_MAX == 1.0f);
 
+    /* Two graph caps, named apart: the spec's per-view cap (§7: "A view has at most
+     * 8 graphs") and the module's per-draw cap (chosen here). They coincide at 8
+     * today; the names keep a change to one from moving the other. */
+    CHECK(CANLIN_UI_GRAPH_MAX_PER_VIEW == 8u);
+    CHECK(CANLIN_UI_GRAPH_MAX_PER_DRAW == 8u);
+
     /* The rows limit follows the header: the last row count is taken, one more is
      * refused and the refusal names the range the header states. */
     snprintf(src, sizeof src,

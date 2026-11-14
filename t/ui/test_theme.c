@@ -526,6 +526,36 @@ static void test_value_ranges(void)
     CHECK(T.from[k] != 0 && nlogs == 1, "radius %s refused", v);
 }
 
+/* The bound on the fraction digits of a §6.1 decimal value lives in the limits header
+ * and the parser follows it: the last allowed digit counts, one more is refused. */
+static void test_fraction_digits(void)
+{
+    char v[32], w[32], msg[64];
+    int k = key_index("theme#radius");
+
+    CHECK(CANLIN_THEME_FRAC_DIGITS_MAX == 4u, "fraction digit bound");
+
+    /* A value with exactly that many fraction digits is taken, and its last digit
+     * counts: the theme reads decimals in 1/10000 em. */
+    memset(v, '0', sizeof v);
+    memset(w, '0', sizeof w);
+    v[1] = w[1] = '.';
+    v[2 + CANLIN_THEME_FRAC_DIGITS_MAX - 1] = '1';   /* the last kept digit */
+    v[2 + CANLIN_THEME_FRAC_DIGITS_MAX] = 0;
+    w[2 + CANLIN_THEME_FRAC_DIGITS_MAX] = '1';        /* one digit too many */
+    w[3 + CANLIN_THEME_FRAC_DIGITS_MAX] = 0;
+    reset(); puts_(&L, "theme#radius", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "radius %s", v);
+    CHECK(fabsf(T.radius - 1.0f / 10000.0f) < 1e-9f, "radius %s is 1/10000 em (%f)", v,
+          (double)T.radius);
+
+    /* One digit more is refused, and the log names the bound. */
+    reset(); puts_(&L, "theme#radius", w); resolve();
+    CHECK(T.from[k] != 0 && nlogs == 1, "radius %s refused", w);
+    snprintf(msg, sizeof msg, "more than %u fraction digits", CANLIN_THEME_FRAC_DIGITS_MAX);
+    CHECK(logged("theme#radius", msg), "log names the bound: %s", msg);
+}
+
 int main(void)
 {
     samples();
@@ -534,6 +564,7 @@ int main(void)
     test_values();
     test_formats();
     test_value_ranges();
+    test_fraction_digits();
     test_per_key_fallback();
     test_log_hygiene();
     test_contrast();

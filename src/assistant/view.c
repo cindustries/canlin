@@ -732,7 +732,7 @@ static int graph_of(vctx *c, const jv *w, canlin_av_widget *out)
     double h = CANLIN_UI_GRAPH_HEIGHT_EM;
     size_t n;
 
-    if (c->graphs >= CANLIN_UI_GRAPH_MAX_PER_DRAW)
+    if (c->graphs >= CANLIN_UI_GRAPH_MAX_PER_VIEW)
         return fail(c, "too many graphs in one view");
     c->graphs++;
     if (num_of(c, w, "height", 0, 0, CANLIN_UI_GRAPH_HEIGHT_MIN_EM,

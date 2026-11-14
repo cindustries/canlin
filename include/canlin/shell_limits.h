@@ -16,14 +16,20 @@
 #define CANLIN_SHELL_TILED_DEFAULT      80.0f   /* em output width: tiled by default */
 #define CANLIN_SHELL_BAR_HEIGHT         2.5f    /* em, status bar */
 
-/* Not in the §6 table: chosen here (provisional). */
+/* §6 table, the last five rows: chosen during canlin#35 and provisional. */
 #define CANLIN_SHELL_DIVIDER_HIT        2.5f    /* em, divider hit area (§2) */
 #define CANLIN_SHELL_OUTPUTS_MAX        4       /* outputs one shell arranges */
 #define CANLIN_SHELL_MODULES_MAX        32      /* modules known to the switcher */
-#define CANLIN_SHELL_ROW_HEIGHT         2.5f    /* em, switcher rows and restart button */
 #define CANLIN_SHELL_SWITCHER_WIDTH     24.0f   /* em, switcher panel (at most the output) */
+#define CANLIN_SHELL_SWIPE              2.5f    /* em downwards from the bar opens the switcher */
+
+/* Not in the §6 table: chosen here (provisional). */
+/* A row of the shell: the switcher entries, the restart button and the text rows of
+ * the faulted pane. */
+#define CANLIN_SHELL_ROW_HEIGHT         2.5f    /* em, row height */
+/* The width of the restart button of a faulted pane; the spec states no size. */
+#define CANLIN_SHELL_RESTART_WIDTH      10.0f   /* em, width of the restart button */
 #define CANLIN_SHELL_SWITCH_BUTTON      6.0f    /* em, switcher entry in the status bar */
 #define CANLIN_SHELL_MODEL_LABEL        1.5f    /* em, "model-generated" strip of a frame */
-#define CANLIN_SHELL_SWIPE              2.5f    /* em downwards from the bar opens the switcher */
 
 #endif

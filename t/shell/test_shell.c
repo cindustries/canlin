@@ -3,6 +3,7 @@
  * theme: em = 16 px at DPI 1.0 and scale 100 %, 20 px at 125 %. Exits 0 on success. */
 #include "canlin/shell.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -704,6 +705,16 @@ static void test_status_bar(void)
     h_done();
 }
 
+/* ---- limits ---- */
+
+/* The row height and the restart button width live in the limits header; the shell
+ * draws the rows and the button from them. The spec states no size for either. */
+static void test_row_sizes(void)
+{
+    CHECK(CANLIN_SHELL_ROW_HEIGHT == 2.5f);
+    CHECK(CANLIN_SHELL_RESTART_WIDTH == 10.0f);
+}
+
 /* ---- §3 faulted pane and restart ---- */
 
 static void test_fault_restart(void)
@@ -713,6 +724,7 @@ static void test_fault_restart(void)
     canlin_theme t;
     unsigned draws;
     canlin_ui_input in;
+    float em;
     canlin_theme_builtin(&t);
     h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
     settle();
@@ -726,6 +738,11 @@ static void test_fault_restart(void)
     settle();
     rs = part(CANLIN_SHELL_P_RESTART, 1);
     CHECK(contains(part(CANLIN_SHELL_P_VIEW, 1), rs));
+    /* The button is drawn from the limits header: a row high and
+     * CANLIN_SHELL_RESTART_WIDTH em wide. */
+    em = canlin_ui_output_em(H.ui, H.out);
+    CHECK(rs.h == (int)ceilf(CANLIN_SHELL_ROW_HEIGHT * em - 0.001f));
+    CHECK(rs.w == (int)ceilf(CANLIN_SHELL_RESTART_WIDTH * em - 0.001f));
     CHECK(rs.h >= 40);
     CHECK(rect_has_color(rs, t.color[CANLIN_THEME_ACCENT]));
     CHECK(has_part(CANLIN_SHELL_P_FAULTED, 0));
@@ -923,6 +940,7 @@ int main(void)
     test_secondary_routing();
     test_reserved_keys();
     test_status_bar();
+    test_row_sizes();
     test_fault_restart();
     test_switcher();
     test_model_frame();

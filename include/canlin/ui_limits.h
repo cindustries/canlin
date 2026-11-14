@@ -51,10 +51,16 @@
 #define CANLIN_THEME_COLOR_LEN          7u
 #define CANLIN_THEME_SIZE_MAXLEN        2u
 #define CANLIN_THEME_DECIMAL_MAXLEN     8u
+/* §6.1 "decimal string": spacing and radius are read in 1/10000 em, so a value keeps
+ * at most 4 fraction digits ("1.5"). */
+#define CANLIN_THEME_FRAC_DIGITS_MAX    4u
 
-/* Not in the §8 table: flow layout (UI spec §2, system design §5), in em. */
+/* §2: "Interactive elements are at least 2.5 em high" (system design §5); "below 40 em
+ * of content width everything is one column". In em. */
 #define CANLIN_UI_MIN_TOUCH_EM          2.5f   /* interactive element height */
 #define CANLIN_UI_COLUMNS_EM            40.0f  /* ui:columns side by side at >= this */
+/* Not in the §8 table: chosen here (provisional). The spec names no line height and no
+ * heading scale (§6.3: "heading levels use scale factors of the heading font"). */
 #define CANLIN_UI_LINE_EM               1.25f  /* text line height per font size */
 /* Heading font sizes per level 1-3, relative to em (level 3 uses the body font). */
 #define CANLIN_UI_HEADING1_SCALE        1.5f
@@ -98,6 +104,10 @@
 /* Identity hash table slots per view; power of two, >= 4 x CANLIN_UI_MAX_WIDGETS (the
  * previous and the current frame can each hold MAX_WIDGETS identities; load <= 50%). */
 #define CANLIN_UI_STATE_SLOTS           2048u
+
+/* §7: "A view has at most 8 graphs" - a model view (the assistant's set_view) holds
+ * at most this many graphs. */
+#define CANLIN_UI_GRAPH_MAX_PER_VIEW    8u
 
 /* Not in the §8 table: graph editor (UI spec §5), chosen here (provisional). */
 #define CANLIN_UI_GRAPH_MAX_PER_DRAW    8u      /* ui:graph calls per draw */
