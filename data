@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T20:42:08Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T20:42:08Z
+created: 2026-11-14T20:22:09Z
+id: 116
+priority: low
+started: 2026-11-14T20:34:51Z
+status: done
+tags:
+- ui
+- shell
+- limits
+title: 'UI: the scale factor''s base percent is a literal in the ui and the shell'
+updated: 2026-11-14T20:42:08Z
+---
+
+src/ui/ui.c:355 and src/shell/shell.c:196 compute the scale factor as 'dpi * scale / 100.0f' - the 100 is the scale's base percent, still a literal rather than a named constant. include/canlin/ui_limits.h now names the steps (CANLIN_UI_SCALE_STEP_100 and the rest, added in 6d5b78b) but not the base the factor is divided by. Found by the 2026-11-14 work on k110.
+
+2026-11-14 (canlin-worker-ui): named the base percent in include/canlin/ui_limits.h as CANLIN_UI_SCALE_BASE_PERCENT (100), in the house style next to the scale steps; src/ui/ui.c:355 (factor_of) and src/shell/shell.c:196 (chrome_font) read it instead of the literal 100.0f. No behaviour change. New test t/ui/test_ui.c:test_scale_base pins the constant (== 100) and checks the output em follows the header (font size x DPI x step / the base percent); it failed to compile before the constant existed (red) and passes now. Mutation check: with the header base at 200 and src/ui/ui.c keeping its own literal 100.0f, exactly that one check fails; with the header at 200 and the code reading it, 75 existing checks fail. All suites pass in build/ui4 except t/module/test_module, which does not compile from another lane's in-flight edit (t/module/test_module.c:920, canlin_module_result initializer).
+
+Ready for review: the base percent is a named constant (CANLIN_UI_SCALE_BASE_PERCENT) in ui_limits.h, read by src/ui/ui.c and src/shell/shell.c; a new test pins it and checks the em follows the header. No behaviour change. Host suites pass in build/ui4; t/module/test_module does not compile (another lane's in-flight edit, not this card).
+
+2026-11-14 20:42 Review 2026-11-14: fixed and reviewed. CANLIN_UI_SCALE_BASE_PERCENT 100 now sits in ui_limits.h next to the scale steps, and src/ui/ui.c:355 and src/shell/shell.c:196 read it instead of the literal. No behaviour change. The new test_scale_base pins the constant and checks the output em follows the header; it was red first (the constant did not exist) and is mutation-verified: with the header base at 200 and the ui keeping its own literal, exactly one check fails, with the code reading the header 75 existing checks fail. The worker states the limitation plainly: the shell's own factor is not observable through any public API, so the behavioural check covers the ui's factor and the shell's read of the same constant is proven by compilation and the shared pin. Committed as 0dff5ef.
