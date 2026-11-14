@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T04:21:25Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:50:26Z
+created: 2026-09-23T04:10:24Z
+id: 24
+priority: high
+started: 2026-09-23T04:10:44Z
+status: done
+tags:
+- ui
+- render
+title: UI scale per output + per-view output metrics
+updated: 2026-11-14T07:50:26Z
+---
+
+UI spec §2.1: scale steps 75/100/125/150/200 % per output id (system/local), em = base x DPI x scale, no global display state, re-layout + font rebake on change, CANLIN_UI_FONT_SIZES_MAX LRU. Today DPI lives in canlin_ui (per theme load).
+
+Merged 7a044ff. 5875 ui checks, host + ASan/UBSan green, 7 mutants caught. i686 skipped. Scale persistence in system/local/ waits for store.
+
+2026-11-14 07:50 Review 2026-11-14: claim holds. The five scale steps are exactly 75, 100, 125, 150 and 200 (src/ui/ui.c:268-271), em = theme base x DPI x scale (:339-347), there is no global display state - canlin_ui holds only the theme, the font cache, a tick, a bake count and a view list, and the header says so (include/canlin/ui.h:8) - a scale change marks every view of the output dirty and fires its dirty callback (:359-367) and a new em rebakes through font_acquire, and CANLIN_UI_FONT_SIZES_MAX is a 4-slot LRU with refs pinning and CANLIN_UI_EFONT when all slots are pinned (:195-201). The card's before-state is exact: at 7a044ff^ the DPI lived in canlin_ui, after it lives in canlin_ui_output. The card's check count reproduces exactly (5875 ui checks at that commit). The card's '7 mutants caught' is not reproducible (k89). Its open item still stands: the persistence of the scale in system/local/ waits for the store, which is k31 in backlog and blocked on libbee and canlin#2. Host make test green; P2/i686 not runnable on this host.
