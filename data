@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T06:41:53Z
+id: 93
+priority: low
+status: backlog
+tags:
+- shell
+- docs
+title: 'Shell: the provisional limits and shell spec §6 disagree about what canlin#35
+  chose'
+updated: 2026-11-14T06:41:53Z
+---
+
+k35 claims the choices were 'read from headers into shell spec §6'. They were only partly read back. include/canlin/shell_limits.h:16 marks eight constants as 'Not in the §6 table', but five of them are in the spec's §6 table (DIVIDER_HIT, OUTPUTS_MAX, MODULES_MAX, SWITCHER_WIDTH, SWIPE). Three are in neither the header's §6 block nor the spec's table: CANLIN_SHELL_ROW_HEIGHT (shell_limits.h:20), CANLIN_SHELL_SWITCH_BUTTON (:22), CANLIN_SHELL_MODEL_LABEL (:23). The spec's sentence 'The last five were chosen during canlin#35 and are provisional' does not cover them either. Decide where the numbers live: the header block or the spec table, and make both say the same. Found by the 2026-11-14 review of k35.
