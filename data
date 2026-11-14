@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-14T23:52:37Z
+claimed_by: canlin-worker-runtime
+class: standard
+completed: 2026-11-14T23:52:37Z
+created: 2026-11-14T23:41:44Z
+id: 134
+priority: low
+started: 2026-11-14T23:42:01Z
+status: done
+tags:
+- runtime
+- limits
+- docs
+title: 'Runtime: ev_limits.h says the spec table has no process-wide op/timer row'
+updated: 2026-11-14T23:52:37Z
+---
+
+include/canlin/ev_limits.h says of CANLIN_EV_PROC_MAX_OPS and CANLIN_EV_PROC_MAX_TIMERS: 'The spec table has no process-wide op/timer row; these are chosen as half the sum of the module bounds, like PROC_MAX_ITEMS.' That is stale: core API spec §7 has carried CANLIN_EV_PROC_MAX_OPS (256) and CANLIN_EV_PROC_MAX_TIMERS (128) rows since the table was written. The comment says the spec is silent where it speaks - the same shape of error as canlin#104, #106 and #118. The comment should name the rows and say how the values relate to them. Found by the 2026-11-14 work on k100.
+
+Runtime worker: fixing the stale comment in include/canlin/ev_limits.h. Confirmed spec section 7 (docs/superpowers/specs/2026-09-23-canlin-core-api-design.md) carries rows CANLIN_EV_PROC_MAX_OPS (256, max none, note 'half the sum of module op limits') and CANLIN_EV_PROC_MAX_TIMERS (128, max none); the rows were added by 0fc6c02, the header comment predates them (79bc487). Comments only, no value touched. Build and test running in build/rt3.
+
+Done: comments only in include/canlin/ev_limits.h.
+
+The op/timer comments no longer claim the spec is silent. They now name the two spec rows (core API spec section 7, docs/superpowers/specs/2026-09-23-canlin-core-api-design.md): CANLIN_EV_PROC_MAX_OPS (256, no max, noted 'half the sum of module op limits') and CANLIN_EV_PROC_MAX_TIMERS (128, no max), next to the module rows they belong to, and say how the values relate (16 module slots at 32 each give 512, half is 256; 16 slots at 16 each give 256, half is 128). No value, macro, code path or behaviour touched: cpp -P of the header before and after is byte-identical.
+
+Gate: make BUILD=build/rt3 test - 23 suites, ALL TESTS PASSED (exit 0), incl. t/ev/test_ev, t/module/test_module, t/sandbox/test_sandbox. i686/QEMU not run: the change is comment-only, no instruction stream differs.
+
+Further mismatch found, not fixed (outside the card): include/canlin/ev_limits.h:24 says the process-wide bounds are 'smaller than the sum of module bounds'. True for the item bound (512 < 16 x 64 = 1024), false for the byte bound: 16 slots x 256 KiB = 4 MiB is exactly PROC_MAX_BYTES, not smaller. Suggest a new card for that comment.
+
+2026-11-15 review (main): read and correct - the comment names the four spec rows with their values (docs/superpowers/specs/2026-09-23-canlin-core-api-design.md:237-240) and the half-sum relation holds: 16 slots x 32 ops = 512, half is 256; 16 x 16 timers = 256, half is 128. Comments only, proven by cpp -P being byte-identical before and after; no value, macro or code path touched. The worker's further finding - the byte-bound sentence at ev_limits.h:24 says the process-wide bound is smaller than the sum of the module bounds, which is false for the bytes (16 x 256 KiB = 4 MiB is exactly CANLIN_EV_PROC_MAX_BYTES) - is filed as k138. Committed as 2163b9d.
