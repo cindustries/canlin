@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-11-14T18:03:11Z
+claimed_by: canlin-test-writer
+class: standard
+created: 2026-11-14T06:34:26Z
+id: 86
+priority: medium
+started: 2026-11-14T17:52:58Z
+status: in-progress
+tags:
+- build
+- toolchain
+title: 'Build: LIBOBJ is collected by every mk/*.mk and never expanded'
+updated: 2026-11-14T18:03:11Z
+---
+
+The Makefile header says subsystems add themselves via 'append objects to LIBOBJ', and 17 mk/*.mk files do exactly that. But $(LIBOBJ) is never expanded in any rule: each test binary links from an explicit dependency list in its own mk file (e.g. mk/sandbox.mk: $(SANDBOX_TEST): ... $(SANDBOX_OBJ) $(LUA_OBJ)). A new subsystem that follows the documented contract therefore links nothing and fails at link time with undefined symbols. Either expand $(LIBOBJ) in the link rules or drop it from the contract and the header comment. Found by the 2026-11-14 review.
