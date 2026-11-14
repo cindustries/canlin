@@ -3,11 +3,9 @@ source: https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
 zip sha256: 9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e (33707794 bytes)
 verified: 2026-09-23. Upstream publishes no checksum for this release (the GitHub
 release asset carries no digest; its size matches the one above); the sha256 values
-here were computed at download time and pin what was vendored.
+in SHA256SUMS were computed at download time and pin what was vendored.
 
-sha256 of each vendored file:
-40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82  Inter-Regular.ttf
-262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a  LICENSE
+sha256 of each vendored file: SHA256SUMS
 
 Contents:
 - Inter-Regular.ttf: extras/ttf/Inter-Regular.ttf from the zip, unmodified. The static
@@ -31,4 +29,4 @@ baking it with stb_truetype does not relax the untrusted theme-font rule (UI spe
 §6.3).
 
 Read-only. Any change to the subset happens in tools/mkfont.py, never here.
-Check: `sha256sum -c` over the list above from this dir.
+Check: `sha256sum -c SHA256SUMS` from this dir.

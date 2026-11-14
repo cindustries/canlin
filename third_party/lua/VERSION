@@ -8,4 +8,7 @@ minus src/lua.c and src/luac.c (standalone interpreter/compiler, not used) and
 src/Makefile. LICENSE is the verbatim notice from src/lua.h (the tarball ships
 no separate license file).
 
+sha256 of each vendored file: SHA256SUMS (paths relative to this dir)
+
 Read-only. Configure via compile flags only; any fix is a patch file plus ticket.
+Check: `sha256sum -c SHA256SUMS` from this dir (one line per vendored file).
