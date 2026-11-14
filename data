@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-14T06:35:43Z
+id: 91
+priority: low
+status: backlog
+tags:
+- llm
+title: 'LLM: the two length-stop limits need a live fixture'
+updated: 2026-11-14T06:35:43Z
+---
+
+Both limits of k59 stand today and can only be settled against a real provider: (1) openai-chat decides 'unfinished' solely by whether the accumulated args parse as one complete JSON object (src/llm/openai_chat.c:445-450), so a provider that truncates at a syntactically valid boundary delivers a truncated call as a real one - the protocol offers no signal to tell them apart; (2) an open text block at max_tokens still fails the anthropic-messages stream (src/llm/anthropic_messages.c:690-697) - only an open tool_use block is tolerated, and no fixture shows whether real servers omit content_block_stop. Needs a live fixture against MiniMax/Moonshot and a key from the maintainer; the normal suite stays on fixtures. Found by the 2026-11-14 review of k59.
