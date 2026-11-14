@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-14T18:18:45Z
+claimed_by: canlin-test-writer
+class: standard
+created: 2026-11-14T06:34:37Z
+id: 87
+priority: medium
+started: 2026-11-14T17:52:46Z
+status: review
+tags:
+- build
+- test
+- toolchain
+title: 'Build: a sanitizer target, so the ASan/UBSan evidence is reproducible'
+updated: 2026-11-14T18:18:45Z
+---
+
+Every review card claims 'Host + ASan/UBSan green', but the repo has no sanitizer target: 'grep -rn fsanitize Makefile mk/' is empty and 'git log -S fsanitize -- Makefile mk' finds nothing. The evidence was produced ad hoc, outside the tree. Add a build mode (e.g. make SAN=asan or a make asan target with its own build dir) that builds the suites with -fsanitize=address,undefined -fno-sanitize-recover=undefined and runs them, so the claim can be re-run by anyone. Known blocker for an -O1 build: t/ui/test_ui.c:1857 snprintf(id, sizeof id, "o%d", i) with char id[8] trips -Werror=format-truncation at -O1 (the -O2 build is clean). Found by the 2026-11-14 review.
+
+Sanitizer target added to the Makefile (k87). New: SAN=asan | SAN=ubsan build mode (own object tree build/<target>/san-<SAN>, flags -fsanitize=address,undefined resp. -fsanitize=undefined, both with -fno-sanitize-recover=undefined -fno-omit-frame-pointer, added with override so a command-line CFLAGS cannot drop them) and the target 'test-san'; 'make SAN=asan test' and 'make SAN=asan test-san' are the same run. The normal make / make test are untouched: the dry-run command list of the host build is byte-identical before and after the change (make -nB diff over 422 lines), and 'make BUILD=build/spine test' still ends in ALL TESTS PASSED. A report fails the build two ways: the sanitizer ends the process (exitcode=1, halt_on_error=1) and the output is scanned for a report line, so even a report that does not change the exit code fails; proven with two scratch programs (UBSan runtime error -> exit 1 + marker matched; UBSan in recover mode -> exit 0 + marker matched). Each binary is checked for the sanitizer runtime (nm -D __asan_init / __ubsan_) before it runs, so an uninstrumented suite cannot pass as green. Result: ASan+UBSan green for all 21 suites (test_android, test_app, test_ev, test_llm, test_llm_http, test_loop, test_loop_native, test_module, sse_test, json_test, http_wire_test, http_test, test_render, test_sandbox, test_shell, test_theme, test_ui, test_graph, test_kbd, test_view, test_response), no leak reports; the UBSan-only variant green for the same 21. The -O1 blocker is confirmed as described: t/ui/test_ui.c:1857 snprintf(id, sizeof id, "o%d", i) with char id[8] trips -Werror=format-truncation at -O1 (directive argument in the range [-2147483646, 4]; output between 3 and 13 bytes into a destination of size 8). Not fixed: the sanitizer build stays at the repo's -O2, so the host build compiles the same sources as before.
+
+Ready for review: Makefile only (SAN build mode + test-san target). Reviewer command: make SAN=asan test (clean tree: builds build/host/san-asan; with BUILD=... it uses <BUILD>/san-asan). Evidence per platform: host only -- no i686/P2-QEMU, no WASM/browser and no device run (the sanitizer mode is host-only by design and errors out for other targets).
