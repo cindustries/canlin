@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-14T07:49:14Z
+id: 96
+priority: low
+status: backlog
+tags:
+- ui
+- font
+- platform
+title: 'UI: the P2 measurements the cards deferred but no card owns (font atlas, graph
+  scale)'
+updated: 2026-11-14T07:49:29Z
+---
+
+Two measurements were deferred by their cards and pointed at the wrong place, so no card on the board owns them. (1) Font atlas memory: k22 left 'Atlas memory ~2x: up to 4 MiB at 200 %' open and pointed at canlin#13 - but #13 is about the sandbox cost factors on P2-QEMU, not font atlas memory. The figure also needs re-deriving: it came from the DejaVu blob (38804 bytes), which k55 replaced with the smaller Inter subset (23792 bytes). (2) Graph scale: k19 left '256 nodes/1024 edges unmeasured on P2' open; the fixture exists and runs (t/ui/test_graph.c:795-827 builds 256 nodes and 1024 edges) but the assertion is only that visible nodes are > 10 and < 256, with no draw-budget or timing assertion. Measure both on P2 or under QEMU pentium2 and put the numbers in the UI spec §6.3. Both are blocked on the canlin-os QEMU harness, which is not on this host. Found by the 2026-11-14 review of k17 and k22.
