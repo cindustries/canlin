@@ -282,6 +282,13 @@ static int contains(canlin_shell_rect o, canlin_shell_rect i)
     return i.x >= o.x && i.y >= o.y && i.x + i.w <= o.x + o.w && i.y + i.h <= o.y + o.h;
 }
 
+/* Is the pixel at (x, y) of the last render the theme colour c? */
+static int pixel_is(canlin_theme_rgb c, int x, int y)
+{
+    const unsigned char *p = H.px + (size_t)y * H.r.pitch + (size_t)x * 3;
+    return p[0] == c.r && p[1] == c.g && p[2] == c.b;
+}
+
 /* The Go button of module i's view, from its layout record. */
 static canlin_ui_rect go_button(int i)
 {
@@ -861,6 +868,73 @@ static void test_model_frame(void)
     h_done();
 }
 
+/* ---- §4 the model view in a pane ---- */
+
+/* The app hands the model's own view to the shell: the pane holds two views then, the
+ * model's own in the frame with the label strip and the module's own outside it. A
+ * click in each area reaches the view of that area. */
+static void test_model_view_pane(void)
+{
+    canlin_ui_view *mv;
+    canlin_shell_rect p, mrect, vrect, lab;
+    unsigned b0;
+    size_t pend;
+
+    h_init(1000, 800, 100, 1, CANLIN_SHELL_IN_POINTER);
+    mv = canlin_ui_view_new(H.ui, H.out, NULL);
+    CHECK(mv != NULL);
+    CHECK(canlin_shell_attach_model_view(H.sh, H.m[0], mv) == CANLIN_SHELL_OK);
+    settle();
+
+    p = part(CANLIN_SHELL_P_PANE, 0);
+    mrect = part(CANLIN_SHELL_P_MODEL_VIEW, 0);
+    vrect = part(CANLIN_SHELL_P_VIEW, 0);
+    lab = part(CANLIN_SHELL_P_MODEL_LABEL, 0);
+    /* Two rectangles in the pane, the model's one above the module's own. */
+    CHECK(contains(p, mrect) && contains(p, vrect) && contains(p, lab));
+    CHECK(!overlap(mrect, vrect));
+    CHECK(mrect.y < vrect.y);
+    /* The label strip belongs to the model's block, not to the module's view. */
+    CHECK(lab.x == mrect.x && lab.w == mrect.w && lab.y + lab.h == mrect.y);
+    /* The module's own widgets sit outside the model's frame. */
+    {
+        canlin_ui_rect b = go_button(0);
+        CHECK(b.y >= vrect.y && b.y >= mrect.y + mrect.h);
+    }
+    /* The frame is drawn around the model's own view, and only there: the band next to
+     * it is the frame, the module's own view has no band above it. */
+    {
+        const canlin_theme *th = canlin_ui_theme(H.ui);
+        CHECK(pixel_is(th->color[CANLIN_THEME_MUTED], mrect.x - 1, mrect.y + 2));
+        CHECK(pixel_is(th->color[CANLIN_THEME_BACKGROUND], vrect.x, vrect.y - 1));
+        CHECK(pixel_is(th->color[CANLIN_THEME_SURFACE], lab.x + 2, lab.y + 2));
+    }
+    /* A click in the module's area reaches the module, not the model's view. */
+    b0 = H.buttons[0];
+    pend = canlin_ui_view_pending(mv);
+    CHECK(tap(vrect.x + 2, vrect.y + 2) == CANLIN_SHELL_R_VIEW);
+    drain();
+    CHECK(H.buttons[0] == b0 + 2);
+    CHECK(canlin_ui_view_pending(mv) == pend);
+    /* A click in the model's area reaches the model's view, not the module. */
+    b0 = H.buttons[0];
+    pend = canlin_ui_view_pending(mv);
+    CHECK(tap(mrect.x + 2, mrect.y + 2) == CANLIN_SHELL_R_VIEW);
+    drain();
+    CHECK(H.buttons[0] == b0);
+    CHECK(canlin_ui_view_pending(mv) == pend + 2);
+    /* A new frame in the model's view makes the shell draw again. */
+    CHECK(canlin_ui_view_frame_begin(mv) == CANLIN_UI_OK);
+    canlin_ui_view_frame_end(mv);
+    CHECK(canlin_shell_update(H.sh) == 1);
+    /* Detaching: the model frame is gone, the module's own view is alone again. */
+    CHECK(canlin_shell_attach_model_view(H.sh, H.m[0], NULL) == CANLIN_SHELL_OK);
+    CHECK(!has_part(CANLIN_SHELL_P_MODEL_VIEW, 0));
+    CHECK(!has_part(CANLIN_SHELL_P_MODEL_LABEL, 0));
+    canlin_ui_view_free(mv);
+    h_done();
+}
+
 /* ---- §5 drawing: idle clock ---- */
 
 static void test_idle_clock(void)
@@ -944,6 +1018,7 @@ int main(void)
     test_fault_restart();
     test_switcher();
     test_model_frame();
+    test_model_view_pane();
     test_idle_clock();
     test_dirty_regions();
     test_input_class();

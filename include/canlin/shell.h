@@ -13,7 +13,9 @@
  *
  * Every output has a tiling of 2-3 slots (panes); full-screen shows the slot `cur`.
  * A module sits in at most one slot of all outputs (switcher assignment swaps), so one
- * view is shown in at most one place (§1).
+ * view is shown in at most one place (§1). A model pane holds two views: the model's
+ * own, in the frame with the label strip, and the module's own below it, outside the
+ * frame (UI spec §4).
  *
  * Coordinates: pointer input and every rect are px of the output. A view's rectangle is
  * set in its output's coordinates (ui.h canlin_ui_view_set_rect), so output px are the
@@ -111,9 +113,24 @@ int canlin_shell_set_tiling(canlin_shell *sh, canlin_ui_output *o, canlin_shell_
  * current slot; the shell gives it a view with canlin_module_set_ui when it is shown. */
 int canlin_shell_add_module(canlin_shell *sh, canlin_module *m, const canlin_module_source *src);
 int canlin_shell_remove_module(canlin_shell *sh, canlin_module *m);
-/* Mark m's view as built by the GUI tool: its pane gets the labelled model-view frame
- * (UI spec §4). The GUI tool itself is a later ticket. */
+/* Mark m's pane as a model pane: it gets the labelled model-view frame (UI spec §4).
+ * Without a view of its own (canlin_shell_attach_model_view) the module's own view is
+ * the model view and sits in the frame. Turning the flag off takes the frame away and
+ * lets go of the view attached to m. */
 int canlin_shell_set_model_view(canlin_shell *sh, canlin_module *m, int on);
+/* The model's own view of m: the pane holds two views then, the model's own in the
+ * frame (the "Model-generated view" label strip belongs to it) and the module's own
+ * below it, outside the frame (UI spec §4). The shell binds the view to the output of
+ * the pane, gives it its rectangle, renders its last finished frame and routes the
+ * pointer input of its block into it.
+ *
+ * The view belongs to the caller: it must stay valid while the shell holds it, and the
+ * shell never frees it. The caller draws into it and draws a new frame when the shell
+ * moved it (the rectangle of CANLIN_SHELL_P_MODEL_VIEW changed) or when the view has
+ * queued input (canlin_ui_view_pending). Keys and text reach the focused module as
+ * before.
+ * NULL detaches the view and takes the model frame away with it. */
+int canlin_shell_attach_model_view(canlin_shell *sh, canlin_module *m, canlin_ui_view *v);
 /* The restart action (core API §5.3): only for a FAULTED module, reloads it from its
  * source as a new generation. Also reachable as the faulted pane's button. */
 int canlin_shell_restart(canlin_shell *sh, canlin_module *m);
@@ -193,6 +210,7 @@ typedef enum canlin_shell_part {
     CANLIN_SHELL_P_DIVIDER,       /* idx = divider (between pane idx and idx+1): hit area */
     CANLIN_SHELL_P_RESTART,       /* idx = pane, only while its module is faulted */
     CANLIN_SHELL_P_MODEL_LABEL,   /* idx = pane, only for a model view */
+    CANLIN_SHELL_P_MODEL_VIEW,    /* idx = pane: the model's own view, in its frame */
     CANLIN_SHELL_P_SWITCHER,      /* only while open */
     CANLIN_SHELL_P_SWITCHER_ROW   /* idx = row, only while open */
 } canlin_shell_part;

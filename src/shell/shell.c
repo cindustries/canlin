@@ -26,11 +26,16 @@ typedef struct mod_ent {
     canlin_module *m;
     const canlin_module_source *src;
     int model;
+    canlin_ui_view *mview;      /* the model's own view of this module (may be NULL) */
     canlin_module_state seen;
     int bound;                  /* set_ui succeeded with bout/br */
     uint32_t bframe;            /* view frames at that bind: older command lists are stale */
     canlin_ui_output *bout;
     canlin_shell_rect br;
+    int mbound;                 /* the model's view is bound to mbout/mbr */
+    uint32_t mbframe;           /* model view frames at that bind */
+    canlin_ui_output *mbout;
+    canlin_shell_rect mbr;
 } mod_ent;
 
 typedef struct shell_out {
@@ -51,6 +56,9 @@ typedef struct shell_out {
     int vn;                               /* visible panes */
     int vslot[CANLIN_SHELL_PANES_MAX];
     canlin_shell_rect pane[CANLIN_SHELL_PANES_MAX], view[CANLIN_SHELL_PANES_MAX];
+    canlin_shell_rect area[CANLIN_SHELL_PANES_MAX];  /* the pane's content area */
+    canlin_shell_rect mview[CANLIN_SHELL_PANES_MAX]; /* the model's own view */
+    canlin_shell_rect mbox[CANLIN_SHELL_PANES_MAX];  /* the frame around it */
     canlin_shell_rect label[CANLIN_SHELL_PANES_MAX], restart[CANLIN_SHELL_PANES_MAX];
     canlin_shell_rect div[CANLIN_SHELL_PANES_MAX - 1];
     int bound[CANLIN_SHELL_PANES_MAX + 1]; /* pane boundaries along the split, px */
@@ -63,14 +71,18 @@ typedef struct shell_out {
     int drag;                             /* divider being dragged, -1 none */
     int drag_off;
     int cap;                              /* module capturing the pointer, -1 none */
+    int cap_model;                        /* the capture is in the model's own view */
     unsigned cap_btns;                    /* buttons held in the captured view (bit each) */
     int hover;                            /* module last sent a motion, -1 none */
+    int hover_model;                      /* the motion was in the model's own view */
     int bar_press, bar_py;
     int chrome_press;                     /* a press consumed by chrome: eat its release */
 
     unsigned dirty;
     uint32_t vframe[CANLIN_SHELL_PANES_MAX];
+    uint32_t mvframe[CANLIN_SHELL_PANES_MAX];
     int vmod[CANLIN_SHELL_PANES_MAX];
+    int mvmod[CANLIN_SHELL_PANES_MAX];
 
     struct nk_context nk;
     int nk_ok;
@@ -378,14 +390,37 @@ static void layout_pane(canlin_shell *sh, shell_out *so, int i)
     if (model && r == 0)
         r = so->ring > 0 ? so->ring : (int)fmaxf(2.0f, roundf(so->em / 8.0f));
     v = mkrect(p.x + r, p.y + r, p.w - 2 * r, p.h - 2 * r);
+    so->area[i] = v;
     so->label[i] = mkrect(0, 0, 0, 0);
+    so->mbox[i] = mkrect(0, 0, 0, 0);
+    so->mview[i] = mkrect(0, 0, 0, 0);
     if (model) {
         int lh = ceil_px(CANLIN_SHELL_MODEL_LABEL * so->em);
-        if (lh > v.h - 1)
-            lh = v.h > 1 ? v.h - 1 : 0;
-        so->label[i] = mkrect(v.x, v.y, v.w, lh);
-        v.y += lh;
-        v.h -= lh;
+        int two = k >= 0 && sh->mods[k].mview != NULL;
+        if (two) {
+            /* Two views in the pane: the model's own in the frame (label strip and
+             * view), the module's own below it, outside the frame. */
+            int half = v.h / 2;
+            canlin_shell_rect area = mkrect(v.x, v.y, v.w, half);
+            canlin_shell_rect box = mkrect(area.x + r, area.y + r, area.w - 2 * r, area.h - 2 * r);
+            canlin_shell_rect in = mkrect(box.x + r, box.y + r, box.w - 2 * r, box.h - 2 * r);
+            if (in.w < 1 || in.h - lh < 1 || v.h - half < 1)
+                two = 0; /* too small for two views: the module's own view stays the model view */
+            else {
+                so->mbox[i] = box;
+                so->label[i] = mkrect(in.x, in.y, in.w, lh);
+                so->mview[i] = mkrect(in.x, in.y + lh, in.w, in.h - lh);
+                v = mkrect(v.x, v.y + half, v.w, v.h - half);
+            }
+        }
+        if (!two) {
+            /* The module's own view is the model view: the label strip sits above it. */
+            if (lh > v.h - 1)
+                lh = v.h > 1 ? v.h - 1 : 0;
+            so->label[i] = mkrect(v.x, v.y, v.w, lh);
+            v.y += lh;
+            v.h -= lh;
+        }
     }
     if (v.w < 1)
         v.w = 1;
@@ -473,7 +508,8 @@ static void move_divider(canlin_shell *sh, shell_out *so, int d, int pos)
         so->dirty |= D_OVERLAY;
 }
 
-/* Rebind every visible module whose view rectangle or output changed. */
+/* Rebind every visible module whose view rectangle or output changed, and every
+ * model's own view the shell holds. */
 static void sync_views(canlin_shell *sh)
 {
     int i, p;
@@ -485,14 +521,27 @@ static void sync_views(canlin_shell *sh)
             if (k < 0)
                 continue;
             e = &sh->mods[k];
-            if (e->bound && e->bout == so->o && rect_eq(&e->br, &so->view[p]))
-                continue;
-            if (canlin_module_set_ui(e->m, sh->ui, so->o, so->view[p].x, so->view[p].y,
-                                     so->view[p].w, so->view[p].h) == CANLIN_MODULE_OK) {
-                e->bound = 1;
-                e->bframe = canlin_ui_view_frames(canlin_module_view(e->m));
-                e->bout = so->o;
-                e->br = so->view[p];
+            if (!(e->bound && e->bout == so->o && rect_eq(&e->br, &so->view[p]))) {
+                if (canlin_module_set_ui(e->m, sh->ui, so->o, so->view[p].x, so->view[p].y,
+                                         so->view[p].w, so->view[p].h) == CANLIN_MODULE_OK) {
+                    e->bound = 1;
+                    e->bframe = canlin_ui_view_frames(canlin_module_view(e->m));
+                    e->bout = so->o;
+                    e->br = so->view[p];
+                }
+            }
+            /* The model's own view: the shell gives it its rectangle in the pane. */
+            if (e->mview != NULL && so->mview[p].w > 0 && so->mview[p].h > 0 &&
+                !(e->mbound && e->mbout == so->o && rect_eq(&e->mbr, &so->mview[p]))) {
+                if (canlin_ui_view_bind(e->mview, sh->ui, so->o) == CANLIN_UI_OK) {
+                    canlin_ui_view_set_rect(e->mview, so->mview[p].x, so->mview[p].y,
+                                            so->mview[p].w, so->mview[p].h);
+                    e->mbound = 1;
+                    e->mbframe = canlin_ui_view_frames(e->mview);
+                    e->mbout = so->o;
+                    e->mbr = so->mview[p];
+                    so->dirty |= D_PANE0 << p; /* the frame around the model's view moved */
+                }
             }
         }
     }
@@ -582,10 +631,12 @@ int canlin_shell_add_output(canlin_shell *sh, canlin_ui_output *o, unsigned inpu
     for (i = 0; i < CANLIN_SHELL_PANES_MAX; i++) {
         so->slot[i] = -1;
         so->vmod[i] = -1;
+        so->mvmod[i] = -1;
     }
     so->frac[0] = 0.5f;
     so->frac[1] = 1.0f;
     so->drag = so->cap = so->hover = -1;
+    so->cap_model = so->hover_model = 0;
     so->bar_press = 0;
     if (chrome_font(sh, so, canlin_ui_output_em(sh->ui, o)) != 0) {
         if (so->nk_ok)
@@ -666,6 +717,7 @@ int canlin_shell_set_tiling(canlin_shell *sh, canlin_ui_output *o, canlin_shell_
     if (so->cur >= panes)
         so->cur = panes - 1;
     so->cap = so->hover = so->drag = -1;
+    so->cap_model = so->hover_model = 0;
     layout(sh, so);
     sync_views(sh);
     return CANLIN_SHELL_OK;
@@ -724,11 +776,17 @@ int canlin_shell_remove_module(canlin_shell *sh, canlin_module *m)
                 so->slot[s] = -1;
             if (so->vmod[s] == k)
                 so->vmod[s] = -1;
+            if (so->mvmod[s] == k)
+                so->mvmod[s] = -1;
         }
-        if (so->cap == k)
+        if (so->cap == k) {
             so->cap = -1;
-        if (so->hover == k)
+            so->cap_model = 0;
+        }
+        if (so->hover == k) {
             so->hover = -1;
+            so->hover_model = 0;
+        }
     }
     memset(&sh->mods[k], 0, sizeof sh->mods[k]);
     relayout_all(sh);
@@ -740,10 +798,34 @@ int canlin_shell_set_model_view(canlin_shell *sh, canlin_module *m, int on)
     int k = sh ? find_mod(sh, m) : -1;
     if (k < 0)
         return CANLIN_SHELL_EINVAL;
-    if (sh->mods[k].model != (on != 0)) {
+    if (sh->mods[k].model != (on != 0) || (!on && sh->mods[k].mview != NULL)) {
         sh->mods[k].model = on != 0;
+        if (!on)
+            sh->mods[k].mview = NULL; /* the shell lets go of the view */
         relayout_all(sh);
     }
+    return CANLIN_SHELL_OK;
+}
+
+int canlin_shell_attach_model_view(canlin_shell *sh, canlin_module *m, canlin_ui_view *v)
+{
+    int k = sh ? find_mod(sh, m) : -1;
+    if (k < 0)
+        return CANLIN_SHELL_EINVAL;
+    if (v == NULL) {
+        if (sh->mods[k].mview == NULL && !sh->mods[k].model)
+            return CANLIN_SHELL_OK;
+        sh->mods[k].mview = NULL;
+        sh->mods[k].model = 0;
+        relayout_all(sh);
+        return CANLIN_SHELL_OK;
+    }
+    if (sh->mods[k].mview == v && sh->mods[k].model)
+        return CANLIN_SHELL_OK;
+    sh->mods[k].mview = v;
+    sh->mods[k].mbound = 0; /* bind it to the output and its rectangle again */
+    sh->mods[k].model = 1;
+    relayout_all(sh);
     return CANLIN_SHELL_OK;
 }
 
@@ -781,6 +863,7 @@ static void assign(canlin_shell *sh, int oi, int slot, int k)
         layout(sh, &sh->out[po]);
     }
     so->cap = so->hover = -1;
+    so->cap_model = so->hover_model = 0;
     layout(sh, so);
     sync_views(sh);
 }
@@ -874,6 +957,23 @@ static int post(canlin_shell *sh, int k, const canlin_ui_input *in)
                                                                            : CANLIN_SHELL_R_DROPPED;
 }
 
+/* Deliver an input to a module's own view (through the module) or to the model's own
+ * view of the same module. */
+static int post_to(canlin_shell *sh, int k, int model, const canlin_ui_input *in)
+{
+    if (k < 0 || mod_state(sh, k) != CANLIN_MODULE_RUNNING)
+        return CANLIN_SHELL_R_DROPPED;
+    if (!model)
+        return post(sh, k, in);
+    {
+        canlin_ui_view *v = sh->mods[k].mview;
+        if (v == NULL)
+            return CANLIN_SHELL_R_DROPPED;
+        return canlin_ui_view_input(v, in) == CANLIN_UI_OK ? CANLIN_SHELL_R_VIEW
+                                                            : CANLIN_SHELL_R_DROPPED;
+    }
+}
+
 static int focused_mod(canlin_shell *sh)
 {
     shell_out *so;
@@ -936,26 +1036,38 @@ static int pane_at(shell_out *so, int x, int y)
     return -1;
 }
 
-/* Keep hover state honest: the view the pointer left gets one motion outside itself. */
-static void hover_to(canlin_shell *sh, shell_out *so, int k, const canlin_ui_input *in)
+/* The model's own view has the point, or the module's own view has it. */
+static int model_at(shell_out *so, int p, int x, int y)
 {
-    if (so->hover >= 0 && so->hover != k) {
+    if (p < 0 || so->mview[p].w <= 0 || so->mview[p].h <= 0)
+        return 0;
+    if (inside(&so->mview[p], x, y))
+        return 1;
+    return so->label[p].h > 0 && inside(&so->label[p], x, y);
+}
+
+/* Keep hover state honest: the view the pointer left gets one motion outside itself. */
+static void hover_to(canlin_shell *sh, shell_out *so, int k, int model, const canlin_ui_input *in)
+{
+    if (so->hover >= 0 && (so->hover != k || so->hover_model != model)) {
         canlin_ui_input mv = *in;
         mv.type = CANLIN_UI_IN_MOTION;
-        post(sh, so->hover, &mv);
+        post_to(sh, so->hover, so->hover_model, &mv);
     }
     so->hover = k;
+    so->hover_model = model;
 }
 
 static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
 {
     shell_out *so = &sh->out[oi];
-    int x = in->x, y = in->y, i, p, k;
+    int x = in->x, y = in->y, i, p, k, md;
 
     if (in->type == CANLIN_UI_IN_SCROLL) {
         if (so->sw_open)
             return CANLIN_SHELL_R_CHROME;
-        return so->hover >= 0 ? post(sh, so->hover, in) : CANLIN_SHELL_R_DROPPED;
+        return so->hover >= 0 ? post_to(sh, so->hover, so->hover_model, in)
+                              : CANLIN_SHELL_R_DROPPED;
     }
     /* Captures first: a divider drag or a view press own the pointer until release. */
     if (so->drag >= 0) {
@@ -968,7 +1080,7 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
         return CANLIN_SHELL_R_CHROME;
     }
     if (so->cap >= 0) {
-        int k = so->cap, r = post(sh, k, in);
+        int r = post_to(sh, so->cap, so->cap_model, in);
         /* Held until every button pressed into the view is released (canlin#32). */
         if (in->type == CANLIN_UI_IN_BUTTON) {
             if (in->down)
@@ -1000,8 +1112,9 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
         i = p >= 0 ? so->slot[so->vslot[p]] : -1;
         if (i >= 0 && mod_state(sh, i) != CANLIN_MODULE_RUNNING)
             i = -1;
-        hover_to(sh, so, i, in);
-        return i >= 0 ? post(sh, i, in) : CANLIN_SHELL_R_DROPPED;
+        md = model_at(so, p, x, y);
+        hover_to(sh, so, i, md, in);
+        return i >= 0 ? post_to(sh, i, md, in) : CANLIN_SHELL_R_DROPPED;
     }
 
     /* A button edge without capture. A release here belongs to nobody. */
@@ -1019,10 +1132,12 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
                 if (inside(&so->div[k], x, y))
                     return CANLIN_SHELL_R_CHROME;
         set_focus(sh, oi, so->vslot[p]);
-        hover_to(sh, so, i, in);
+        md = model_at(so, p, x, y);
+        hover_to(sh, so, i, md, in);
         so->cap = i;
+        so->cap_model = md;
         so->cap_btns = 1u << in->button;
-        return post(sh, i, in);
+        return post_to(sh, i, md, in);
     }
     so->chrome_press = 1;
     if (so->sw_open) {
@@ -1067,10 +1182,12 @@ static int pointer_input(canlin_shell *sh, int oi, const canlin_ui_input *in)
     }
     /* Tap-through: focus moved above, the press goes to the view in the same call. */
     so->chrome_press = 0;
-    hover_to(sh, so, i, in);
+    md = model_at(so, p, x, y);
+    hover_to(sh, so, i, md, in);
     so->cap = i;
+    so->cap_model = md;
     so->cap_btns = 1u << CANLIN_UI_BUTTON_PRIMARY;
-    return post(sh, i, in);
+    return post_to(sh, i, md, in);
 }
 
 int canlin_shell_input(canlin_shell *sh, canlin_ui_output *o, const canlin_ui_input *in)
@@ -1170,10 +1287,14 @@ int canlin_shell_update(canlin_shell *sh)
             for (i = 0; i < so->vn; i++)
                 if (so->vslot[i] == s)
                     so->dirty |= D_PANE0 << i;
-            if (so->cap == k)
+            if (so->cap == k) {
                 so->cap = -1;
-            if (so->hover == k)
+                so->cap_model = 0;
+            }
+            if (so->hover == k) {
                 so->hover = -1;
+                so->hover_model = 0;
+            }
         }
         for (i = 0; i < sh->nout; i++) {
             layout_bar(sh, &sh->out[i]);
@@ -1200,6 +1321,19 @@ static int view_new_frame(canlin_shell *sh, shell_out *so, int p)
     return so->vmod[p] != k || canlin_ui_view_frames(v) != so->vframe[p];
 }
 
+/* The model's own view finished a new frame since the last draw. */
+static int model_new_frame(canlin_shell *sh, shell_out *so, int p)
+{
+    int k = so->slot[so->vslot[p]];
+    canlin_ui_view *v;
+    if (k < 0 || mod_state(sh, k) != CANLIN_MODULE_RUNNING)
+        return 0;
+    v = sh->mods[k].mview;
+    if (v == NULL || canlin_ui_view_frames(v) == sh->mods[k].mbframe)
+        return 0;
+    return so->mvmod[p] != k || canlin_ui_view_frames(v) != so->mvframe[p];
+}
+
 int canlin_shell_dirty(canlin_shell *sh, canlin_ui_output *o)
 {
     shell_out *so = find_out(sh, o);
@@ -1209,7 +1343,7 @@ int canlin_shell_dirty(canlin_shell *sh, canlin_ui_output *o)
     if (so->dirty)
         return 1;
     for (p = 0; p < so->vn; p++)
-        if (view_new_frame(sh, so, p))
+        if (view_new_frame(sh, so, p) || model_new_frame(sh, so, p))
             return 1;
     return 0;
 }
@@ -1263,7 +1397,15 @@ static void draw_pane(canlin_shell *sh, shell_out *so, struct nk_command_buffer 
     canlin_shell_rect pr = so->pane[p], v = so->view[p];
     nk_fill_rect(cv, nkr(pr), 0,
                  focused && so->ring ? role(sh, CANLIN_THEME_ACCENT) : role(sh, CANLIN_THEME_MUTED));
+    nk_fill_rect(cv, nkr(so->area[p]), 0, role(sh, CANLIN_THEME_BACKGROUND));
     nk_fill_rect(cv, nkr(v), 0, role(sh, CANLIN_THEME_BACKGROUND));
+    if (so->mbox[p].w > 0) {
+        /* The frame around the model's own view (its block: label strip and view). */
+        nk_fill_rect(cv, nkr(so->mbox[p]), 0,
+                     focused && so->ring ? role(sh, CANLIN_THEME_ACCENT)
+                                         : role(sh, CANLIN_THEME_MUTED));
+        nk_fill_rect(cv, nkr(so->mview[p]), 0, role(sh, CANLIN_THEME_BACKGROUND));
+    }
     if (so->label[p].h > 0) {
         nk_fill_rect(cv, nkr(so->label[p]), 0, role(sh, CANLIN_THEME_SURFACE));
         text_in(so, cv, so->label[p], "Model-generated view", role(sh, CANLIN_THEME_TEXT), 0);
@@ -1349,18 +1491,28 @@ void canlin_shell_render(canlin_shell *sh, canlin_ui_output *o, canlin_render *r
     chrome_end(so, r);
     for (p = 0; p < so->vn; p++) {
         int k = so->slot[so->vslot[p]];
-        if (!(d & (D_PANE0 << p)) && !view_new_frame(sh, so, p))
+        if (!(d & (D_PANE0 << p)) && !view_new_frame(sh, so, p) && !model_new_frame(sh, so, p))
             continue;
         so->vmod[p] = k;
+        so->mvmod[p] = k;
         if (k < 0 || mod_state(sh, k) != CANLIN_MODULE_RUNNING)
             continue;
         {
             canlin_ui_view *v = canlin_module_view(sh->mods[k].m);
-            if (v == NULL || canlin_ui_view_frames(v) == sh->mods[k].bframe)
-                continue;
-            so->vframe[p] = canlin_ui_view_frames(v);
-            canlin_ui_view_render(v, r);
-            drew = 1;
+            if (v != NULL && canlin_ui_view_frames(v) != sh->mods[k].bframe) {
+                so->vframe[p] = canlin_ui_view_frames(v);
+                canlin_ui_view_render(v, r);
+                drew = 1;
+            }
+        }
+        {
+            /* The model's own view: its own frame, its own rendering. */
+            canlin_ui_view *mv = sh->mods[k].mview;
+            if (mv != NULL && canlin_ui_view_frames(mv) != sh->mods[k].mbframe) {
+                so->mvframe[p] = canlin_ui_view_frames(mv);
+                canlin_ui_view_render(mv, r);
+                drew = 1;
+            }
         }
     }
     if (so->sw_open && ((d & (D_OVERLAY | D_BAR)) || drew)) {
@@ -1409,6 +1561,7 @@ int canlin_shell_part_rect(canlin_shell *sh, canlin_ui_output *o, canlin_shell_p
     case CANLIN_SHELL_P_VIEW:
     case CANLIN_SHELL_P_RESTART:
     case CANLIN_SHELL_P_MODEL_LABEL:
+    case CANLIN_SHELL_P_MODEL_VIEW:
         if (idx < 0 || idx >= so->vn)
             return 0;
         k = so->slot[so->vslot[idx]];
@@ -1416,7 +1569,11 @@ int canlin_shell_part_rect(canlin_shell *sh, canlin_ui_output *o, canlin_shell_p
             x = so->pane[idx];
         else if (part == CANLIN_SHELL_P_VIEW)
             x = so->view[idx];
-        else if (part == CANLIN_SHELL_P_MODEL_LABEL) {
+        else if (part == CANLIN_SHELL_P_MODEL_VIEW) {
+            if (so->mview[idx].w <= 0 || so->mview[idx].h <= 0)
+                return 0;
+            x = so->mview[idx];
+        } else if (part == CANLIN_SHELL_P_MODEL_LABEL) {
             if (so->label[idx].h <= 0)
                 return 0;
             x = so->label[idx];
