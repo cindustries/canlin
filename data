@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-11-14T19:57:02Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-14T19:57:02Z
+created: 2026-11-14T18:45:58Z
+id: 109
+priority: high
+started: 2026-11-14T19:20:10Z
+status: done
+tags:
+- assistant
+- llm
+- app
+- platform
+title: The built-in assistant module and the app wiring that drives it
+updated: 2026-11-14T19:57:02Z
+---
+
+Part 2 of canlin#40 (LLM step 3, providers spec §10.3), depends on the binding card. The product side: a compiled-in assistant module that drives the conversation, and the app wiring that feeds it. The pieces: the app creates the assistant session (view + gate), sets the trusted loader callback on the module source so canlin.llm and the assistant-view binding are installed for that module only, routes the module's llm and done events into the gate, attaches the assistant view to a ui view, and forwards the user's input into the assistant view. The module itself is a compiled-in Lua module like the demo module in src/app/app.c: it holds the conversation, calls canlin.llm.request with tools = {'set_view'}, and on the done event follows the llm-ui design §4 rule - a failed or cut-off answer keeps the text marked 'abgebrochen' or 'gekürzt', goes into the history without the dropped tool calls, leaves the view unchanged and says so in one short line; a complete tool call of a length-stopped answer is applied as usual. The tool loop is bounded by CANLIN_LLM_TOOL_ROUNDS_MAX (4). The module roles spec §3 assigns the role 'assistant' to the module the shell opens for 'ask the assistant'. Done when the module can hold a conversation against a fixture transport and the model-produced view is rendered and submitted, without a live provider.
+
+Built the assistant session in src/app/assistant.c (new) with src/app/app_int.h and the app wiring in src/app/app.c; the test is t/app/test_assistant.c (new), the build fragment mk/app_assistant.mk (new).
+
+The loader (the app) owns the session: it creates the LLM context, the model view and the gate, loads the built-in assistant module with source.assistant set (so canlin.llm, canlin.view and the session table are installed for that module only), routes the module's llm and done events into the gate before the module sees them, and attaches the model view to the module's view. The tool result goes back to the module through canlin.session.result(id): the gate holds it in C, the module only reads it, so the module can neither set the model view nor forge one.
+
+The compiled-in assistant module holds the conversation, asks the provider with tools = {'set_view'}, follows the tool loop (bounded by CANLIN_LLM_TOOL_ROUNDS_MAX, handed to it as canlin.session.rounds_max), applies the llm-ui design 4 rule (a failed answer keeps the text marked 'abgebrochen', a length stop marks it 'gekuert'; the dropped tool calls never go back to the provider; the view stays and the assistant says 'Ansicht nicht geaendert') and sends the user's submission of the model's form back to the provider.
+
+Evidence: make BUILD=build/plat - all suites pass (the app suite 74 checks, the new assistant suite 141 checks, the assistant view/gate/binding, llm, loop, shell, ev, sandbox, ui, render, net and android suites). The same tree also builds libcanlin.so for android-armv7 and the assistant test passes under SAN=asan. The t/module/test_module binary does not build in the shared tree: another agent's unfinished edit in t/module/test_module.c leaves test_op_payload_shape uncalled (-Werror=unused-function); the committed version of that file passes against this tree (2669 checks).
+
+Ready for review. The tree is commit-ready; the commit belongs to the main agent.
+
+What changed and why:
+- src/app/assistant.c (new): the assistant session - the compiled-in assistant module (Lua), the trusted install hook (canlin.llm + canlin.view + the session table), the routing of the module's llm and done events into the response gate, and the hand-out of the recorded tool result.
+- src/app/app_int.h (new): the session struct shared by app.c and assistant.c.
+- src/app/app.c: the app creates the session, adds the assistant module to the shell (as the assistant-role module, its pane marked as a model view), routes its deliveries into the gate first, attaches the model view to the module's view, and opens the assistant (canlin_app_open_assistant). The demo module now prints its capabilities at init: it is the module without the capability and must see neither table.
+- include/canlin/app.h: the config carries the provider transport (NULL: no assistant) and the profile id; canlin_app_llm() hands the LLM context to the trusted settings surface, canlin_app_assistant() the module, canlin_app_open_assistant() the switcher's action.
+- t/app/test_assistant.c (new): the suite - the real sandbox, the real scheduler, the fixture transport; the conversation, the tool loop with the tool result, the submission, the failed and the cut-off answer, and the module without the capability.
+- mk/app_assistant.mk (new) and mk/app.mk: the build fragment and the app's link list.
+
+Security: the assistant module gets canlin.llm (the profiles without URLs and keys, the provider request), canlin.view (draw into its own view, submission pickup) and canlin.session (the profile id, the round bound, the recorded tool result of the current response). It cannot set the model view, cannot read a credential, cannot reach another module's view, the filesystem or the network except through the provider request. Every other module sees neither table.
+
+Review points: the scope of the assistant's scope counter is one request (the tool round), the tool loop of a user turn is bounded by CANLIN_LLM_TOOL_ROUNDS_MAX requests, the marked text goes into the conversation history, the user's input reaches the model view through the shell's routing into the view the assistant view is attached to (posting it a second time would deliver every key twice), and the conversation history is not trimmed yet (the core refuses more than CANLIN_LLM_MESSAGES_MAX messages, visibly).
+
+2026-11-14 19:57 Review 2026-11-14: fixed and reviewed. The loader owns the session: src/app/assistant.c holds the model view, the gate and the routing of the module's llm and done events into the gate; the gate is fed before the module sees the event, so the module's done handler finds the tool results. Only the built-in assistant gets canlin.llm, canlin.view and canlin.session - the demo module's source.assistant stays NULL and the test asserts it sees neither table. There is deliberately no module-facing set_view: the module cannot set or forge a model view, and the recorded result reaches it read-only through canlin.session.result(id). The compiled-in module holds the conversation, asks with tools = {'set_view'} and applies the llm-ui §4 rule for a failed or cut-off answer. Committed as 776f72f. Verified by the main agent: app assistant 141 checks, app 74 checks. The two decisions the worker flagged both hold against the specs: CANLIN_LLM_TOOL_ROUNDS_MAX is '4 automatic tool rounds per user turn' (llm spec §7 line 172) and the module stops at that bound, and the scope per request matches 'A tool-call identity is scoped to its request/turn' (llm-ui design §5) - the request and the turn are one concept there, and the recorded result of a repeated call id is what the duplicate rule covers. Three limits are left open and are not fixed by this card: the conversation history is not trimmed, so a long conversation hits CANLIN_LLM_MESSAGES_MAX visibly - now k113; the module's own question field is a module widget, so the shell's model-view frame covers it too - now k114; and the module serialises the form values to JSON in Lua, because the binding hands out a table and the house has a JSON reader but no writer - now k115.
