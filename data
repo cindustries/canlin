@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T17:41:09Z
+claimed_by: canlin
+class: standard
+completed: 2026-11-14T06:37:23Z
+created: 2026-09-23T05:49:07Z
+id: 51
+priority: medium
+started: 2026-09-23T17:32:41Z
+status: done
+tags:
+- llm
+- assistant
+title: 'LLM: act on openai-chat tool calls only after done ok (assistant) + test'
+updated: 2026-11-14T06:37:23Z
+---
+
+Spec decision 2026-09-23 in providers §2.3. Also: stream_options.include_usage as preset flag; MiniMax/Moonshot openai-chat presets. From canlin#38.
+
+Landed 1673398, 092e748 (host make test green; i686 build + qemu-i386 user-mode pentium2 for test_response/test_llm/test_view; canlin-os full-system gate not available). Open: product Lua binding for the gate (with #40); UI wording for dropped calls unspecified; reasoning_content echo for Kimi/DeepSeek tool loops unverified; tool-call id 256 vs set_view 128 mismatch.
+
+2026-11-14 06:37 Review 2026-11-14: claim holds. The gate holds every tool call in a bounded block and dispatches set_view only when done is ok (src/assistant/response.c:143-174); a failed or cancelled done discards the held calls unexecuted, a second done and a late tool event are refused. include_usage is a preset flag, emitted only where the provider documents it and never for custom profiles. The regression test drives fixture transport to openai-chat to canlin.llm to the gate to the assistant view in a real sandbox, with the pre-[DONE] EOF, provider-error and transport-reset cases asserted. All four open items still stand and are tracked: the product Lua binding for the gate (k40), the dropped-call UI wording (decided in the LLM/UI spec, 8d44b27, but not rendered in code - k40), the reasoning_content echo (k58 - unimplemented, not merely unverified: openai_chat.c has no such key, so DeepSeek and Kimi reasoning deltas are silently dropped), and the tool-call id limit mismatch (k57 - llm_limits.h 256 against assistant_limits.h 128, enforced at src/assistant/view.c:1515). Host make test green (test_response 3582 checks); ASan/UBSan green.
