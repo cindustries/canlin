@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:33:26Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:50:10Z
+created: 2026-09-23T03:36:47Z
+id: 20
+priority: high
+started: 2026-09-23T05:06:43Z
+status: done
+tags:
+- ui
+- llm
+title: 'UI step 4: set_view GUI tool validator and assistant view'
+updated: 2026-11-14T07:50:10Z
+---
+
+UI spec §7, §11.4; with the LLM slice.
+
+Merged 4d2371b (c79cdeb). 1434 checks, host + ASan/UBSan green. i686 skipped. Decisions by orchestrator: \n/\t allowed in text/bubble/area values; bubble role system rejected in set_view (follow-up #47).
+
+2026-11-14 07:50 Review 2026-11-14: today's code is correct and matches the spec - the role system is rejected (src/assistant/view.c:914), newline and tab are admitted only in multi-line content (:428-433) and only for text, bubble text and area values (:965, :971, :983), while ids, labels, placeholders, field values, titles, options and enums stay single-line (:1015). The validator is real: per-key fallback with one log line naming the offending key, the JSON path in the first failure, the last valid view retained on error, tool-call identity scoped by generation and turn, exactly one pending submission, and a submit payload carrying only the input widgets. FINDING: the card attributes two decisions to its commit that are in the opposite state there - at 4d2371b ROLES still contained 'system' and has_control took no multiline flag; both decisions landed later in b985dd7, which the card itself names as follow-up k47. The named merge c79cdeb also runs the wrong way relative to every other card: it is not on HEAD's first-parent chain, and the merge that brought the assistant work onto main is 14eb1b8. The card's check count reproduces exactly (1434 at that commit). Host make test green; P2/i686 not runnable on this host.
