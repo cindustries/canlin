@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-11-14T23:48:31Z
+created: 2026-11-14T07:49:05Z
+id: 95
+priority: low
+started: 2026-11-14T23:35:46Z
+status: done
+tags:
+- vendor
+- third_party
+- docs
+title: 'Vendor: third_party/nuklear/VERSION still says ProggyClean is used'
+updated: 2026-11-14T23:48:31Z
+---
+
+third_party/nuklear/VERSION:15 states that ProggyClean.ttf is 'used through NK_INCLUDE_DEFAULT_FONT'. That became false in k22 (1e49a2b): include/canlin/nk.h:13 lists NK_INCLUDE_DEFAULT_FONT under 'Deliberately absent', so the default font is not linked and the built-in subset is used instead. third_party/ is read-only per the house rules, so this is a vendor-lane item: correct the manifest entry there (or record the deviation in CanLin's own docs) rather than editing the vendored tree. Found by the 2026-11-14 review of k22.
+
+2026-11-14 23:44 vendor (canlin-vendor): third_party/nuklear/VERSION is CanLin's own manifest, not upstream content (upstream Nuklear ships no VERSION file; it was written by 3edf780 'chore(third_party): vendor Nuklear 9f77502'), so correcting the wording is a manifest fix; no vendored upstream file is touched.
+
+Changed third_party/nuklear/VERSION:15-17 - ProggyClean.ttf is 'embedded in the header but compiled out' instead of 'used through NK_INCLUDE_DEFAULT_FONT'; added a Configuration paragraph (VERSION:24-28) naming the NK_* set of include/canlin/nk.h:27-29 and stating that NK_INCLUDE_DEFAULT_FONT is deliberately absent (canlin#22), so the built-in font is the Inter 4.1 Latin subset in src/render/font_builtin.c. The Read-only line now matches third_party/cmp/VERSION.
+
+Upstream files byte-identical: sha256sum -c over the manifest's own list passes (nuklear.h, LICENSE, demo/rawfb/nuklear_rawfb.h, demo/common/node_editor.c). Gates: host make and make test green (ALL TESTS PASSED); i686 skipped - i686-linux-musl-gcc not installed; canlin-os QEMU harness skipped with it. No commit made.
+
+Proposed subject: chore(third_party): correct the Nuklear manifest on ProggyClean (k95)
+
+2026-11-15 review (main): verified every claim in the tree myself - include/canlin/nk.h:27-29 sets exactly NK_INCLUDE_FIXED_TYPES, NK_INCLUDE_DEFAULT_ALLOCATOR, NK_INCLUDE_FONT_BAKING and lists NK_INCLUDE_DEFAULT_FONT as deliberately absent; src/render/font_builtin.c:1 is generated from third_party/fonts/inter/Inter-Regular.ttf (Inter 4.1, Latin subset) and third_party/fonts/inter/LICENSE is SIL OFL 1.1; sha256sum -c over the manifest's own list: 4x OK. The vendored upstream files stay byte-identical to 9f77502. Committed as 5a01eb8 (manifest) and 02e5be0 (lane guard). The worker's finding is confirmed and fixed: the lane guard blocked the worker's own progress note and handoff, which the house rules ask of it; the guard now allows the reads, the note, the block reason and the handoff and still refuses the board mutations (15 cases checked).
