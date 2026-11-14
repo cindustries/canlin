@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:25:22Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:42:24Z
+created: 2026-09-23T04:31:19Z
+id: 32
+priority: low
+started: 2026-09-23T05:06:44Z
+status: done
+tags:
+- ui
+- input
+title: Secondary button in normalised input (right-click -> graph add)
+updated: 2026-11-14T06:42:24Z
+---
+
+canlin_ui_input has only a primary button. From canlin#19.
+
+Merged f26f21d. Host + ASan/UBSan green. i686 skipped.
+
+2026-11-14 06:42 Review 2026-11-14: claim holds. canlin_ui_button carries PRIMARY, SECONDARY and MIDDLE (include/canlin/ui.h:184-186) and the input carries it (ui.h:197); canlin_ui_input_valid rejects a button outside the enum (src/ui/ui.c:670), nk_button_of maps to Nuklear's right and middle buttons (:731), and an overflow releases every held button, not only the primary (:957). The shell holds the capture until every button pressed into the view is released (src/shell/shell.c:974-977), a secondary press focuses and captures the view under it (:1023, :1071), and the chrome has no secondary binding (:1090). A secondary press on empty canvas produces exactly one add edit at that point (src/ui/graph.c:1273-1285); nodes, ports, edges and the middle button do nothing, and a held primary gesture suppresses it. Tests test_secondary (t/ui/test_graph.c:1156) and test_secondary_routing (t/shell/test_shell.c:515). The card names the merge f26f21d, which carries the feature commit 3092224. Host make test green (graph 13363, shell 3591 checks); ASan/UBSan green for the shell half, the graph half ran on the host only. P2/i686 not runnable on this host.
