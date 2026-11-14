@@ -93,8 +93,10 @@ typedef struct canlin_theme {
 void canlin_theme_builtin(canlin_theme *t);
 
 /* Resolves every key through srcs[0..n) then the built-in theme. n <= 254; extra
- * sources are ignored. Logs a warning if text/background contrast is below 4.5:1.
- * log may be NULL. Returns the number of log lines emitted. */
+ * sources are ignored. Logs a warning for each pair whose contrast is below 4.5:1:
+ * text against background and text against surface, each line naming the pair. The
+ * theme is never refused (UI spec §6). log may be NULL. Returns the number of log
+ * lines emitted. */
 int canlin_theme_resolve(canlin_theme *t, const canlin_theme_source *srcs, size_t n,
                          canlin_theme_log_fn log, void *log_ud);
 

@@ -39,6 +39,7 @@ struct canlin_ui {
     uint64_t tick;
     unsigned bakes;
     canlin_ui_view *views;    /* every view bound to this ui, linked through unext */
+    unsigned test_fail;       /* CANLIN_UI_TEST_FAIL_* (tests) */
 };
 
 struct canlin_ui_output {
@@ -175,6 +176,12 @@ void canlin_ui_font_stats(const canlin_ui *ui, unsigned *held, unsigned *bakes)
         *bakes = ui ? ui->bakes : 0;
 }
 
+void canlin_ui_test_fail_next(canlin_ui *ui, unsigned what)
+{
+    if (ui)
+        ui->test_fail |= what;
+}
+
 /* Pins the entry for em px, baking it if needed. Evicts the least recently used unpinned
  * entry when the cache is full; never one with refs > 0. */
 static font_entry *font_acquire(canlin_ui *ui, float em, int *err)
@@ -182,6 +189,11 @@ static font_entry *font_acquire(canlin_ui *ui, float em, int *err)
     font_entry *hit = NULL, *victim = NULL;
     float px[F_COUNT];
     unsigned i;
+    if (ui->test_fail & CANLIN_UI_TEST_FAIL_ACQUIRE) {
+        ui->test_fail &= ~CANLIN_UI_TEST_FAIL_ACQUIRE;
+        *err = CANLIN_UI_EFONT;
+        return NULL;
+    }
     for (i = 0; i < CANLIN_UI_FONT_SIZES_MAX; i++) {
         font_entry *e = &ui->fonts[i];
         if (e->used && e->em == em) {
@@ -513,7 +525,7 @@ static void output_link(canlin_ui_view *v, canlin_ui_output *o)
 canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err)
 {
     canlin_ui_view *v;
-    int dummy;
+    int dummy, init_failed;
     if (err == NULL)
         err = &dummy;
     *err = CANLIN_UI_EINVAL;
@@ -532,8 +544,15 @@ canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err)
         free(v);
         return NULL;
     }
-    if (!nk_init_default(&v->nk, &v->fe->font.font->handle)) {
-        font_release(NULL, v->fe);
+    if (ui->test_fail & CANLIN_UI_TEST_FAIL_INIT) {
+        ui->test_fail &= ~CANLIN_UI_TEST_FAIL_INIT;
+        init_failed = 1;
+    } else {
+        init_failed = !nk_init_default(&v->nk, &v->fe->font.font->handle);
+    }
+    if (init_failed) {
+        /* The slot goes back with its ui, so a view waiting for one is woken (canlin#30). */
+        font_release(v->ui, v->fe);
         free(v);
         *err = CANLIN_UI_ENOMEM;
         return NULL;

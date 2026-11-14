@@ -2230,6 +2230,63 @@ static void test_font_cache_wake(void)
     h_done(&h);
 }
 
+/* k92: the ENOMEM path of canlin_ui_view_new gives the font slot back with its ui, so a
+ * view that waits for a slot is woken (canlin#30).
+ *
+ * The host cannot fail a font acquire or a Nuklear init on its own, so the test hooks
+ * do it. Both are needed: a view waits for a slot only while every slot is pinned, and
+ * then a new view cannot take one at all - the waiter and the failing view cannot meet
+ * without the hooks. */
+static void count_dirty(void *ud)
+{
+    (*(unsigned *)ud)++;
+}
+
+static void test_font_cache_wake_init_fail(void)
+{
+    canlin_theme t;
+    canlin_ui *ui;
+    canlin_ui_output *o[2];
+    canlin_ui_view *v;
+    canlin_ui_output_desc d;
+    unsigned wakes = 0;
+    int i, err;
+
+    canlin_theme_builtin(&t);
+    ui = canlin_ui_new(&t);
+    d.w = d.h = 300;
+    d.dpi = 1.0f;
+    d.id = "a";
+    d.scale = 100;
+    o[0] = canlin_ui_output_new(&d, &err);
+    d.id = "b";
+    d.scale = 125;
+    o[1] = canlin_ui_output_new(&d, &err);
+    v = canlin_ui_view_new(ui, o[0], &err);
+    CHECK(v != NULL);
+    canlin_ui_view_set_rect(v, 0, 0, 300, 300);
+
+    /* The view waits for a font slot: the acquire fails, as if every slot were pinned. */
+    canlin_ui_test_fail_next(ui, CANLIN_UI_TEST_FAIL_ACQUIRE);
+    CHECK(canlin_ui_output_set_scale(o[0], 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_frame_begin(v) == CANLIN_UI_EFONT);
+    canlin_ui_view_set_dirty_fn(v, count_dirty, &wakes);
+
+    /* The failed view gives its slot back: the waiter is woken and retries. */
+    canlin_ui_test_fail_next(ui, CANLIN_UI_TEST_FAIL_INIT);
+    CHECK(canlin_ui_view_new(ui, o[1], &err) == NULL);
+    CHECK(err == CANLIN_UI_ENOMEM);
+    CHECK(wakes == 1);
+    CHECK(canlin_ui_view_frame_begin(v) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_em(v) == 32.0f);
+    canlin_ui_view_frame_end(v);
+
+    canlin_ui_view_free(v);
+    for (i = 0; i < 2; i++)
+        CHECK(canlin_ui_output_free(o[i]) == CANLIN_UI_OK);
+    canlin_ui_free(ui);
+}
+
 /* Lua has no path to scale, DPI or the output: the whole canlin.* surface is an
  * allowlist here (a new entry must be reviewed against §2.1), and the ui object carries
  * no metric accessors and cannot be written. */
@@ -2299,6 +2356,7 @@ int main(void)
     test_font_cache();
     test_font_cache_module();
     test_font_cache_wake();
+    test_font_cache_wake_init_fail();
     test_tab_order();
     test_tab_scroll();
     test_lua_no_scale();

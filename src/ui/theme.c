@@ -210,12 +210,29 @@ static int logf_(canlin_theme_log_fn log, void *ud, const char *src, const char 
     return 1;
 }
 
+/* Logs a warning if a pair is below the minimum contrast. The pair goes into the line,
+ * so the reader knows which pair is meant. Returns 1 when it warned. */
+static int warn_contrast(canlin_theme_log_fn log, void *log_ud, const char *pair,
+                          canlin_theme_rgb fg, canlin_theme_rgb bg)
+{
+    float cr = canlin_theme_contrast(fg, bg);
+    if (cr >= CANLIN_THEME_MIN_CONTRAST)
+        return 0;
+    if (log) {
+        char line[128];
+        snprintf(line, sizeof line,
+                 "theme: warning: %s contrast %.2f:1 is below %.1f:1",
+                 pair, (double)cr, (double)CANLIN_THEME_MIN_CONTRAST);
+        log(log_ud, line);
+    }
+    return 1;
+}
+
 int canlin_theme_resolve(canlin_theme *t, const canlin_theme_source *srcs, size_t n,
                          canlin_theme_log_fn log, void *log_ud)
 {
     int key, lines = 0;
     size_t i;
-    float cr;
 
     canlin_theme_builtin(t);
     if (n > CANLIN_THEME_FROM_BUILTIN - 1u)
@@ -247,17 +264,12 @@ int canlin_theme_resolve(canlin_theme *t, const canlin_theme_source *srcs, size_
             lines += logf_(log, log_ud, srcs[i].name, key_names[key], why);
         }
     }
-    cr = canlin_theme_contrast(t->color[CANLIN_THEME_TEXT], t->color[CANLIN_THEME_BACKGROUND]);
-    if (cr < CANLIN_THEME_MIN_CONTRAST) {
-        if (log) {
-            char line[128];
-            snprintf(line, sizeof line,
-                     "theme: warning: text/background contrast %.2f:1 is below %.1f:1",
-                     (double)cr, (double)CANLIN_THEME_MIN_CONTRAST);
-            log(log_ud, line);
-        }
-        lines++;
-    }
+    /* Text is read on the background and on the surface (the panels): both pairs are
+     * checked, each on its own (UI spec §6). */
+    lines += warn_contrast(log, log_ud, "text/background",
+                           t->color[CANLIN_THEME_TEXT], t->color[CANLIN_THEME_BACKGROUND]);
+    lines += warn_contrast(log, log_ud, "text/surface",
+                           t->color[CANLIN_THEME_TEXT], t->color[CANLIN_THEME_SURFACE]);
     return lines;
 }
 

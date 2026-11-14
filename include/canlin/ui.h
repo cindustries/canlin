@@ -65,6 +65,18 @@ void canlin_ui_free(canlin_ui *ui);
 /* Font cache state (tests): entries held, and bakes performed since canlin_ui_new. */
 void canlin_ui_font_stats(const canlin_ui *ui, unsigned *held, unsigned *bakes);
 
+/* Test hooks (tests): the host cannot fail a font acquire or a Nuklear init on demand,
+ * but the paths behind them must be testable - a frame skipped with EFONT (canlin#30)
+ * and the ENOMEM path of canlin_ui_view_new (canlin#92). Every flag applies to the
+ * next call of its kind, on this ui only.
+ *   CANLIN_UI_TEST_FAIL_ACQUIRE  the next font acquire fails with CANLIN_UI_EFONT,
+ *                                as if every slot were pinned.
+ *   CANLIN_UI_TEST_FAIL_INIT     the next Nuklear init of a new view fails, as an
+ *                                allocation failure would. */
+#define CANLIN_UI_TEST_FAIL_ACQUIRE 1u
+#define CANLIN_UI_TEST_FAIL_INIT    2u
+void canlin_ui_test_fail_next(canlin_ui *ui, unsigned what);
+
 /* ---- outputs (spec §2.1) ---- */
 
 typedef struct canlin_ui_output canlin_ui_output;

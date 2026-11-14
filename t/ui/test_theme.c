@@ -91,6 +91,16 @@ static int logged(const char *a, const char *b)
     return 0;
 }
 
+/* How many lines name the given pair, e.g. "text/surface". */
+static int logged_pair(const char *pair)
+{
+    int i, n = 0;
+    for (i = 0; i < nlogs && i < 32; i++)
+        if (strstr(logs[i], pair))
+            n++;
+    return n;
+}
+
 static struct mem L, B;         /* layers: local, theme.bee */
 static canlin_theme T;
 
@@ -378,19 +388,35 @@ static void test_contrast(void)
           "black/white 21:1 (%.3f)", cr);
     CHECK(fabsf(canlin_theme_contrast(w, w) - 1.0f) < 1e-6f, "same colour 1:1");
 
+    /* Both pairs below the threshold: one line per pair, each naming its pair. */
     reset();
     puts_(&L, "theme#color#text", "#777777");
     puts_(&B, "theme#color#background", "#888888");
+    puts_(&L, "theme#color#surface", "#8a8a8a");
     resolve();
     CHECK(T.from[CANLIN_THEME_TEXT] == 0 && T.from[CANLIN_THEME_BACKGROUND] == 1,
           "low contrast is accepted, not refused");
-    CHECK(nlogs == 1 && logged("warning", "contrast"), "contrast warning (%d)", nlogs);
+    CHECK(nlogs == 2 && logged("warning", "contrast"), "contrast warnings (%d)", nlogs);
+    CHECK(logged_pair("text/background") == 1 && logged_pair("text/surface") == 1,
+          "one line per pair below the threshold");
 
+    /* The background passes, the surface does not: only the surface pair is named. */
     reset();                            /* #767676 on white is 4.54:1, just passes */
     puts_(&L, "theme#color#text", "#767676");
     puts_(&L, "theme#color#background", "#FFFFFF");
+    puts_(&L, "theme#color#surface", "#8a8a8a");
     resolve();
-    CHECK(nlogs == 0, "4.54:1 has no warning");
+    CHECK(nlogs == 1 && logged_pair("text/surface") == 1 &&
+          logged_pair("text/background") == 0,
+          "only the pair below the threshold is named (%d)", nlogs);
+
+    /* Both pairs pass: no warning at all. */
+    reset();
+    puts_(&L, "theme#color#text", "#000000");
+    puts_(&L, "theme#color#background", "#FFFFFF");
+    puts_(&L, "theme#color#surface", "#808080");
+    resolve();
+    CHECK(nlogs == 0, "no warning above the threshold");
 }
 
 static void test_em(void)
