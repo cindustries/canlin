@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-23T17:43:22Z
+claimed_by: canlin
+class: standard
+completed: 2026-11-14T06:37:11Z
+created: 2026-09-23T05:13:41Z
+id: 39
+priority: high
+started: 2026-09-23T17:32:41Z
+status: done
+tags:
+- llm
+title: 'LLM step 2: anthropic-messages dialect'
+updated: 2026-11-14T06:37:11Z
+---
+
+LLM providers spec §2.1, §10.2.
+
+Landed b700136. host make test green; i686 build + qemu-i386 -cpu pentium2 user-mode test_llm/test_response green; full-system canlin-os gate unavailable. Open: lmstudio-anthropic preset w/ dummy key?; truncated tool under max_tokens -> fail vs length (both dialects); anthropic-version per preset if a gateway needs it; live smoke vs MiniMax/Moonshot not done.
+
+2026-11-14 06:37 Review 2026-11-14: claim holds. POST {base}/v1/messages, anthropic-version 2023-06-01, system messages merged into a top-level system string, tool_result blocks before the user text, args refused unless one complete JSON object, delivery at content_block_stop, success only on message_stop after a message_delta with stop_reason - each verified in src/llm/anthropic_messages.c. Two of the four open items are closed by k59 (the lmstudio-anthropic preset with dummy key, the truncated tool under max_tokens). Two still stand: anthropic-version is hard-coded at src/llm/anthropic_messages.c:34 with no per-preset seam for a gateway that needs another version, and there is no live smoke against MiniMax or Moonshot. Host make test green; ASan/UBSan green; P2/i686 not runnable on this host.
