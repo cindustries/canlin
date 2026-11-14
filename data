@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T23:53:00Z
+id: 140
+priority: medium
+status: backlog
+tags:
+- test
+- assistant
+- llm
+title: 'Test: nothing pins the tool-round bound of the assistant'
+updated: 2026-11-14T23:53:00Z
+---
+
+The assistant module counts its tool rounds in Lua (turn() resets rounds = 0) and hands over to CANLIN_LLM_TOOL_ROUNDS_MAX as canlin.session.rounds_max (src/app/assistant.c:42, :113-118, :307). No test anywhere pins that bound: grep -rn "Runde|rounds" t/ finds nothing. The bound is what stops a model that keeps calling tools from looping forever, so it needs a test that shows the turn stops at the bound and says so. Found by the 2026-11-15 review of k115.
