@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:06:29Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:42:36Z
+created: 2026-09-23T04:37:40Z
+id: 35
+priority: high
+started: 2026-09-23T04:49:41Z
+status: done
+tags:
+- shell
+- ui
+title: 'Implement shell v1: full-screen + tiled, chrome, focus'
+updated: 2026-11-14T06:42:36Z
+---
+
+Shell spec 2026-09-23.
+
+Merged 1a38ee4 (2233249) after accidental stop; verified by orchestrator: 3197 shell checks, host + ASan/UBSan green. i686 skipped. Worker report lost; choices read from headers into shell spec §6.
+
+2026-11-14 06:42 Review 2026-11-14: the implementation holds and is fully covered. choose() honours the user's in-memory override, tiled is available at 60 em and the default at 80 em (src/shell/shell.c:247), tiling_fits enforces the 30 em pane minimum (:240), and the fallback keeps the wanted mode so tiling returns when the space does. The clock redraws only the bar rows, at most once a minute (:1143-1153). Chrome, switcher, dividers, focus mark, model-view frame and the faulted pane with restart are all present, and the reserved keys are filtered in key_input (:885). t/shell/test_shell.c covers every topic of shell spec §7. FINDING: the choices were only partly read back into the spec - include/canlin/shell_limits.h:16 says the eight provisional constants are 'Not in the §6 table', but five are in the spec's §6 table and three are in neither, now k93. The merge 2233249 is also the merge that carried k36's cb1a09d. Host make test green (shell 3591 checks); ASan/UBSan green; P2/i686 not runnable on this host.
