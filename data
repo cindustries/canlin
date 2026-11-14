@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:49:06Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:43:02Z
+created: 2026-09-23T05:33:26Z
+id: 47
+priority: medium
+started: 2026-09-23T05:49:06Z
+status: done
+tags:
+- assistant
+- ui
+title: 'set_view: allow \n/\t in multi-line values, reject bubble role system'
+updated: 2026-11-14T06:43:02Z
+---
+
+UI spec §7 updated 2026-09-23. From canlin#20.
+
+Merged (2052ee9). Host + ASan/UBSan green; i686 musl build of all suites green (native 32-bit run, no xmm in disassembly); QEMU pentium2 not run.
+
+2026-11-14 06:43 Review 2026-11-14: the code holds, the card names the wrong merge. 2052ee9 is k45's and k46's merge - it touches no file under src/assistant/ or t/assistant/. The work is commit b985dd7, which entered main through merge 2060a12 together with the spec commit cda67b2. has_control admits only newline and tab and only in multi-line content (src/assistant/view.c:428); every other C0, DEL and C1 is still rejected, and the multi-line variant is used for text, bubble text and area values (:965, :971, :983) while ids, labels, placeholders, field values, titles, options, enums and the graph node title and body stay single-line (:1015). The bubble role system is rejected (:914) and matches the renderer (:1786). The UI spec §7 carries both rules (docs/superpowers/specs/2026-09-23-canlin-ui-design.md:305-310). Test test_multiline plus the new rejection cases (t/assistant/test_view.c). Host make test green (assistant view 1905 checks); ASan/UBSan green; the card's i686 native run is not reproducible on this host.
