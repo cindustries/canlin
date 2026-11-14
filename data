@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-14T19:57:12Z
+id: 113
+priority: medium
+status: backlog
+tags:
+- assistant
+- llm
+title: 'Assistant: the conversation history is not trimmed'
+updated: 2026-11-14T19:57:12Z
+---
+
+The built-in assistant module (k109) keeps the whole conversation in its history and sends it with every request. The core refuses more than CANLIN_LLM_MESSAGES_MAX messages, and it refuses visibly - the request fails instead of the conversation being shortened. A long conversation therefore breaks rather than degrades. Decide what a turn drops: the oldest user/assistant pairs, a summary, or a bounded window - and put the rule in the llm-ui design §4 next to the other conversation rules. Found by the 2026-11-14 work on k109.
