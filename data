@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T03:51:05Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:49:49Z
+created: 2026-09-23T03:36:46Z
+id: 17
+priority: high
+started: 2026-09-23T03:36:52Z
+status: done
+tags:
+- ui
+- render
+- theme
+title: 'UI step 1: vendor Nuklear + stb_truetype, offscreen rasterizer, theme resolution'
+updated: 2026-11-14T07:49:49Z
+---
+
+UI spec 2026-09-23 §6, §9, §11.1.
+
+Merged 2184ee4. 7 suites host + ASan/UBSan green. i686 skipped (x87 float determinism under -mno-sse worth checking). Spec clarified.
+
+2026-11-14 07:49 Review 2026-11-14: the rest of the card holds. Nuklear and stb_truetype are vendored with the sha256 sums matching, the rasterizer has no SIMD and no malloc in the draw path, and the theme resolves per UI spec §6; exactly seven test files existed at that commit, matching the card. FINDING: the contrast warning covers only one of the two pairs the spec names - the spec says 'Contrast of text against both background and surface below 4.5:1 is logged as a warning', but the resolver computes contrast against CANLIN_THEME_BACKGROUND only (src/ui/theme.c:250) and CANLIN_THEME_SURFACE appears in no contrast call. A probe with text=#767676, background=#ffffff (4.54:1) and surface=#8a8a8a (1.32:1) logs nothing, and panels are drawn on the surface (src/ui/ui.c:2425). Now k94. The card's own open item still stands: x87 float determinism under -mno-sse is not checked and no commit addresses it. The card's ASan/UBSan evidence is not reproducible from the repo, which has no sanitizer target (k87); it was reproduced by hand. Host make test green; P2/i686 not runnable on this host.
