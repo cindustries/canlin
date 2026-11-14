@@ -11,9 +11,24 @@ populate its GUI through validated declarative tool calls. Inference stays remot
 local data and interaction work without deploying a canlin-server. A user's own server can
 optionally add a provider gateway, speech, sync or other services.
 
-## Design first
+## Build and test
 
-There is no runtime implementation or Makefile yet.
+```
+make            # host build
+make test       # host suites, one binary per part
+make TARGET=i686 # the P2 target: needs i686-linux-musl-gcc with -march=i686 -mno-sse
+```
+
+The i686 target needs a musl cross toolchain on `PATH`. A prebuilt one
+(`i686-linux-musl-cross` from musl.cc) is unpacked at `~/opt/i686-linux-musl-cross`;
+`export PATH="$HOME/opt/i686-linux-musl-cross/bin:$PATH"` makes the target build. The
+suites then run under `qemu-i386 -cpu pentium2` — that is user-mode emulation, not the
+canlin-os full-system harness (`qemu-system-i386 -cpu pentium2 -m 1024`), and the two are
+reported separately.
+
+## Design
+
+The runtime stands in `src/`, its suites in `t/`, the specs below come first.
 
 - [System design](docs/superpowers/specs/2026-09-22-canlin-system-design.md): targets, storage,
   sync, trust boundaries, server contracts and verification gates.
@@ -21,6 +36,8 @@ There is no runtime implementation or Makefile yet.
   dispatch, platform wait/yield, bounded queues, cancellation, lifecycle and capabilities.
 - [LLM connections and GUI](docs/superpowers/specs/2026-09-22-canlin-llm-ui-design.md): direct
   providers, optional gateways, credentials, streaming and the model's constrained GUI tool.
+- [Core API](docs/superpowers/specs/2026-09-23-canlin-core-api-design.md): the C/Lua seam, the
+  numeric budgets and the cancel semantics.
 - `.claude/skills/canlin-core/SKILL.md`: the implementers' briefing summary, subordinate to
   those specs.
 

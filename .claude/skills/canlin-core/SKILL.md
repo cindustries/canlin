@@ -78,6 +78,7 @@ Read the spec that owns the seam before editing it. The most specific one wins.
 |---|---|
 | `2026-09-22-canlin-system-design.md` | family, subsystem contracts, the split |
 | `2026-09-22-canlin-event-runtime-design.md` | scheduling, platform seam, lifetimes |
+| `2026-09-22-canlin-llm-ui-design.md` | the product contract, the two connection modes, the GUI tool |
 | `2026-09-23-canlin-core-api-design.md` | C/Lua signatures, numeric budgets, cancel semantics |
 | `2026-09-23-canlin-ui-design.md` | flow API, graph editor, theme, GUI tool schema |
 | `2026-09-23-canlin-shell-design.md` | arrangement, chrome, focus |
