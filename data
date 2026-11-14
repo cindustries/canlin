@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-23T04:10:26Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:49:56Z
+created: 2026-09-23T03:36:47Z
+id: 18
+priority: high
+started: 2026-09-23T03:51:05Z
+status: done
+tags:
+- ui
+title: 'UI step 2: flow widgets and layout wired to draw(ui)'
+updated: 2026-11-14T07:49:56Z
+---
+
+UI spec §2-§4, §11.2.
+
+Merged 03e1adc. 4190 ui checks, host + ASan/UBSan green. i686 skipped. Silent-spec choices recorded in UI spec §2/§3.
+
+2026-11-14 07:49 Review 2026-11-14: claim holds. All fourteen widget methods of spec §3 are registered (src/ui/ui.c:2498-2502), the layout invariants hold (2.5 em interactive minimum, the 40 em column threshold, spacing unit = theme spacing x 0.25 em with 2 units between widgets and 4 between columns, view padding 2 units), duplicate stateful widgets in one draw raise and use after draw raises, and the work is charged against the sandbox budget. At this commit ui:graph raised 'not implemented' and ui:icon 'unsupported', exactly as the card's message says; both were implemented later by k19 and k23. One precision: the commit message says the column threshold compares the current column width while the spec says content width; the code uses the current column's content width (src/ui/ui.c:2266), which only differs for a nested ui:columns inside a column. The card's check count reproduces exactly (4190 ui checks at that commit). Host make test green; P2/i686 not runnable on this host.
