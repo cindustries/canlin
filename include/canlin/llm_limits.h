@@ -37,7 +37,9 @@
 /* Not in the spec: text bytes per "llm" text event; longer pending text is split at a
  * UTF-8 boundary. Half of CANLIN_MARSHAL_MAX_BYTES leaves room for the other fields. */
 #define CANLIN_LLM_EVENT_TEXT_MAX    (32u * 1024u)
-/* Not in the spec: configured profiles and their string fields. */
+/* Not in the spec: configured profiles and their string fields. The id pattern is taken
+ * from the UI spec's view-widget id (UI spec §7: "[a-z0-9_-]{1,32}", unique within the
+ * view); the LLM providers spec states no id format of its own. */
 #define CANLIN_LLM_PROFILES_MAX      16u
 #define CANLIN_LLM_ID_MAX            32u   /* profile/preset id: [a-z0-9_-]{1,32} */
 #define CANLIN_LLM_TITLE_MAX         64u
