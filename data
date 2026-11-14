@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T19:57:22Z
+id: 115
+priority: low
+status: backlog
+tags:
+- assistant
+- llm
+- json
+title: 'Assistant: the module serialises the model''s form values to JSON in Lua'
+updated: 2026-11-14T19:57:22Z
+---
+
+The binding hands the submission out as a Lua table, and the built-in assistant module (k109) serialises those values back to JSON in Lua - a hand-written jstr/jval in the module source. The house has a JSON reader in C (src/net/json.c) but no writer, and the module's writer is not the house's bounded one: it is unbounded in depth except for its own depth > 4 guard, and it replaces control characters with '?'. Two ways out: the binding hands out the submission's own JSON bytes instead of a table (the core built them already, so they are the contract), or the core grows a bounded JSON writer the module uses. The first is smaller. Found by the 2026-11-14 work on k109.
