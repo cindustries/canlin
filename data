@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-14T23:28:31Z
+id: 132
+priority: medium
+status: backlog
+tags:
+- shell
+- ui
+- assistant
+- events
+title: 'Shell: the events the model''s own view receives keep the backend''s t=0'
+updated: 2026-11-14T23:28:31Z
+---
+
+The shell forwards the events to the model's own view unchanged (post_to -> canlin_ui_view_input, src/shell/shell.c:962), while the module path stamps the edges with the scheduler clock (src/module/module.c:1066) and the motions and scrolls with canlin_ev_now (:820, :825). The backends send t = 0 (src/android/adapter.c:90-98), so a long press and a double tap inside the model's view measure nothing - src/ui/graph.c:1030 and :1058 read e->btn_t. The shell has only the wall clock for the status bar (include/canlin/shell.h:55), so it cannot stamp; the app lane should take the delivery over, or the shell needs a millisecond clock. Found by the 2026-11-14 work on k128.
