@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-22T19:40:43Z
+claimed_by: canlin-worker-5
+class: standard
+completed: 2026-11-14T06:35:58Z
+created: 2026-09-22T19:29:04Z
+id: 5
+priority: high
+started: 2026-09-22T19:29:17Z
+status: done
+tags:
+- llm
+- net
+title: Bounded incremental SSE and JSON parsers (src/net)
+updated: 2026-11-14T06:35:58Z
+---
+
+Push-parser for Server-Sent Events and a bounded streaming JSON tokenizer per LLM/UI spec §4: arbitrary chunk splits, UTF-8 validation, CRLF/LF/CR, multiline data, depth/string/event size limits enforced during assembly, incomplete final record is an error.
+
+Merged (18d03a9). Host + ASan/UBSan green, 18/18 mutants killed. i686 skipped. Open questions -> #10.
+
+2026-11-14 06:35 Review 2026-11-14: the implementation holds. Arbitrary chunk splits, CRLF/LF/lone-CR with CRLF split across feeds, multi-line data, limits enforced during assembly, and an incomplete final record as an error are all present. Two precisions: only the JSON tokenizer validates UTF-8, the SSE parser is byte-transparent on purpose and core API spec D5 ratified that, so the card's blanket 'UTF-8 validation' is half true of the code as merged; and '18/18 mutants killed' is not reproducible from the repo, there is no mutation-testing tooling under tools/ (k89). Host make test green (sse 47 vectors, json 132 vectors); ASan/UBSan green; P2/i686 not runnable on this host.
