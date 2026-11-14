@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-14T06:34:55Z
+id: 89
+priority: low
+status: backlog
+tags:
+- test
+- toolchain
+title: 'Mutation testing: the cards claim killed mutants, the repo has no tooling'
+updated: 2026-11-14T06:34:55Z
+---
+
+k5 claims '18/18 mutants killed', k19 '6 mutants caught', k27 '3 mutants caught'. There is no mutation-testing tooling in the tree - tools/ holds only android-test.sh and mkfont.py - so none of these claims can be re-run or checked by a reviewer. Decide: add the tooling under tools/ so the claims become reproducible, or restate them as the manual checks they actually were. Found by the 2026-11-14 review.
