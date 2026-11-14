@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-23T02:17:21Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:36:25Z
+created: 2026-09-22T19:40:34Z
+id: 9
+priority: high
+started: 2026-09-23T02:06:43Z
+status: done
+tags:
+- runtime
+- lua
+- events
+title: 'Module callback seam: call init/event/sync/draw under budget from src/ev'
+updated: 2026-11-14T06:36:25Z
+---
+
+Sandbox only runs chunks; needs budgeted call of returned table fields, bounded arg/result marshalling, wiring to cl_ev delivery. Blocked on core API spec signatures.
+
+Started against core API spec a35524a §4-§7.
+
+Merged a600dfd (dfff43a). 989 module checks, host + ASan/UBSan green. i686 skipped. Implementation choices recorded in core API spec §6.
+
+2026-11-14 06:36 Review 2026-11-14: claim holds. canlin_sandbox_call_budget (include/canlin/sandbox.h:98) enforces nargs <= CANLIN_MARSHAL_MAX_ARGS and runs the field as one budgeted callback with the budget reset per callback; results are bounded by canlin_value_check (depth 8, 1024 entries, 64 KiB), an oversize result becomes ok=false with code full and is never truncated. canlin_module_deliver is called only from the scheduler's deliver callback (src/app/app.c:65), so the no-nesting rule holds by construction. Note: the card's 989 module checks is the count at merge time, the suite now reports 2669. Host make test green; ASan/UBSan green; P2/i686 not runnable on this host.
