@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-14T19:15:14Z
+claimed_by: canlin-worker-ui
+class: standard
+created: 2026-11-14T18:44:04Z
+id: 105
+priority: low
+started: 2026-11-14T19:15:14Z
+status: in-progress
+tags:
+- ui
+- shell
+- assistant
+- limits
+- docs
+title: 'UI: the assistant, render and shell limits headers misattribute the spec'
+updated: 2026-11-14T19:15:14Z
+---
+
+Three misattributions in the UI lane, all found by the 2026-11-14 limits sweep. (1) include/canlin/assistant_limits.h:15-16 marks CANLIN_AV_ID_MAX 32u and CANLIN_AV_CALLS_MAX 16u as 'chosen for canlin#20 (provisional)'; both are the spec's values - the id pattern [a-z0-9_-]{1,32} and 'Recorded results per turn: at most 16' (ui-design.md:305, :315). (2) include/canlin/render_limits.h:13-14 says CANLIN_RENDER_FONT_SIZES 4 is 'body plus heading levels', but an atlas holds three faces - body, H1, H2 (src/ui/ui.c:26, 221), and ui-design.md:58 says 'one atlas per size, holding body and both heading sizes'. 4 is a safe array bound, so nothing breaks; the comment is simply wrong. (3) include/canlin/ui_limits.h:45-51 puts CANLIN_UI_LINE_EM 1.25f and the two heading scale factors under a block comment citing UI §2 and system design §5, but those sections number no line height and no heading scales; the same block's MIN_TOUCH_EM and COLUMNS_EM are correctly backed by §2. And CANLIN_UI_GRAPH_MAX_PER_DRAW 8u (ui_limits.h:70) serves two different limits: the spec's per-view cap of 8 graphs (applied at src/assistant/view.c:734) and a per-draw cap for module ui:graph calls with no spec basis (src/ui/ui.c:2241) - one future change to either moves the other silently. Correct the attribution; the values are right.
+
+2026-11-14 19:14 2026-11-14: one part of this is already done. The ui_limits.h half - the comment above the output constants saying 'Not in the §8 table' although CANLIN_UI_DPI_MIN, CANLIN_UI_DPI_MAX and CANLIN_UI_OUTPUT_ID_MAX are rows of that table - was corrected in 6d5b78b (k101/k103), together with the constant itself: CANLIN_UI_OUTPUT_ID_MAX now means the spec's 63 bytes and the buffer has its own constant. What is left here is assistant_limits.h, render_limits.h and the CANLIN_UI_GRAPH_MAX_PER_DRAW finding.
