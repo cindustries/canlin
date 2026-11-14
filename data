@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-14T20:29:02Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-14T20:29:02Z
+created: 2026-11-14T20:22:34Z
+id: 118
+priority: low
+started: 2026-11-14T20:22:49Z
+status: done
+tags:
+- assistant
+- limits
+- docs
+title: 'Net/LLM: the assistant limits header misattributes two of its constants'
+updated: 2026-11-14T20:29:10Z
+---
+
+The part of canlin#105 that belongs to the assistant lane. include/canlin/assistant_limits.h:15-16 marks CANLIN_AV_ID_MAX 32u and CANLIN_AV_CALLS_MAX 16u as 'chosen for canlin#20 (provisional, to be checked on P2)'. Both are the spec's values: the id pattern [a-z0-9_-]{1,32} and 'Recorded results per turn: at most 16' (docs/superpowers/specs/2026-09-23-canlin-ui-design.md:305 and :315). The values are right, the attribution is wrong - same shape as the transport header (canlin#104) and the loop header (canlin#106). Comments only: no value, no macro, no code path. The rest of canlin#105 (render_limits.h and ui_limits.h) is in the ui lane and is not this card.
+
+2026-11-14 20:29 Done: include/canlin/assistant_limits.h - the preamble no longer lumps every value under canlin#20. CANLIN_AV_ID_MAX and CANLIN_AV_CALLS_MAX now carry the UI spec 7 wording (id pattern "[a-z0-9_-]{1,32}", unique within the view; "Recorded results per turn: at most 16"); the remaining values keep the canlin#20 attribution. The values did match the spec, so nothing was changed there. Comments only: the preprocessed header is byte-identical to HEAD (gcc -E diff clean) - no value, macro or code path touched. Verified: make BUILD=build/llm3 test - 21 of 23 suites pass, including assistant/test_view, assistant/test_response, assistant/test_binding, app/test_assistant, llm/test_llm, llm/test_llm_http. t/module/test_module and t/ui/test_ui do not compile because the module and ui lanes are mid-edit in this tree (t/module/test_module.c:920 canlin_module_result initializer; t/ui/test_ui.c:2401 CANLIN_UI_GRAPH_MAX_PER_VIEW undeclared) - not caused by this card. No i686/P2 evidence: not checkable here. Proposed commit subject: Attribute the assistant view limits to the spec 7 values they came from (k118)
+
+2026-11-14 20:28 Ready for review: comments only in include/canlin/assistant_limits.h. The header preamble no longer attributes every value to canlin#20; CANLIN_AV_ID_MAX and CANLIN_AV_CALLS_MAX now quote the UI spec 7 wording they come from (the id pattern [a-z0-9_-]{1,32} and 'Recorded results per turn: at most 16'). Values unchanged - the preprocessed header is byte-identical to HEAD. Verified: make BUILD=build/llm3 test - 21 of 23 suites pass (assistant test_view/test_response/test_binding, app/test_assistant, llm/test_llm and llm/test_llm_http green); t/module/test_module and t/ui/test_ui do not compile because the module and ui lanes are mid-edit in the same tree, not because of this card.
+
+2026-11-14 20:29 Review 2026-11-14: fixed and reviewed. Comments only in include/canlin/assistant_limits.h; the worker proved it by preprocessing both versions - byte-identical. The preamble no longer lumps every value under 'chosen for canlin#20': CANLIN_AV_ID_MAX and CANLIN_AV_CALLS_MAX are the spec's and carry its wording (the id pattern [a-z0-9_-]{1,32} and 'Recorded results per turn: at most 16', UI spec §7:305 and :315), the rest stay marked as chosen for canlin#20. The values were checked against the enforcement sites too: src/assistant/view.c uses them as the spec describes (id length check, 'full' past 16, 'invalid' on the same id with other arguments). Committed as 8f2c9a4. The card's line numbers were off - the misattribution sat in the preamble, not at lines 15-16; both places are correct now. Two suites of other lanes did not compile in the shared tree (the runtime lane's module.h change and the ui lane's k105 rename); the other 21 passed.
+
+2026-11-14 20:29 Correction to the note above: the commit hash is 4a78ba6, not 8f2c9a4.
