@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-14T23:53:13Z
+id: 142
+priority: low
+status: backlog
+tags:
+- ui
+- shell
+title: 'UI: the shell''s chrome zeroes the window padding, spacing and border'
+updated: 2026-11-14T23:53:13Z
+---
+
+src/shell/shell.c:231-233 sets s->window.padding = (0,0), s->window.spacing = (0,0) and s->window.border = 0 right after canlin_theme_apply_nk(), so the theme's spacing unit (UI spec §2: the spacing unit is theme#spacing x 0.25 em, the gap between widgets 2 units) never reaches the shell's window. The widget styles keep it (src/ui/theme.c:386-397: the button padding and the roundings), so the chrome's widgets are spaced but the window around them is not padded. Decide against the spec: is the chrome's own frame meant to be edge to edge (then say so in a comment), or does it keep the theme's padding (then the zeroing goes)? Found by the 2026-11-15 review of k120.
