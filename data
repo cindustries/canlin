@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-23T18:19:29Z
+claimed_by: canlin
+class: standard
+completed: 2026-11-14T06:37:17Z
+created: 2026-09-23T05:13:42Z
+id: 41
+priority: high
+started: 2026-09-23T17:32:41Z
+status: done
+tags:
+- net
+- transport
+- spec
+title: Native HTTP/1.1 + TLS transport spec and implementation (mbedtls)
+updated: 2026-11-14T06:37:17Z
+---
+
+LLM providers spec §8. DNS, TLS verification, chunked, redirects, credential origin binding, event-runtime integration.
+
+Spec: docs/superpowers/specs/2026-09-23-canlin-http-transport-design.md (cabc7b7). Worker dispatched.
+
+Landed d9dfc3d..d35db93 (+ spec 774dbc2). host make test green; i686 build + all net/llm tests under qemu-i386 -cpu pentium2 user-mode green; objdump: no SSE/MMX/AES-NI/cpuid/rdrand. Not run: canlin-os qemu-system harness, P2 handshake timing, real system CA bundle, rawfb/SDL2 loop wiring, live provider.
+
+2026-11-14 06:37 Review 2026-11-14: the implementation is fully verified. DNS runs in one bounded worker thread (src/net/dns.c), TLS uses MBEDTLS_SSL_VERIFY_REQUIRED with no ignore switch, a mid-chunk EOF maps to eof and never to end, redirects are refused for non-GET and for a plain-http downgrade, the credential origin binding drops the header on a cross-origin hop, pollfds/step run under a bounded turn budget, and the mbedtls config carries no hand-written SIMD (aesni.o and padlock.o disassemble to zero AES instructions). FINDING: the spec commit named in the card, 774dbc2, is not an ancestor of HEAD - it survives only in the reflog; the same edit landed as 198a1e9, the two differing only in line wrapping. The card's own Not-run list is still open and tracked elsewhere: canlin-os harness and P2 handshake timing (k63), the real CA bundle (k75), the rawfb and SDL2 wiring (k64, k65). The card's i686/QEMU evidence could not be reproduced here.
