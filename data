@@ -1,0 +1,38 @@
+---
+claimed_at: 2026-11-14T23:56:51Z
+claimed_by: canlin-vendor
+class: standard
+completed: 2026-11-14T23:56:51Z
+created: 2026-11-14T23:49:27Z
+id: 136
+priority: medium
+started: 2026-11-14T23:50:31Z
+status: done
+tags:
+- vendor
+- third_party
+- docs
+title: 'Vendor: lua, nuklear and fonts/inter have no SHA256SUMS file'
+updated: 2026-11-14T23:56:51Z
+---
+
+The vendoring skill asks for a SHA256SUMS per vendored lib (sha256sum -c from the lib dir must pass). Present: third_party/cmp and third_party/mbedtls, one file per lib, hashes relative to the lib dir. Missing elsewhere: third_party/lua pins only the upstream tarball hash (lua-5.4.9.tar.gz), so the vendored src/ tree itself is unpinned - a changed file would not be caught; third_party/nuklear and third_party/fonts/inter keep their per-file hashes inline in VERSION, so sha256sum -c has no file to read. Do it like cmp and mbedtls: write third_party/lua/SHA256SUMS, third_party/nuklear/SHA256SUMS and third_party/fonts/inter/SHA256SUMS with the sha256 of every vendored file, move the inline lists of nuklear and fonts/inter out of VERSION, and leave a pointer to the file in VERSION. sha256sum -c SHA256SUMS must pass from each lib dir. Do not touch a vendored upstream file, only the manifests CanLin wrote itself.
+
+Drei SHA256SUMS-Dateien geschrieben, Format wie third_party/cmp (zwei Leerzeichen, Pfade relativ zum Lib-Dir, eine Zeile pro vendorter Datei).
+
+Neu:
+- third_party/lua/SHA256SUMS (62 Zeilen): src/*.c, src/*.h, src/lua.hpp, README, LICENSE. src/lua.c, src/luac.c und src/Makefile sind nicht vendort und stehen deshalb nicht in der Liste; der Bestand wurde gegen das upstream-Tarball geprueft (diff -rq: genau diese drei Dateien fehlen, sonst identisch).
+- third_party/nuklear/SHA256SUMS (4 Zeilen): nuklear.h, LICENSE, demo/rawfb/nuklear_rawfb.h, demo/common/node_editor.c.
+- third_party/fonts/inter/SHA256SUMS (2 Zeilen): Inter-Regular.ttf, LICENSE.
+
+Die bisher inline in nuklear/VERSION und fonts/inter/VERSION stehenden Hash-Listen sind raus, das VERSION verweist nur noch auf SHA256SUMS (Check-Zeile auf 'sha256sum -c SHA256SUMS from this dir' umgestellt). lua/VERSION hat jetzt denselben Check-Verweis plus die Zeile 'sha256 of each vendored file: SHA256SUMS'.
+
+Pin-Werte unveraendert: die sechs schon gelisteten Hashes (nuklear.h, LICENSE, demo/rawfb/nuklear_rawfb.h, demo/common/node_editor.c, Inter-Regular.ttf, fonts/inter/LICENSE) wurden vor dem Umbau mit sha256sum nachgerechnet und stimmen byteweise mit den Werten im VERSION ueberein - die Pin-Datei-Funktion wurde also nicht neu definiert.
+
+Zusaetzlich zur Absicherung: das upstream lua-5.4.9.tarball neu geladen, sha256 2335b6c5... bestaetigt (identisch mit dem Wert im VERSION), entpackt und der vendorte src-Baum byteweise verglichen - identisch. Die vendorte LICENSE-Datei wurde gegen den Hinweistext aus upstream src/lua.h geprueft: wortgleich.
+
+Gates: 'sha256sum -c SHA256SUMS' laeuft aus jedem der drei Lib-Dirs durch (62/62, 4/4, 2/2 OK). Zusatzpruefung: die Liste deckt in jedem der drei Baeume jede Datei ausser VERSION und SHA256SUMS selbst ab (diff der Pfadlisten leer). cmp und mbedtls unveraendert und weiterhin OK. Host: make und make test gruen (ALL TESTS PASSED). i686: uebersprungen - i686-linux-musl-gcc ist hier nicht vorhanden, also kein P2-Nachweis. Kein Upstream-File angefasst, nur die drei Manifeste, die CanLin selbst geschrieben hat.
+
+SHA256SUMS fuer third_party/lua (62 Zeilen), third_party/nuklear (4) und third_party/fonts/inter (2) geschrieben, Format wie cmp/mbedtls; die Inline-Listen in nuklear/VERSION und fonts/inter/VERSION raus, dort nur noch der Verweis. Die sechs vorher gelisteten Hashes sind unveraendert (vorher nachgerechnet). sha256sum -c SHA256SUMS laeuft aus jedem Lib-Dir durch (62/62, 4/4, 2/2), die Liste deckt jede vendorte Datei ab. Host: make und make test gruen; i686 uebersprungen (keine Toolchain hier). Kein Upstream-File angefasst. Proposed Subject: Pin the vendored files of lua, nuklear and fonts/inter (k136)
+
+2026-11-15 review (main): verified in the main tree - sha256sum -c SHA256SUMS passes from each of the three lib dirs (lua 62, nuklear 4, fonts/inter 2), and the path list in each SHA256SUMS is exactly the set of files present minus VERSION and SHA256SUMS themselves. cmp (3) and mbedtls (272) still pass. The pin values are unchanged: the six previously inline hashes were recomputed before the move and match byte for byte. The worker's own check of lua against the upstream tarball (re-downloaded, sha256 2335b6c5 as pinned, byte-identical src/, lua.c/luac.c/src/Makefile absent as the manifest says) is the stronger evidence and it holds. Committed as 132a199.
