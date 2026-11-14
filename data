@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-09-23T18:19:30Z
+id: 62
+priority: low
+status: backlog
+tags:
+- net
+- llm
+title: 'Net: map transport error codes to connection-test categories; CANLIN_VERSION
+  in build'
+updated: 2026-11-14T20:13:50Z
+---
+
+Providers spec §6 categories vs HTTP spec §7 codes. User-Agent is CanLin/0.0-dev until CANLIN_VERSION is defined by the build.
+
+2026-11-14 20:13 2026-11-14: one half of this card is a comment, not code. include/canlin/http.h:33 covers CANLIN_VERSION and CANLIN_HTTP_USER_AGENT with 'Not in the spec: no CanLin version string exists yet; the build may define one'. The HTTP transport spec §6 does name the header ('User-Agent: CanLin/<version>') - what it does not state is the version value. So the comment is defensible but reads as claiming the User-Agent itself is unspecified. The other half of the card - mapping the transport error codes to the connection-test categories of the providers spec §6, and defining CANLIN_VERSION in the build - is still open: the macro exists in http.h as a fallback 0.0-dev with an #ifndef, but no build target defines it.
