@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T18:02:11Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T18:02:11Z
+created: 2026-11-14T07:48:55Z
+id: 94
+priority: high
+started: 2026-11-14T17:50:28Z
+status: done
+tags:
+- ui
+- theme
+- bug
+title: 'UI: the theme resolver warns only for text/background, not text/surface'
+updated: 2026-11-14T18:02:11Z
+---
+
+The UI spec §6 says: 'Contrast of text against both background and surface below 4.5:1 is logged as a warning, not refused' - the wording 'against both' came with k17 itself (0f7e21f). The resolver computes contrast once, against CANLIN_THEME_BACKGROUND only (src/ui/theme.c:250); CANLIN_THEME_SURFACE appears in no contrast call in the tree. Panels are drawn on the surface (src/ui/ui.c:2425 fills with CANLIN_THEME_SURFACE, src/ui/theme.c:309 maps it into the style table), so text on a panel can be unreadable while the resolver stays silent. A probe against the shipped theme.o with text=#767676, background=#ffffff (4.54:1) and surface=#8a8a8a (1.32:1) logs nothing. t/ui/test_theme.c:373-395 exercises only the background pair. The header at include/canlin/theme.h:96 states the narrower rule, so code and header agree with each other and disagree with the spec. Found by the 2026-11-14 review of k17.
+
+Resolver now warns for both pairs (text/background and text/surface), each line naming its pair; the theme is still never refused. Header contract in include/canlin/theme.h now states the rule the code implements. Test first: t/ui/test_theme.c test_contrast failed with 3 assertions (only the background pair was checked), then green. Host suite green (make test: ALL TESTS PASSED, theme: all passed).
+
+Done: canlin_theme_resolve warns once per pair below 4.5:1 (text/background, text/surface), each line naming the pair; still a warning, never a refusal (UI spec §6). New helper warn_contrast() in src/ui/theme.c; header contract include/canlin/theme.h:96 updated. Regression test in t/ui/test_theme.c (test_contrast): red first (3 failed assertions), green after the fix. Host: make + make test green, ./build/host/t/ui/test_theme passes. Finding for the board: nk_init_default() in the vendored Nuklear always returns 1 (third_party/nuklear/nuklear.h:19658), so the ENOMEM path of canlin_ui_view_new is unreachable today - see k92.
+
+2026-11-14 18:02 Review 2026-11-14: fixed and reviewed. The resolver now checks both pairs the spec names: text/background and text/surface each warn on their own and name the pair (src/ui/theme.c:270-275, helper warn_contrast at :213). The message format of the existing background pair is unchanged, and the theme is still accepted, never refused - the spec says warned, not refused. The header contract at include/canlin/theme.h:96 now states the rule the code implements. The test was red first (t/ui/test_theme.c:399/400/409 failed against the old resolver) and now covers both pairs below, only the surface below, and both above. Committed as c9a0181. Host make test green (theme all passed, ui 12474 checks); android-armv7 cross-build green; the i686/P2 gate and the on-device run are not reproducible on this host and are named as skipped.
