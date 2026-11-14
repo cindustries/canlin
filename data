@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T17:41:01Z
+id: 97
+priority: low
+status: backlog
+tags:
+- vendor
+- docs
+- toolchain
+title: 'Vendoring skill: a submodule is not a vendored snapshot'
+updated: 2026-11-14T17:41:01Z
+---
+
+canlin-vendoring describes the VERSION/SHA256SUMS discipline for every C library under third_party/ (write VERSION, write SHA256SUMS, sha256sum -c must pass, verbatim LICENSE). libbee is none of that: it is a git submodule at third_party/libbee with no VERSION and no SHA256SUMS, and its pin moves per libbee release. The skill has no line saying so, so a worker applying it to libbee would look for files that do not exist. Decide where the submodule discipline is written: a line in canlin-vendoring, or a section in docs/THIRD-PARTY.md next to the libbee entry. Found by the 2026-11-14 review of k2.
