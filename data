@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-11-14T18:03:16Z
+claimed_by: canlin-worker-runtime
+class: standard
+created: 2026-11-14T06:34:46Z
+id: 88
+priority: low
+started: 2026-11-14T17:53:04Z
+status: in-progress
+tags:
+- runtime
+- events
+- api
+title: 'C seam: type the op-complete payload at the ev boundary'
+updated: 2026-11-14T18:03:16Z
+---
+
+canlin_ev_op_complete(ev, h, status, void *payload, bytes, release) carries an untyped payload. src/module/module.c map_op casts d->payload to const canlin_module_result * with no type tag, so a second producer with a different payload shape would be read wrongly. Latent today: the only producer is src/llm/llm.c:897, which passes the correct type, and include/canlin/module.h:67 documents the contract in prose only. Done when the payload carries a type tag or a typed wrapper exists. Found by the 2026-11-14 review.
