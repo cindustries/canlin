@@ -352,7 +352,7 @@ void canlin_ui_output_size(const canlin_ui_output *o, int *w, int *h)
 
 static float factor_of(const canlin_ui_output *o)
 {
-    return o->dpi * (float)o->scale / 100.0f;
+    return o->dpi * (float)o->scale / (float)CANLIN_UI_SCALE_BASE_PERCENT;
 }
 
 float canlin_ui_output_em(const canlin_ui *ui, const canlin_ui_output *o)

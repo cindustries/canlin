@@ -193,7 +193,8 @@ static void dirty_all(canlin_shell *sh, unsigned bits)
 
 static int chrome_font(canlin_shell *sh, shell_out *so, float em)
 {
-    float factor = canlin_ui_output_dpi(so->o) * (float)canlin_ui_output_scale(so->o) / 100.0f;
+    float factor = canlin_ui_output_dpi(so->o) * (float)canlin_ui_output_scale(so->o) /
+                   (float)CANLIN_UI_SCALE_BASE_PERCENT;
     struct nk_style *s;
     if (so->font_ok && so->font_em == em)
         return 0;

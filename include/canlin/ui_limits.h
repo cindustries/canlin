@@ -26,8 +26,9 @@
 /* set_view: JSON argument bytes; widgets in one model view (graph nodes separate). */
 #define CANLIN_UI_TOOL_MAX_BYTES        (64u * 1024u)
 #define CANLIN_UI_TOOL_MAX_WIDGETS      128u
-/* Baked font pixel sizes held at once (§2.1). One entry is one em px size: its atlas
- * carries the body and both heading sizes, so one render atlas serves a view. */
+/* Baked font pixel sizes held at once (§2.1): the bound of the UI's font cache, one
+ * entry per distinct em px size. The faces are not counted: one atlas per size holds
+ * the body and both heading sizes. */
 #define CANLIN_UI_FONT_SIZES_MAX        4u
 /* Theme blobs, bytes: per font, and the logo PNG. */
 #define CANLIN_THEME_FONT_MAX           (2u * 1024u * 1024u)
@@ -87,6 +88,9 @@
 #define CANLIN_UI_SCALE_STEP_125        125
 #define CANLIN_UI_SCALE_STEP_150        150
 #define CANLIN_UI_SCALE_STEP_200        200
+/* The base the scale factor is divided by: the 100 % step, where the factor is the
+ * output DPI factor alone. */
+#define CANLIN_UI_SCALE_BASE_PERCENT    100
 
 /* §8 table: the output DPI factor (outside the bounds is rejected) and the stable output
  * identity, in bytes. The identity is the platform's output identity (a settings key);
