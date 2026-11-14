@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-14T20:18:08Z
+claimed_by: canlin-worker-ui
+class: standard
+created: 2026-11-14T19:14:40Z
+id: 111
+priority: low
+started: 2026-11-14T19:14:58Z
+status: review
+tags:
+- ui
+- theme
+- limits
+title: 'UI: the theme''s fraction-digit bound is a literal in src/ while its sibling
+  bounds are in the header'
+updated: 2026-11-14T20:18:08Z
+---
+
+src/ui/theme.c:122 refuses a decimal with 'more than 4 fraction digits' as a literal, while its sibling format bounds live in the header (CANLIN_THEME_DECIMAL_MAXLEN and the other §6.1 format bounds). Same class as k101: the number is not named, not tunable and not greppable as a limit. The built-in theme's defaults (font size 16, spacing 1.0, radius 0.25) are theme data and not limits - they stay where they are. Found by the 2026-11-14 work on k101.
+
+canlin-worker-ui: done. The bound now has a name next to its siblings: CANLIN_THEME_FRAC_DIGITS_MAX 4u in include/canlin/ui_limits.h (format-bound block, comment quotes the §6.1 'decimal string' wording and the 1/10000 em reading). src/ui/theme.c uses it for the digit check and formats the refusal message from it, so 'more than 4 fraction digits' stays byte-identical. Value and behaviour unchanged. Test: t/ui/test_theme.c test_fraction_digits pins the constant, builds the accepted value (N digits, last digit counts as 1/10000 em) and the refused one (N+1 digits) from the header, and checks the log names the bound. Suites: build/ui3 t/ui/test_theme, test_ui, test_graph, test_kbd, t/render/test_render, t/shell/test_shell - all pass.
+
+Done, ready for review: the theme's fraction-digit bound is named CANLIN_THEME_FRAC_DIGITS_MAX in include/canlin/ui_limits.h, used by src/ui/theme.c (message byte-identical), pinned by t/ui/test_theme.c. UI-lane suites pass in build/ui3.
