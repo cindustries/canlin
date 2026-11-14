@@ -97,6 +97,10 @@ int canlin_ui_output_free(canlin_ui_output *o);
 const char *canlin_ui_output_id(const canlin_ui_output *o);
 int canlin_ui_output_scale(const canlin_ui_output *o);
 float canlin_ui_output_dpi(const canlin_ui_output *o);
+/* The output's factor: the DPI x the scale step / the base percent (ui_limits.h). The
+ * em of theme ui is the theme's font size times it; the shell styles its chrome with
+ * it. The ui owns the formula, so there is only one of it. */
+float canlin_ui_output_factor(const canlin_ui_output *o);
 void canlin_ui_output_size(const canlin_ui_output *o, int *w, int *h);
 /* em in px for theme ui on output o. */
 float canlin_ui_output_em(const canlin_ui *ui, const canlin_ui_output *o);

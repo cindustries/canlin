@@ -342,6 +342,13 @@ float canlin_ui_output_dpi(const canlin_ui_output *o)
     return o->dpi;
 }
 
+/* The one formula of the output's factor (ui_limits.h holds the base); the shell
+ * styles its chrome with it, so it comes from here and not from a second copy. */
+float canlin_ui_output_factor(const canlin_ui_output *o)
+{
+    return o->dpi * (float)o->scale / (float)CANLIN_UI_SCALE_BASE_PERCENT;
+}
+
 void canlin_ui_output_size(const canlin_ui_output *o, int *w, int *h)
 {
     if (w)
@@ -350,14 +357,9 @@ void canlin_ui_output_size(const canlin_ui_output *o, int *w, int *h)
         *h = o->h;
 }
 
-static float factor_of(const canlin_ui_output *o)
-{
-    return o->dpi * (float)o->scale / (float)CANLIN_UI_SCALE_BASE_PERCENT;
-}
-
 float canlin_ui_output_em(const canlin_ui *ui, const canlin_ui_output *o)
 {
-    return canlin_theme_em(&ui->theme, factor_of(o));
+    return canlin_theme_em(&ui->theme, canlin_ui_output_factor(o));
 }
 
 static int output_busy(const canlin_ui_output *o)
@@ -539,7 +541,7 @@ canlin_ui_view *canlin_ui_view_new(canlin_ui *ui, canlin_ui_output *o, int *err)
         return NULL;
     }
     v->ui = ui;
-    v->factor = factor_of(o);
+    v->factor = canlin_ui_output_factor(o);
     v->em = canlin_theme_em(&ui->theme, v->factor);
     v->fe = font_acquire(ui, v->em, err);
     if (v->fe == NULL) {
@@ -592,7 +594,7 @@ int canlin_ui_view_bind(canlin_ui_view *v, canlin_ui *ui, canlin_ui_output *o)
         return CANLIN_UI_EBUSY;
     if (ui == v->ui && o == v->out)
         return CANLIN_UI_OK;
-    factor = factor_of(o);
+    factor = canlin_ui_output_factor(o);
     em = canlin_theme_em(&ui->theme, factor);
     fe = font_acquire(ui, em, &err); /* before releasing: failure leaves v unchanged */
     if (fe == NULL)
@@ -1221,7 +1223,8 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     old = NULL;
     {
         /* Metrics are read from the output every frame (spec §2.1). */
-        float factor = factor_of(v->out), em = canlin_theme_em(&v->ui->theme, factor);
+        float factor = canlin_ui_output_factor(v->out);
+        float em = canlin_theme_em(&v->ui->theme, factor);
         if (em != v->fe->em || factor != v->factor) {
             int err = CANLIN_UI_OK;
             font_entry *fe = em == v->fe->em ? v->fe : font_acquire(v->ui, em, &err);

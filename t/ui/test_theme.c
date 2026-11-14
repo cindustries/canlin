@@ -466,6 +466,37 @@ static void test_apply_nk(void)
     canlin_render_font_free(&f);
 }
 
+/* The colour mix (§6.2): one role mixed with another, the second one's share in percent
+ * of the base (ui_limits.h). The hover colour is the surface with a quarter of the
+ * accent in it. The base is the header's own; the test builds the expected colour from
+ * it, so it fails when the mix divides by a literal of its own. */
+static void test_mix_base(void)
+{
+    canlin_render_font f;
+    struct nk_context ctx;
+    canlin_theme t;
+    struct nk_color c;
+    const int pct = 25;    /* the hover colour: a quarter of the accent */
+
+    CHECK(CANLIN_THEME_MIX_BASE_PERCENT == 100, "the mix base is 100 percent");
+    CHECK(canlin_render_font_default(&f, 16.0f) == 0, "font");
+    CHECK(nk_init_default(&ctx, &f.font->handle), "nk_init");
+    canlin_theme_builtin(&t);
+    canlin_theme_apply_nk(&t, 1.0f, &ctx, &f.font->handle);
+    c = ctx.style.button.hover.data.color;
+    CHECK(c.r == (t.color[CANLIN_THEME_SURFACE].r * (CANLIN_THEME_MIX_BASE_PERCENT - pct) +
+                  t.color[CANLIN_THEME_ACCENT].r * pct) / CANLIN_THEME_MIX_BASE_PERCENT,
+          "hover red: the surface mixed with the accent");
+    CHECK(c.g == (t.color[CANLIN_THEME_SURFACE].g * (CANLIN_THEME_MIX_BASE_PERCENT - pct) +
+                  t.color[CANLIN_THEME_ACCENT].g * pct) / CANLIN_THEME_MIX_BASE_PERCENT,
+          "hover green: the surface mixed with the accent");
+    CHECK(c.b == (t.color[CANLIN_THEME_SURFACE].b * (CANLIN_THEME_MIX_BASE_PERCENT - pct) +
+                  t.color[CANLIN_THEME_ACCENT].b * pct) / CANLIN_THEME_MIX_BASE_PERCENT,
+          "hover blue: the surface mixed with the accent");
+    nk_free(&ctx);
+    canlin_render_font_free(&f);
+}
+
 /* The value ranges the spec states (UI spec §6.1) live in the limits header and the
  * parser follows them. The pins hold the header to the spec; the cases below are built
  * from the header, so they fail when the parser stops following it. */
@@ -570,6 +601,7 @@ int main(void)
     test_contrast();
     test_em();
     test_apply_nk();
+    test_mix_base();
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

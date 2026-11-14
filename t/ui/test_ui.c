@@ -1766,6 +1766,32 @@ static void test_scale_base(void)
     h_done(&h);
 }
 
+/* The output's factor: the DPI x the scale step / the base percent (ui_limits.h). The
+ * shell styles its chrome with it, so the ui owns the one formula and hands the factor
+ * out; the test pins it against the header and against the em built from it, so a
+ * second copy of the formula somewhere else cannot drift from this one. */
+static void test_output_factor(void)
+{
+    harness h;
+    canlin_theme t;
+    canlin_theme_builtin(&t);
+    CHECK(CANLIN_UI_SCALE_BASE_PERCENT == 100);
+    h_init(&h, &t, 2.0f, all_src, 400, 2000);
+    CHECK(canlin_ui_output_factor(h.out) ==
+          2.0f * (float)CANLIN_UI_SCALE_STEP_100 / (float)CANLIN_UI_SCALE_BASE_PERCENT);
+    CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_125) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_factor(h.out) ==
+          2.0f * (float)CANLIN_UI_SCALE_STEP_125 / (float)CANLIN_UI_SCALE_BASE_PERCENT);
+    CHECK(canlin_ui_output_factor(h.out) == 2.5f);
+    CHECK(canlin_ui_output_set_dpi(h.out, 1.5f) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_factor(h.out) ==
+          1.5f * (float)CANLIN_UI_SCALE_STEP_125 / (float)CANLIN_UI_SCALE_BASE_PERCENT);
+    /* The em the ui lays out with is the theme's font size times that same factor. */
+    CHECK(canlin_ui_output_em(h.ui, h.out) ==
+          (float)t.font_size * canlin_ui_output_factor(h.out));
+    h_done(&h);
+}
+
 /* §8: the stable output identity is at most CANLIN_UI_OUTPUT_ID_MAX bytes (§8 table:
  * 63 B); the buffer that holds it is one byte longer, for the terminator. The two are
  * different numbers, and the check follows the first: an identity of the full length is
@@ -2465,6 +2491,7 @@ int main(void)
     test_scale_min_touch();
     test_scale_invalid();
     test_scale_base();
+    test_output_factor();
     test_output_id_limit();
     test_scale_keeps_state();
     test_two_outputs();

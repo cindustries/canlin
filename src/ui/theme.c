@@ -324,10 +324,14 @@ static struct nk_color nkc(canlin_theme_rgb c)
     return nk_rgb(c.r, c.g, c.b);
 }
 
+/* A colour mixed with another: pct is the second colour's share, in percent of the
+ * base (ui_limits.h). */
 static struct nk_color mix(canlin_theme_rgb a, canlin_theme_rgb b, int pct)
 {
-    return nk_rgb((a.r * (100 - pct) + b.r * pct) / 100, (a.g * (100 - pct) + b.g * pct) / 100,
-                  (a.b * (100 - pct) + b.b * pct) / 100);
+    const int base = CANLIN_THEME_MIX_BASE_PERCENT;
+    return nk_rgb((a.r * (base - pct) + b.r * pct) / base,
+                  (a.g * (base - pct) + b.g * pct) / base,
+                  (a.b * (base - pct) + b.b * pct) / base);
 }
 
 /* Role -> Nuklear colour table. Provisional spacing mapping (one "unit" = spacing x

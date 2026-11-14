@@ -55,6 +55,10 @@
 /* §6.1 "decimal string": spacing and radius are read in 1/10000 em, so a value keeps
  * at most 4 fraction digits ("1.5"). */
 #define CANLIN_THEME_FRAC_DIGITS_MAX    4u
+/* §6.2: the colour mix: the second colour's share, in percent of this base (the base
+ * alone is the second colour, 0 % the first). Its own base, apart from the scale's
+ * (CANLIN_UI_SCALE_BASE_PERCENT): the same digit, a different meaning. */
+#define CANLIN_THEME_MIX_BASE_PERCENT   100
 
 /* §2: "Interactive elements are at least 2.5 em high" (system design §5); "below 40 em
  * of content width everything is one column". In em. */
