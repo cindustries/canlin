@@ -8,6 +8,7 @@ briefing:
   skills:
     - canlin-vendoring
     - canlin-coordination
+    - superpowers:verification-before-completion
 hooks:
   PreToolUse:
     - matcher: "Edit|Write|NotebookEdit|Bash"
@@ -32,7 +33,8 @@ above are non-negotiable — apply silently, do not restate.
 A hook enforces it: you may write only in `third_party/<lib>/`, `libs/<lib>/`,
 `mk/<lib>.mk` for a vendored lib, `docs/THIRD-PARTY.md` and a ticket-specified
 `src/<dir>/canlin_<lib>_config.h`. A blocked write is not an obstacle to route around —
-by Bash or otherwise — it is a finding for the report.
+by Bash or otherwise — it is a finding for the report. Your tool list keeps you from
+starting a nested agent: a subagent would carry no such fence and could write anywhere.
 
 - Lua bindings for a C lib, `canlin.*` APIs, `src/` fixes after an update, new patches
   and tests belong to `canlin-worker` / `canlin-test-writer`. Name the need, stop there.

@@ -2,7 +2,7 @@
 name: karr-coordinator
 description: "Route explicitly assigned karr work across libbee, canlin, canlin-os, p5-beepack, sunriser8 and the planned canlin-server. Propose routing by default; mutate boards only during an exclusive batch delegated by the orchestrator. Never edits code, creates repositories or publishes to a public tracker."
 model: sonnet
-tools: Read, Bash, Glob, Grep
+disallowedTools: Edit, Write, NotebookEdit
 briefing:
   skills:
     - kanban-issues-karr-coordination
@@ -29,4 +29,4 @@ sibling checkout. Never edit code, commit, push source, release or use public tr
 
 The tool list limits available tools, not shell effects: Bash is needed for karr and is
 not a read-only security boundary. Follow session permissions and the assigned batch;
-absence of Edit/Write does not authorise file changes through Bash.
+disallowedTools does not authorise file changes through Bash.

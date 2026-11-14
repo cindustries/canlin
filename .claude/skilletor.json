@@ -19,7 +19,9 @@
       "getty-git-usage@getty",
       "kanban-issues-karr-coordination@karr",
       "kanban-issues-karr-ticket@karr",
-      "beepack-format@libbee"
+      "beepack-format@libbee",
+      "claude-headless@getty",
+      "model-routing@getty"
     ],
     "bundles": [
       "getty-house@getty"
