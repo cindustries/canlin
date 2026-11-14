@@ -49,6 +49,10 @@ binaries into `TESTS`).
 | `make TARGET=android-armv7 test-device` | on-device suites; `ANDROID_SERIAL` picks the device |
 | `make TARGET=android-armv7 apk` | the NativeActivity APK |
 
+`BUILD` can be overridden on the command line (`make BUILD=build/probe …`): two agents
+building at the same time must each use their own build directory, or they write the same
+object files and the link picks up a half-written one.
+
 The host runs SSE, the target does not: only a P2 run catches an illegal instruction, so a green
 host test is not a green i686 test. QEMU user-mode (`qemu-i386 -cpu pentium2`) is not the
 canlin-os full-system harness — name which one ran.
