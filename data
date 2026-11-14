@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-14T18:02:38Z
+id: 98
+priority: high
+status: backlog
+tags:
+- ui
+- render
+- bug
+title: 'UI: a real out-of-memory leaves a broken Nuklear context, because nk_init
+  always succeeds'
+updated: 2026-11-14T18:02:38Z
+---
+
+third_party/nuklear/nuklear.h:19658 - nk_init() returns 1 unconditionally, so nk_init_default() never fails and the ENOMEM path of canlin_ui_view_new (src/ui/ui.c:544) is unreachable. A real out-of-memory inside Nuklear leaves ctx->memory.memory.ptr == NULL and the view is created with a broken context instead of failing cleanly. k92 fixed the wake in that path, but the path itself cannot be entered without a test hook. Decide: check the allocation result after nk_init_default and fail the view with CANLIN_UI_ENOMEM, or accept the vendored behaviour and say so in the UI spec. Found by the 2026-11-14 review of k92.
