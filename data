@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T19:20:03Z
+id: 112
+priority: medium
+status: backlog
+tags:
+- ui
+- assistant
+- security
+title: 'UI: the model view and the module''s own widgets share one identity space'
+updated: 2026-11-14T19:20:03Z
+---
+
+The model view's widgets and the module's own widgets share the ui view's identity space (r<rev>:<id>). A module that draws a colliding identity in an earlier frame can prime the model view's field or choice state. It stays inside the module's own view - which the shell frames as the model view anyway - so it reaches nothing new, but a module can reach into the state of the view it does not own. A per-view nonce in the identity would close it; that changes the identity scheme, so it needs a decision rather than a patch. Found by the 2026-11-14 work on k108.
