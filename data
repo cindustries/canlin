@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:19:00Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:50:18Z
+created: 2026-09-23T03:51:04Z
+id: 22
+priority: medium
+started: 2026-09-23T05:06:43Z
+status: done
+tags:
+- ui
+- font
+title: Built-in Latin subset font with known licence + replacement glyph
+updated: 2026-11-14T07:50:18Z
+---
+
+Replace ProggyClean placeholder (13px, blurry at 16). From canlin#17.
+
+Merged 1e49a2b. DejaVu Sans 2.37 subset (38.8 KB), U+25A1 fallback, ProggyClean dropped (nk.h flag change accepted). Host + ASan/UBSan green. i686 skipped. Atlas memory ~2x: up to 4 MiB at 200% -> P2 check (#13).
+
+2026-11-14 07:50 Review 2026-11-14: what the card claims and still holds: the replacement glyph is present (CANLIN_FONT_BUILTIN_BOX 0x25A1, src/render/font_builtin.h:12, wired as Nuklear's fallback_glyph at src/render/render.c:594), the subset is baked per size, theme TTF blobs are still not baked (the untrusted-font policy is k21, still backlog), and nk.h no longer defines NK_INCLUDE_DEFAULT_FONT. Two precisions: the DejaVu Sans 2.37 subset of 38.8 KB was true at 1e49a2b and was superseded by k55 - today's src/render/font_builtin.c:3 reads 'Inter 4.1 Regular, Latin subset (343 codepoints, 23792 bytes)' and the spec §6.3 describes Inter, so the card is stale rather than wrong. And third_party/nuklear/VERSION:15 still says ProggyClean is used through NK_INCLUDE_DEFAULT_FONT, which became false with this card - now k95, since third_party/ is read-only. The card's open item still stands but pointed at the wrong card: the atlas measurement is not canlin#13 (sandbox cost factors) and no card owned it - now k96, together with the graph scale measurement from k19. Host make test green; P2/i686 not runnable on this host.
