@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T04:31:19Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T07:50:02Z
+created: 2026-09-23T03:36:47Z
+id: 19
+priority: high
+started: 2026-09-23T04:12:32Z
+status: done
+tags:
+- ui
+- graph
+title: 'UI step 3: graph editor widget'
+updated: 2026-11-14T07:50:02Z
+---
+
+UI spec §5, §11.3. Reference: Nuklear demo/common/node_editor.c. No zoom in v1.
+
+Merged 4777e80. 9001 graph checks, host + ASan/UBSan green, 6 mutants caught. i686 skipped; 256 nodes/1024 edges unmeasured on P2. Choices recorded in UI spec §5.2.
+
+2026-11-14 07:50 Review 2026-11-14: claim holds. The seven edit kinds are present (src/ui/graph.c:1131), connects are rejected locally for output-to-output, input-to-input, same-node, duplicate and type-mismatched pairs (:733-753), incompatible ports are marked during the drag (:762-783), pan and fit are kept per graph identity (:480), off-screen nodes and edges are culled before commands (:835, :922), port touch targets are at least 2.5 em (:600), long press and double tap are timed from the scheduler-stamped input (:1033 in src/module/module.c), and there is no zoom. Spec §5.2 was updated with exactly the edit shapes the card claims. The card's check count reproduces exactly (9001 graph checks at that commit). The card's '6 mutants caught' is not reproducible - there is no mutation-testing tooling under tools/ (k89). Its open item still stands: 256 nodes and 1024 edges are unmeasured on P2, now k96. Host make test green; P2/i686 not runnable on this host.
