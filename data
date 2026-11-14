@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T22:27:30Z
+claimed_by: canlin-worker-runtime
+class: standard
+completed: 2026-11-14T22:27:30Z
+created: 2026-11-14T18:43:37Z
+id: 102
+priority: medium
+started: 2026-11-14T22:04:02Z
+status: done
+tags:
+- runtime
+- limits
+- api
+title: 'Runtime: eight of the ten core API §7 ceilings exist only as prose'
+updated: 2026-11-14T22:27:30Z
+---
+
+Core API spec §7 says 'Each has a compile-time maximum; configuration can lower, never raise, a value beyond its maximum', and its table gives a ceiling for ten rows. Two are real constants and are enforced: CANLIN_SB_MEM_MAX (include/canlin/sandbox_limits.h:14, clamped at src/sandbox/sandbox.c:538) and CANLIN_SB_BUDGET_MAX (:19, clamped at :542). The other eight have no constant anywhere: CANLIN_EV_MAX_MODULES 32, CANLIN_EV_MOD_MAX_ITEMS 256, CANLIN_EV_MOD_MAX_BYTES 1 MiB, CANLIN_EV_PROC_MAX_ITEMS 2048, CANLIN_EV_PROC_MAX_BYTES 16 MiB, CANLIN_EV_MOD_MAX_OPS 128, CANLIN_EV_MOD_MAX_TIMERS 64, CANLIN_MARSHAL_MAX_BYTES 1 MiB. include/canlin/ev_limits.h documents the gap ('recorded in the comment until configuration exists'), so it is a known deviation - but the treatment is inconsistent, and the marshal-bytes ceiling is not even recorded in a comment. Why it matters: three of the eight (module ops, module timers, module count) are already enforced at their v1 value, so when configuration arrives they could be raised past the spec's ceiling without anything stopping them. Give each a constant and clamp it. Found by the 2026-11-14 limits sweep.
+
+Worker start: the ev header records the spec's max column in a comment only, and the marshal-bytes ceiling is not recorded at all. Plan: a ceiling constant per limit in the header that owns it (ev_limits.h for the seven, module_limits.h for the marshal bytes), the code that applies the limit clamped by it, tests pinning every ceiling to the spec value.
+
+Done: each of the eight limits has its spec §7 ceiling as a constant of the header that owns it, and the code that applies the limit is clamped by it. New constants: include/canlin/ev_limits.h CANLIN_EV_MAX_MODULES_CEILING 32, CANLIN_EV_MOD_MAX_ITEMS_CEILING 256, CANLIN_EV_MOD_MAX_BYTES_CEILING 1 MiB, CANLIN_EV_PROC_MAX_ITEMS_CEILING 2048, CANLIN_EV_PROC_MAX_BYTES_CEILING 16 MiB, CANLIN_EV_MOD_MAX_OPS_CEILING 128, CANLIN_EV_MOD_MAX_TIMERS_CEILING 64; include/canlin/module_limits.h CANLIN_MARSHAL_MAX_BYTES_CEILING 1 MiB (this ceiling was not even recorded in a comment before). Clamp: src/ev/ev.c:13-33 and src/module/module.c:72-79 hold a _Static_assert per limit, so a limit raised past its ceiling does not build - verified by temporarily raising CANLIN_EV_MOD_MAX_OPS to 200 and CANLIN_MARSHAL_MAX_BYTES to 2 MiB: both fail the compile ('negative width in bit-field __error_if_negative'), then reverted. The v1 values in force are unchanged. Nothing is configurable yet, so this clamp is the ceiling itself; a future configuration must clamp at runtime like the sandbox does (src/sandbox/sandbox.c:538/542: value > CANLIN_SB_MEM_MAX -> CANLIN_SB_MEM_MAX) and keep the ceiling constants as the bound. Tests first, red before the fix (the constants did not exist): t/ev/test_ev.c:test_limit_ceilings pins all seven ceilings to the spec's max column and checks every limit inside its ceiling; t/module/test_module.c:test_marshal_ceiling does the same for the marshal bytes. 'make BUILD=build/rt2 test': ALL TESTS PASSED. Gates: host only - the i686 toolchain is not installed here and there is no WASM target in the Makefile, so the P2 and browser gates are not proven by this run; _Static_assert under -std=c99 was checked on the host gcc 14 and the Android NDK clang, both accept it.
+
+2026-11-14 22:27 Review 2026-11-14: fixed and reviewed. Eight of the ten ceilings of core API spec §7 exist as constants now: seven in include/canlin/ev_limits.h (CANLIN_EV_MAX_MODULES_CEILING 32, MOD_MAX_ITEMS 256, MOD_MAX_BYTES 1 MiB, PROC_MAX_ITEMS 2048, PROC_MAX_BYTES 16 MiB, MOD_MAX_OPS 128, MOD_MAX_TIMERS 64) and CANLIN_MARSHAL_MAX_BYTES_CEILING 1 MiB in module_limits.h - the last was not even recorded in a comment before. A static assertion per limit fails the build when a limit is raised past its ceiling; the worker verified it bites by raising two of them temporarily and getting a compile error, then reverting. The v1 values in force are unchanged. The two rows the §7 table marks with '-' (the process-wide op and timer bounds, the turn quotas, the marshalling arg/depth/entry rows) deliberately got no ceiling, because the spec gives none. All ten rows of §7 that carry a 'max' are covered now. The tests were red first (the constants did not exist) and pin every ceiling to the spec's column. Committed as 0e31654, together with k127 - the same files. Host and sanitizer green; the i686/P2 and WASM gates are not runnable here and are named as skipped.
