@@ -917,7 +917,7 @@ static const canlin_value_pair res_pairs[] = {
     {{CANLIN_VALUE_STR, 0, "s", 1, NULL, 0}, {CANLIN_VALUE_STR, 0, "hi", 2, NULL, 0}},
 };
 static const canlin_value res_val = {CANLIN_VALUE_TABLE, 0, NULL, 0, res_pairs, 2};
-static canlin_module_result res_ok = {&res_val, NULL, NULL};
+static canlin_module_result res_ok = {CANLIN_MODULE_RESULT_TAG, &res_val, NULL, NULL};
 
 static void complete_hook(harness *h, int i, const canlin_ev_delivery *d)
 {
@@ -946,6 +946,64 @@ static void test_done_next_turn(void)
     h_turn(&h);
     snprintf(line, sizeof line, "done ok\t%lld\t42\thi", (long long)h.op);
     CHECK(has(&h.log[0], line));
+    h_done(&h);
+}
+
+/* A second producer completes an operation for the module with a payload of another
+ * shape: as large as a module result, arranged differently. The payload crosses the ev
+ * boundary as opaque bytes, so the module layer must refuse it instead of reading the
+ * foreign words as its own result -- the foreign code must never reach Lua. */
+typedef struct other_result {
+    uint32_t kind;               /* the other producer's own word, not the module's tag */
+    uint32_t pad;
+    const char *code;            /* a code of the other producer's own */
+    const char *message;         /* a message of the other producer's own */
+    const canlin_value *value;   /* a value of the other producer's own */
+} other_result;
+
+static void test_op_payload_shape(void)
+{
+    harness h;
+    other_result other;
+    canlin_ev_handle op, op_small, op_ok;
+    char line[128];
+
+    /* Big enough to pass as a result by its size alone: only the type tag tells the
+     * module layer that the words are not its own. */
+    CHECK(sizeof(other_result) >= sizeof(canlin_module_result));
+    h_init(&h);
+    CHECK(h_load(&h, 0, "shape", done_src, 0) == CANLIN_MODULE_OK);
+    memset(&other, 0, sizeof other);
+    other.kind = 0x4f544845u; /* "OTHR" */
+    other.code = "denied";
+    other.message = "not allowed";
+    CHECK(canlin_ev_op_begin(h.ev, canlin_module_gen(h.m[0]), 64, NULL, &op) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, op, CANLIN_EV_FAILURE, &other, sizeof other, NULL) ==
+          CANLIN_EV_OK);
+    /* The same, truncated: too small to be a module result at all. */
+    CHECK(canlin_ev_op_begin(h.ev, canlin_module_gen(h.m[0]), 64, NULL, &op_small) ==
+          CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, op_small, CANLIN_EV_FAILURE, &other,
+                                sizeof other - sizeof other.value, NULL) == CANLIN_EV_OK);
+    /* And one that claims success: reading it as a result would follow the other
+     * producer's pointer into the module's value tree. */
+    CHECK(canlin_ev_op_begin(h.ev, canlin_module_gen(h.m[0]), 64, NULL, &op_ok) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, op_ok, CANLIN_EV_SUCCESS, &other, sizeof other, NULL) ==
+          CANLIN_EV_OK);
+    h_drain(&h);
+    /* The foreign payload is refused, not read: no foreign code reaches Lua. */
+    snprintf(line, sizeof line, "done fail\t%lld\tunavailable\tresult is not a module result",
+             (long long)op);
+    CHECK(has(&h.log[0], line));
+    snprintf(line, sizeof line, "done fail\t%lld\tunavailable\tresult is not a module result",
+             (long long)op_small);
+    CHECK(has(&h.log[0], line));
+    snprintf(line, sizeof line, "done fail\t%lld\tunavailable\tresult is not a module result",
+             (long long)op_ok);
+    CHECK(has(&h.log[0], line));
+    CHECK(!has(&h.log[0], "denied"));
+    CHECK(!has(&h.log[0], "done ok")); /* no foreign value ever reaches Lua */
+    CHECK(canlin_module_get_state(h.m[0]) == CANLIN_MODULE_RUNNING);
     h_done(&h);
 }
 
@@ -1002,16 +1060,22 @@ static void test_oversize(void)
     CHECK(canlin_ev_op_begin(h.ev, g, 64, NULL, &b) == CANLIN_EV_OK);
     CHECK(canlin_ev_op_begin(h.ev, g, 64, NULL, &c) == CANLIN_EV_OK);
     CHECK(canlin_ev_op_begin(h.ev, g, 64, NULL, &dd) == CANLIN_EV_OK);
+    memset(&r_many, 0, sizeof r_many);
+    r_many.tag = CANLIN_MODULE_RESULT_TAG;
     r_many.value = &many;
+    memset(&r_deep, 0, sizeof r_deep);
+    r_deep.tag = CANLIN_MODULE_RESULT_TAG;
     r_deep.value = &deep[0];
     memset(&r_fail, 0, sizeof r_fail);
+    r_fail.tag = CANLIN_MODULE_RESULT_TAG;
     r_fail.code = "denied";
     r_fail.message = "not allowed";
     CHECK(canlin_ev_op_complete(h.ev, a, CANLIN_EV_SUCCESS, &res_ok, 17, NULL) ==
           CANLIN_EV_OVERSIZE);
     CHECK(canlin_ev_op_complete(h.ev, b, CANLIN_EV_SUCCESS, &r_many, 64, NULL) == CANLIN_EV_OK);
     CHECK(canlin_ev_op_complete(h.ev, c, CANLIN_EV_SUCCESS, &r_deep, 64, NULL) == CANLIN_EV_OK);
-    CHECK(canlin_ev_op_complete(h.ev, dd, CANLIN_EV_FAILURE, &r_fail, 8, NULL) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, dd, CANLIN_EV_FAILURE, &r_fail, sizeof r_fail, NULL) ==
+          CANLIN_EV_OK);
     h_drain(&h);
     snprintf(line, sizeof line, "done fail\t%lld\tfull", (long long)a);
     CHECK(has(&h.log[0], line));
@@ -1081,6 +1145,7 @@ static void test_marshal_budget(void)
     ev_small.name = "small";
     ev_small.value = &small;
     memset(&r_big, 0, sizeof r_big);
+    r_big.tag = CANLIN_MODULE_RESULT_TAG;
     r_big.value = &big;
 
     h_init(&h);
@@ -1213,6 +1278,7 @@ int main(void)
     test_reload_busy();
     test_load_errors();
     test_done_next_turn();
+    test_op_payload_shape();
     test_oversize();
     test_marshal_budget();
     test_isolation();

@@ -436,13 +436,36 @@ static void done_fail(call_args *a, const char *code, const char *msg)
     a->msglen = n < 0 ? CANLIN_SB_ERRMSG_MAX : (size_t)n;
 }
 
-static void map_op(const canlin_ev_delivery *d, call_args *a)
+/* The payload of an OP completion is opaque to the scheduler: it is the producer's own
+ * blob, whose first bytes are a module result (module.h). The tag names that shape.
+ * A payload without the tag is not read at all -- its words are not a result, and
+ * reading them as one would follow foreign pointers. */
+static int op_result_ok(const canlin_ev_delivery *d)
 {
-    const canlin_module_result *r = d->payload;
+    uint32_t tag;
+    if (d->payload == NULL || d->bytes < sizeof(canlin_module_result))
+        return 0;
+    memcpy(&tag, d->payload, sizeof tag);
+    return tag == CANLIN_MODULE_RESULT_TAG;
+}
+
+static void map_op(canlin_module *m, const canlin_ev_delivery *d, call_args *a)
+{
+    const canlin_module_result *r = NULL;
+    int typed = op_result_ok(d);
     a->name = "done";
     a->h = d->handle;
-    if (d->status == CANLIN_EV_SUCCESS) {
-        const canlin_value *v = r ? r->value : NULL;
+    if (typed)
+        r = d->payload;
+    if (d->detail == CANLIN_EV_DETAIL_OVERSIZE) {
+        done_fail(a, "full", "result exceeded its reserved size");
+    } else if (d->payload != NULL && !typed) {
+        /* A completion of another shape: the module gets a failure, never the words of
+         * a foreign payload. */
+        mlog(m, "done", "refused: result is not a module result");
+        done_fail(a, "unavailable", "result is not a module result");
+    } else if (d->status == CANLIN_EV_SUCCESS) {
+        const canlin_value *v = typed ? r->value : NULL;
         int rc = canlin_value_check(v);
         if (rc == CANLIN_VALUE_ETOOBIG)
             done_fail(a, "full", "result exceeds the marshalling limits");
@@ -452,9 +475,7 @@ static void map_op(const canlin_ev_delivery *d, call_args *a)
             a->kind = ARG_DONE_OK;
             a->v = v;
         }
-    } else if (d->detail == CANLIN_EV_DETAIL_OVERSIZE) {
-        done_fail(a, "full", "result exceeded its reserved size");
-    } else if (r && known_code(r->code)) {
+    } else if (typed && known_code(r->code)) {
         done_fail(a, r->code, r->message);
     } else {
         done_fail(a, "unavailable", "operation failed");
@@ -848,7 +869,7 @@ canlin_sandbox_status canlin_module_deliver(canlin_module *m, const canlin_ev_de
         a.h = d->handle;
         break;
     case CANLIN_EV_D_OP:
-        map_op(d, &a);
+        map_op(m, d, &a);
         break;
     case CANLIN_EV_D_EVENT: {
         const canlin_module_event *e = d->payload;

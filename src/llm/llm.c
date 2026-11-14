@@ -879,6 +879,7 @@ static int req_pump(llm_req *r)
     res = calloc(1, sizeof *res);
     if (res == NULL)
         return 0; /* retried by the next pump */
+    res->r.tag = CANLIN_MODULE_RESULT_TAG; /* the module layer checks it before reading */
     if (r->ok) {
         res->v.type = CANLIN_VALUE_TABLE;
         res->v.pairs = res->p;

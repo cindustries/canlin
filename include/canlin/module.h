@@ -64,11 +64,23 @@ enum {
  * checks again and converts any violation into ok=false. */
 int canlin_value_check(const canlin_value *v);
 
-/* Payload of an OP completion for a module (canlin_ev_op_complete payload). */
+/* Type tag of the payload of an OP completion for a module (ASCII magic, like the
+ * source tags below). The scheduler hands such a payload over as opaque bytes, so
+ * the tag is what tells the module layer that the bytes are a module result and not
+ * another producer's payload: it is checked before a single field of the body is
+ * read. A producer stamps it; the module layer refuses an unstamped payload. */
+#define CANLIN_MODULE_RESULT_TAG 0x4d524553u /* "MRES" */
+
+/* Payload of an OP completion for a module (canlin_ev_op_complete payload).
+ *
+ * The payload *begins* with this struct: a producer that keeps its own data next to
+ * the result puts the result first and hands over the whole block, because the
+ * pointers in the result must stay valid until the delivery. */
 typedef struct canlin_module_result {
-    const canlin_value *value; /* SUCCESS: `result` (NULL = nil) */
-    const char *code;          /* FAILURE: a spec §3.1 code string */
-    const char *message;       /* FAILURE: diagnostic text, may be NULL */
+    uint32_t tag;               /* CANLIN_MODULE_RESULT_TAG */
+    const canlin_value *value;  /* SUCCESS: `result` (NULL = nil) */
+    const char *code;           /* FAILURE: a spec §3.1 code string */
+    const char *message;        /* FAILURE: diagnostic text, may be NULL */
 } canlin_module_result;
 
 /* canlin_ev_post source whose payload is a canlin_module_event, delivered to Lua as
