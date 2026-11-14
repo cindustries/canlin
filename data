@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:00:29Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:42:42Z
+created: 2026-09-23T04:39:45Z
+id: 36
+priority: medium
+started: 2026-09-23T04:49:41Z
+status: done
+tags:
+- ui
+- graph
+title: UI polish from offscreen demo (6 defects)
+updated: 2026-11-14T06:42:42Z
+---
+
+1 node title separator overshoots right border 2-3px (graph.c). 2 view background rounded corners leave unpainted pixels: square view corners or clear to background. 3 toggle label gap does not scale with em; checkbox ~1em without frame at 200%; verify 2.5em target. 4 section header indistinguishable from choice (design). 5 font blur above 100% (ProggyClean scaled; see #22/#21). 6 drag preview: own-node and already-connected inputs not marked. Demo sources: scratchpad/demo (session db664178).
+
+Merged cb1a09d. ui 7842 / graph 10962 checks, host + ASan/UBSan green. Spec §3/§5.2/§6.2 updated. Font blur remains #21/#22.
+
+2026-11-14 06:42 Review 2026-11-14: five of the six defects are fixed and pixel-tested against today's code. (1) The node title separator no longer overshoots: nk_stroke_line is replaced by a fill band of exactly the node width (src/ui/graph.c:934). (2) The view background corners are square, checked pixel by pixel at 100, 150 and 200 % (src/ui/ui.c:489, test_view_background_square t/ui/test_ui.c:1354). (3) The toggle box is 1.25 em with an em-scaled gap and a themed frame, and the whole row is the hit target at the 2.5 em minimum touch size (src/ui/ui.c:2006, :2030, test_toggle_geometry t/ui/test_ui.c:1387). (4) The section header is a heading-style row with a disclosure triangle and a muted rule (src/ui/ui.c:2289, test_section_header_look :1511). (6) The drag preview marks a type clash, the dragging node's own ports and an input that already carries the same edge (src/ui/graph.c:763, test_graph.c:971). Defect 5, the font blur, is STALE: the runtime bakes a TTF subset per em size, so nothing is resampled, and k55 later replaced the font with Inter. The spec updates are in 0365f4e. The card names the feature commit cb1a09d, which reached main through the merge 2233249. The offscreen demo is not in the repository, so the demo itself is unverified. Host make test green (ui 12464, graph 13363 checks); ASan/UBSan green for the ui half.
