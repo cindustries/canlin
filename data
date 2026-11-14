@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T05:49:05Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:42:48Z
+created: 2026-09-23T05:25:20Z
+id: 45
+priority: medium
+started: 2026-09-23T05:25:45Z
+status: done
+tags:
+- ui
+- input
+title: 'On-screen keyboard for touch-without-keyboard outputs (rest of #26)'
+updated: 2026-11-14T06:42:48Z
+---
+
+QWERTZ with umlauts, shift, backspace, enter, space, hide; 2.5 em keys; input-class setter on canlin_ui_output (canlin_ui_output_set_input). From canlin#26.
+
+Merged (2052ee9). Host + ASan/UBSan green; i686 musl build of all suites green (native 32-bit run, no xmm in disassembly); QEMU pentium2 not run.
+
+2026-11-14 06:42 Review 2026-11-14: claim holds. German QWERTZ with ü, ö, ä and ß (src/ui/ui.c:757-763); shift, backspace, enter, space, layer and hide (:754-763); enter posts a tab in a field and an enter in an area (:896); the keys are 2.5 em (include/canlin/ui_limits.h CANLIN_UI_KBD_KEY_EM) and shrink evenly to fit a narrow view, floored at 1.5 em (:796-799); canlin_ui_output_set_input is the input-class setter (include/canlin/ui.h:110, src/ui/ui.c:395) and the shell feeds it from the output's class (src/shell/shell.c:571); the panel appears only for touch-without-keyboard outputs with a focused field or area (:1098). The merge 2052ee9 carries the feature commit ab803ca. Host make test green (kbd 8515 checks); no ASan/UBSan build of this suite exists in the tree; the card's i686 native run and the QEMU pentium2 gate are not reproducible on this host.
