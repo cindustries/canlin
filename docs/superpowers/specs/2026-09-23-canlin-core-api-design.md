@@ -1,11 +1,18 @@
 # CanLin — core API design (v1 slice)
 
-Status: draft for review. Fixes the API shapes, numeric budgets and open semantics that
-the [event-runtime design](2026-09-22-canlin-event-runtime-design.md) and the
+Status: implemented for canlin#4–#16 (2026-11-14); where code and spec disagreed, the
+code was aligned to the spec, not the spec to the code — canlin#14 moved the sandbox
+constants onto the §7 values. A review on 2026-11-14 checked every §7 constant in the
+`include/canlin/*_limits.h` headers value by value and found them in agreement. Fixes the
+API shapes, numeric budgets and open semantics that the
+[event-runtime design](2026-09-22-canlin-event-runtime-design.md) and the
 [system design](2026-09-22-canlin-system-design.md) §13 defer to "the core API spec", for
 the first runtime slice (system design §3, step 2). It is written against the code that
-exists on `main` (`src/ev`, `src/net`, `src/sandbox`) and records where that code must
-change. Subsystems not needed by the slice are listed in §9 with their own follow-ups.
+exists on `main` (`src/ev`, `src/net`, `src/sandbox`). It is now the implemented basis;
+the numbers are not final — they stay v1 estimates to be calibrated on P2 (canlin#13,
+blocked on the canlin-os QEMU harness), and the cost factors in
+`include/canlin/sandbox_limits.h` stay provisional. Subsystems not needed by the slice
+are listed in §9 with their own follow-ups.
 
 ## 1. Scope
 
