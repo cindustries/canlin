@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-11-14T20:23:18Z
+claimed_by: canlin-worker-ui
+class: standard
+created: 2026-11-14T18:44:18Z
+id: 107
+priority: low
+started: 2026-11-14T19:15:03Z
+status: review
+tags:
+- shell
+- limits
+title: 'UI: the shell hard-codes em sizes that no spec states and no constant names'
+updated: 2026-11-14T20:23:18Z
+---
+
+src/shell/shell.c:1271, :1276 and :1278 hard-code 2.5f * so->em for the faulted-pane text rows, and :394 hard-codes 10.0f * so->em for the restart button width. Neither is stated in any spec and neither has a constant: shell_limits.h has CANLIN_SHELL_ROW_HEIGHT 2.5f (:20), which covers the switcher rows and the restart button, but these call sites do not use it, and the 10 em button width has no home at all. Not a spec mismatch - the spec is silent - but the code has em sizes that are neither spec-governed nor named, and one of them silently ignores the constant that does exist. Found by the 2026-11-14 limits sweep.
+
+canlin-worker-ui: done, two decisions. (1) The faulted pane's text rows (src/shell/shell.c:1271, 1276, 1278) now read CANLIN_SHELL_ROW_HEIGHT (2.5 em); that constant's comment in include/canlin/shell_limits.h now names all three kinds of row it covers (the switcher entries, the restart button, the faulted pane's text rows). (2) The 10 em restart button width got its own constant CANLIN_SHELL_RESTART_WIDTH 10.0f in shell_limits.h, in the 'Not in the §6 table: chosen here (provisional)' block, because the spec states no size: aligning it with the row height would invent a rule and would clip the 'Restart' label (2.5 em is about 40 px, the label about 60 px), and width and height are separate dimensions the header already keeps apart. No value or drawn result changed. Tests: t/shell/test_shell.c test_row_sizes pins both constants; test_fault_restart now checks the drawn button against the header (height = ROW_HEIGHT em, width = RESTART_WIDTH em). Verified by mutation: changing the width in the header or hard-coding 8.0f in the shell makes the suite fail.
+
+Done, ready for review: the faulted pane's rows read CANLIN_SHELL_ROW_HEIGHT, the restart button's 10 em width is its own provisional constant CANLIN_SHELL_RESTART_WIDTH, and t/shell/test_shell.c pins both and checks the drawn button against the header. No value or drawn result changed.
