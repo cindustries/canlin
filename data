@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-11-14T23:28:07Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T23:28:07Z
+created: 2026-11-14T22:28:22Z
+id: 128
+priority: high
+started: 2026-11-14T22:29:12Z
+status: done
+tags:
+- shell
+- ui
+- assistant
+title: 'UI: the shell can hold a second view in a pane and frame it as the model view'
+updated: 2026-11-14T23:28:07Z
+---
+
+Step 1 of 3 of the owner's decision on canlin#112 and #114 (the model view gets its own canlin_ui_view). The shell's pane holds one view per module today: layout_pane (src/shell/shell.c:370-398) computes one rect, reserves the model label strip above it, and draw_pane (:1258-1286) fills that rect and draws the strip with the text 'Model-generated view'. The shell knows exactly one bit per module - sh->mods[k].model - and it means 'this module's pane is a model pane'. Give the shell the ability to hold a SECOND view for that module: the model's own view, with its own rectangle, its own frame, the label strip belonging to IT rather than to the module's view, and the model's rectangle rendered. The module's own widgets then sit outside the frame, which is what UI §4 describes. The shell must also keep the input routing right: the input goes to the view under the point, and a click in the model's area must reach the model's widgets and not the module's. Spec sentences this touches: shell §1 ('One view per module instance') and §3 (the model-view frame bullet), UI §2 ('one vertical scroll region') and §4. Write the spec sentences as the change lands, or say in your report what they must say. Depends on: the app that creates the model's view (canlin#129) and the binding that draws into it (canlin#130) - the shell's part lands first and is exercised by its own tests.
+
+2026-11-14 23:23 Progress (canlin-worker-ui): the shell's part is implemented in src/shell/shell.c and include/canlin/shell.h, with the new test in t/shell/test_shell.c.
+
+- New entry point next to canlin_shell_set_model_view: canlin_shell_attach_model_view(sh, m, v) hands the model's own canlin_ui_view to the shell (the app owns it; the shell binds it to the pane's output, gives it its rectangle, renders its last finished frame and routes the pointer input of its block into it). NULL detaches it and takes the model frame away.
+- Layout: a model pane with a model view holds two rectangles. The model's own block (label strip + view) is in the upper half of the pane's content area, framed by a band; the module's own view is the lower half, outside the frame. The label strip belongs to the model's block.
+- Rendering: draw_pane paints the frame band and the label strip of the model's block; the model's view is rendered from its own frame count (model_new_frame), like the module's own view.
+- Input: a pointer in the model's block goes to the model's view (post_to), everything else in the pane to the module; hover, capture and scroll follow the view under the point.
+- New geometry part CANLIN_SHELL_P_MODEL_VIEW for the model's own view rect.
+- Legacy arrangement kept: a model pane without a model view still shows the module's own view in the frame (the assistant's test uses it).
+
+Test: t/shell/test_shell.c test_model_view_pane (two rectangles, label belongs to the model's block, module's widgets outside the frame, frame band drawn, click in each area to the right view, a new frame in the model's view makes the shell draw again). Written first, red before the fix.
+
+Build: make BUILD=build/shell test - ALL TESTS PASSED (shell: 3893 checks passed). The i686/P2 gate could not be run here: no i686-linux-musl-gcc in this environment (host only).
+
+2026-11-14 23:24 Ready for review (canlin-worker-ui).
+
+What changed: src/shell/shell.c, include/canlin/shell.h, t/shell/test_shell.c. The shell holds a second view for a module - the model's own canlin_ui_view - handed over by the app with the new canlin_shell_attach_model_view(sh, m, v) next to canlin_shell_set_model_view. A model pane with such a view lays out two rectangles: the model's own block (label strip + view) in the upper half of the pane's content area, framed by a band, and the module's own view in the lower half, outside the frame. The label strip belongs to the model's block. The shell binds the model's view to the output, gives it its rectangle, renders its last finished frame and routes the pointer input of its block into it: a click in the model's area reaches the model's view and not the module, a click in the module's area reaches the module. New geometry part CANLIN_SHELL_P_MODEL_VIEW.
+
+Test first: t/shell/test_shell.c test_model_view_pane was red before the fix and is green now.
+
+Checks: make BUILD=build/shell test - ALL TESTS PASSED (shell: 3893 checks passed; the assistant, ui, module, ev and net suites unchanged). The i686/P2 gate was NOT run: this machine has no i686-linux-musl-gcc, so only the host was checked. The reviewer should run the target gate.
+
+Decisions, the spec sentences that must change and the findings for other lanes are in the worker's report to the orchestrator.
+
+2026-11-14 23:28 Review 2026-11-14: fixed and reviewed - step 1 of the owner's decision on canlin#112 and #114. canlin_shell_attach_model_view(sh, m, v) is the new entry point: the app hands the model's own view over, the shell binds it to the pane's output, gives it its rectangle, renders its last finished frame and routes the pointer input of its block into it. The view belongs to the caller and the shell never frees it; NULL detaches it, and turning the model flag off lets go of it too, so the shell never holds a pointer the app may have freed. A model pane without a view of its own keeps the old arrangement (the module's own view inside the frame) - t/assistant/test_view.c depends on it, so the worker kept that path deliberately. The layout: the model's block in the pane's upper half with the frame and the label strip, the module's own view in the lower half without a frame - the label strip reads as the pane's header and the generated form with its submit boundary lands where the eye goes first; the split is even because a split following the model's content height would reflow the module's view on every model frame. The test was red before the fix and checks the two rectangles, the label strip's owner, the module's widget outside the frame, the frame band in the theme colours, a click in each area reaching the right view and the detach. Committed as c9a967c. The main agent ran the full host suite: ALL TESTS PASSED. Four findings are left for the other lanes and are now on the board: keys and text never reach the model's view (the shell cannot know which of the two holds the keyboard focus) - k131; the events the model's view receives keep the backend's t=0, so a long press inside the model view measures nothing - k132; nobody requests a redraw of the model's view - k133; and the assistant still draws the model into the module's own view, which is canlin#130.
