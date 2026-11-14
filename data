@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-14T22:03:32Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-14T22:03:32Z
+created: 2026-11-14T21:46:07Z
+id: 125
+priority: medium
+started: 2026-11-14T21:46:21Z
+status: done
+tags:
+- platform
+- module
+- assistant
+title: 'Platform: the module layer and the assistant judge an oversize op completion
+  differently'
+updated: 2026-11-14T22:03:32Z
+---
+
+For an oversize op completion the two layers disagree. The module layer fails it 'full' with 'result exceeded its reserved size' (src/module/module.c:460), because the scheduler sets status=FAILURE and the detail OVERSIZE. The app sees the NULL payload and fails 'unavailable' with an empty message (src/app/assistant.c:407). The module is therefore told 'full' and the assistant is told 'unavailable' about the same event. Decide which is the contract and make both say it. Found by the 2026-11-14 work on k122.
+
+Contract decided: the module layer's judgement is the contract (core API spec §5.2: a result exceeding the limits is converted into ok=false, code=full; §3.1: full = a count/byte bound refuses admission now, a retry later may succeed, while unavailable says the capability itself is not usable). Fixed in src/app/assistant.c: route_done now judges an op completion the way module.c map_op does - an OVERSIZE delivery fails full / 'result exceeded its reserved size', a success whose value exceeds the marshalling limits fails full / 'result exceeds the marshalling limits', an unmarshallable value invalid / 'result is not a marshallable value'. The app no longer says unavailable with an empty message about the same event. Tests written before the fix in t/app/test_assistant.c (test_oversize_completion, test_oversize_value): a witness module in a scheduler of its own prints what the module layer tells a module, so the two readings of one delivery are compared. Before the fix the gate said unavailable with an empty message while the module layer said full. make BUILD=build/plat4 test: ALL TESTS PASSED (app assistant 254 checks, test_module 2751 checks). No change in src/module/module.c: the module layer already said it.
+
+The assistant now judges an op completion the way the module layer judges it: an oversize result is a full, not an unavailable. Fixed in src/app/assistant.c only; src/module/module.c needed no change. Tests written before the fix in t/app/test_assistant.c compare the app's gate with the module layer's own done event through a witness module. make BUILD=build/plat4 test: ALL TESTS PASSED.
+
+2026-11-14 22:03 Review 2026-11-14: fixed and reviewed. The module layer's judgement is the contract, and the assistant now mirrors it branch for branch: an oversize completion is 'full' with 'result exceeded its reserved size' (was 'unavailable' with an empty message), and a result over the marshalling limits is 'full' and an unmarshallable value 'invalid' - the app previously said ok where the module said 'full'. The reasoning is recorded in the code: a full refuses admission now and a retry later may succeed, while 'unavailable' says the capability itself is not usable - for the assistant that would tell the user it is broken. src/module/module.c needed no change. The tests were written before each fix and were red first: the gate said 'unavailable' with an empty message, and for the value check it said ok. A witness harness compares the gate with the module layer's own done event, so the two readings of one delivery are seen in one run. Committed as 7f91332. Verified by the main agent: app assistant 286 checks, module 2751 checks.
