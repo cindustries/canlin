@@ -1394,14 +1394,15 @@ static void test_toggle_geometry(void)
         int s = polish_scales[k], w = 5 * s;
         harness h;
         const canlin_ui_rect *r;
-        float em = 16.0f * (float)s / 100.0f, unit = t.spacing * 0.25f * em;
+        float em = 16.0f * (float)s / 100.0f, unit = t.spacing * CANLIN_UI_UNIT_SCALE * em;
         canlin_theme_rgb bg = t.color[CANLIN_THEME_BACKGROUND];
         gaps[k] = 0;
         polish_render(&h, toggle_src, s);
         r = find(&h, CANLIN_UI_W_TOGGLE, CANLIN_UI_P_BOX, 0);
         CHECK(r != NULL);
         if (r) {
-            int bs = (int)(1.25f * em + 0.5f), bx = r->x, by = r->y + (r->h - bs) / 2;
+            int bs = (int)(CANLIN_UI_TOGGLE_BOX_EM * em + 0.5f), bx = r->x,
+                by = r->y + (r->h - bs) / 2;
             int my = by + bs / 2, x, y, lx0 = w, lx1 = 0;
             CHECK(r->h >= (int)(2.5f * em + 0.999f));
             /* frame (muted) on both sides, surface inside, background right after */
@@ -1694,7 +1695,12 @@ static void test_scale_min_touch(void)
 
 static void test_scale_invalid(void)
 {
-    static const int bad[] = {0, 50, 74, 76, 99, 101, 110, 175, 199, 201, 250, -100, 7500};
+    static const int bad[] = {0, 50, CANLIN_UI_SCALE_STEP_75 - 1, CANLIN_UI_SCALE_STEP_75 + 1,
+                              CANLIN_UI_SCALE_STEP_100 - 1, CANLIN_UI_SCALE_STEP_100 + 1, 110,
+                              CANLIN_UI_SCALE_STEP_125 - 1, CANLIN_UI_SCALE_STEP_125 + 1,
+                              CANLIN_UI_SCALE_STEP_150 - 1, CANLIN_UI_SCALE_STEP_150 + 1,
+                              CANLIN_UI_SCALE_STEP_200 - 1, CANLIN_UI_SCALE_STEP_200 + 1, 250,
+                              -100, 7500};
     harness h;
     canlin_ui_output_desc d;
     canlin_ui_view *v;
@@ -1717,8 +1723,11 @@ static void test_scale_invalid(void)
     CHECK(canlin_ui_output_set_scale(NULL, 100) == CANLIN_UI_EINVAL);
     CHECK(canlin_ui_output_scale(h.out) == 100 && canlin_ui_output_dpi(h.out) == 1.0f);
     CHECK(!canlin_ui_view_dirty(v)); /* rejected values invalidate nothing */
-    CHECK(canlin_ui_scale_valid(75) && canlin_ui_scale_valid(100) && canlin_ui_scale_valid(125) &&
-          canlin_ui_scale_valid(150) && canlin_ui_scale_valid(200));
+    CHECK(canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_75) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_100) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_125) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_150) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_200));
 
     d.id = "o";
     d.w = d.h = 100;
@@ -1737,6 +1746,38 @@ static void test_scale_invalid(void)
     CHECK(canlin_ui_output_free(h.out) == CANLIN_UI_EBUSY);
     CHECK(strcmp(canlin_ui_output_id(h.out), "test-output") == 0);
     h_done(&h);
+}
+
+/* §8: the stable output identity is at most CANLIN_UI_OUTPUT_ID_MAX bytes (§8 table:
+ * 63 B); the buffer that holds it is one byte longer, for the terminator. The two are
+ * different numbers, and the check follows the first: an identity of the full length is
+ * taken, one byte more is refused. */
+static void test_output_id_limit(void)
+{
+    canlin_ui_output_desc d;
+    canlin_ui_output *o;
+    char id[CANLIN_UI_OUTPUT_ID_BUF + 1];
+    int err = 0;
+
+    CHECK(CANLIN_UI_OUTPUT_ID_MAX == 63u);
+    CHECK(CANLIN_UI_OUTPUT_ID_BUF == 64u);
+
+    memset(id, 'x', sizeof id);
+    id[CANLIN_UI_OUTPUT_ID_MAX] = 0;         /* 63 bytes */
+    d.id = id;
+    d.w = d.h = 100;
+    d.dpi = 1.0f;
+    d.scale = 100;
+    o = canlin_ui_output_new(&d, &err);
+    CHECK(o != NULL && err == CANLIN_UI_OK);
+    if (o) {
+        CHECK(strlen(canlin_ui_output_id(o)) == CANLIN_UI_OUTPUT_ID_MAX);
+        CHECK(canlin_ui_output_free(o) == CANLIN_UI_OK);
+    }
+    id[CANLIN_UI_OUTPUT_ID_MAX] = 'x';       /* 64 bytes */
+    id[CANLIN_UI_OUTPUT_ID_BUF] = 0;
+    o = canlin_ui_output_new(&d, &err);
+    CHECK(o == NULL && err == CANLIN_UI_EINVAL);
 }
 
 static const char keep_src[] =
@@ -2322,6 +2363,54 @@ static void test_lua_no_scale(void)
     h_done(&h);
 }
 
+/* ---- the limits the spec states (UI spec §2, §2.1, §3) ----
+ *
+ * The limits header owns the numbers and the code reads them from there. The pins hold
+ * the header to the spec; the checks after them read the header, so they fail when the
+ * code follows a literal of its own instead. */
+static void test_limits(void)
+{
+    harness h;
+    char src[256], needle[64];
+
+    /* §2: one unit = theme#spacing x 0.25 em; the view padding and the gap between
+     * widgets are 2 units, the gap between columns is 4 units. */
+    CHECK(CANLIN_UI_UNIT_SCALE == 0.25f);
+    CHECK(CANLIN_UI_PAD_UNITS == 2);
+    CHECK(CANLIN_UI_GAP_UNITS == 2);
+    CHECK(CANLIN_UI_COL_GAP_UNITS == 4);
+
+    /* §2.1: the UI scale steps are fixed by the spec: 75, 100, 125, 150, 200 %. */
+    CHECK(CANLIN_UI_SCALE_STEP_75 == 75 && CANLIN_UI_SCALE_STEP_100 == 100 &&
+          CANLIN_UI_SCALE_STEP_125 == 125 && CANLIN_UI_SCALE_STEP_150 == 150 &&
+          CANLIN_UI_SCALE_STEP_200 == 200);
+    CHECK(canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_75) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_100) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_125) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_150) &&
+          canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_200));
+
+    /* §3: ui:area opts.rows 2-20, ui:toggle box 1.25 em, ui:meter clamped to 0.0-1.0. */
+    CHECK(CANLIN_UI_AREA_ROWS_MIN == 2 && CANLIN_UI_AREA_ROWS_MAX == 20);
+    CHECK(CANLIN_UI_TOGGLE_BOX_EM == 1.25f);
+    CHECK(CANLIN_UI_METER_MIN == 0.0f && CANLIN_UI_METER_MAX == 1.0f);
+
+    /* The rows limit follows the header: the last row count is taken, one more is
+     * refused and the refusal names the range the header states. */
+    snprintf(src, sizeof src,
+             "local M = {}\nfunction M.draw(ui)\nui:area('a', '', {rows = %d})\nprint('rows ok')\n"
+             "end\nreturn M\n",
+             CANLIN_UI_AREA_ROWS_MAX);
+    h_init(&h, NULL, 1.0f, src, 400, 400);
+    h_drain(&h);
+    CHECK(has(&h, "rows ok"));
+    h_done(&h);
+    snprintf(src, sizeof src, "ui:area('a', '', {rows = %d})", CANLIN_UI_AREA_ROWS_MAX + 1);
+    snprintf(needle, sizeof needle, "opts.rows must be %d-%d", CANLIN_UI_AREA_ROWS_MIN,
+             CANLIN_UI_AREA_ROWS_MAX);
+    expect_draw_error(src, needle);
+}
+
 int main(void)
 {
     test_columns();
@@ -2351,6 +2440,7 @@ int main(void)
     test_scale_columns_dirty();
     test_scale_min_touch();
     test_scale_invalid();
+    test_output_id_limit();
     test_scale_keeps_state();
     test_two_outputs();
     test_font_cache();
@@ -2360,6 +2450,7 @@ int main(void)
     test_tab_order();
     test_tab_scroll();
     test_lua_no_scale();
+    test_limits();
     if (failures) {
         fprintf(stderr, "ui: %d of %d checks failed\n", failures, checks);
         return 1;

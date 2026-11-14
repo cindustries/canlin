@@ -82,10 +82,10 @@ void canlin_ui_test_fail_next(canlin_ui *ui, unsigned what);
 typedef struct canlin_ui_output canlin_ui_output;
 
 typedef struct canlin_ui_output_desc {
-    const char *id;  /* stable platform identity, 1..CANLIN_UI_OUTPUT_ID_MAX-1 bytes, copied */
+    const char *id;  /* stable platform identity, 1..CANLIN_UI_OUTPUT_ID_MAX bytes, copied */
     int w, h;        /* px, > 0 */
     float dpi;       /* platform DPI factor, CANLIN_UI_DPI_MIN..CANLIN_UI_DPI_MAX */
-    int scale;       /* UI scale step in percent: 75, 100, 125, 150 or 200 */
+    int scale;       /* UI scale step in percent: one of CANLIN_UI_SCALE_STEP_* */
 } canlin_ui_output_desc;
 
 /* Returns 1 for a valid UI scale step (percent), else 0. No continuous scale. */

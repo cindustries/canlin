@@ -466,6 +466,66 @@ static void test_apply_nk(void)
     canlin_render_font_free(&f);
 }
 
+/* The value ranges the spec states (UI spec §6.1) live in the limits header and the
+ * parser follows them. The pins hold the header to the spec; the cases below are built
+ * from the header, so they fail when the parser stops following it. */
+static void test_value_ranges(void)
+{
+    char v[16];
+    int k;
+
+    CHECK(CANLIN_THEME_FONT_SIZE_MIN == 10 && CANLIN_THEME_FONT_SIZE_MAX == 40,
+          "theme#font#size range");
+    CHECK(CANLIN_THEME_SPACING_MIN == 0.25f && CANLIN_THEME_SPACING_MAX == 4.0f,
+          "theme#spacing range");
+    CHECK(CANLIN_THEME_RADIUS_MIN == 0.0f && CANLIN_THEME_RADIUS_MAX == 2.0f,
+          "theme#radius range");
+
+    /* theme#font#size: the first and the last size are taken, one step outside is not. */
+    k = key_index("theme#font#size");
+    snprintf(v, sizeof v, "%d", CANLIN_THEME_FONT_SIZE_MIN);
+    reset(); puts_(&L, "theme#font#size", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "font size %s", v);
+    snprintf(v, sizeof v, "%d", CANLIN_THEME_FONT_SIZE_MAX);
+    reset(); puts_(&L, "theme#font#size", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "font size %s", v);
+    snprintf(v, sizeof v, "%d", CANLIN_THEME_FONT_SIZE_MIN - 1);
+    reset(); puts_(&L, "theme#font#size", v); resolve();
+    CHECK(T.from[k] != 0 && nlogs == 1, "font size %s refused", v);
+    snprintf(v, sizeof v, "%d", CANLIN_THEME_FONT_SIZE_MAX + 1);
+    reset(); puts_(&L, "theme#font#size", v); resolve();
+    CHECK(T.from[k] != 0 && nlogs == 1, "font size %s refused", v);
+
+    /* theme#spacing: the first and the last value are taken, one step (1/10000 em)
+     * outside is not. */
+    k = key_index("theme#spacing");
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_SPACING_MIN);
+    reset(); puts_(&L, "theme#spacing", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "spacing %s", v);
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_SPACING_MAX);
+    reset(); puts_(&L, "theme#spacing", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "spacing %s", v);
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_SPACING_MIN - 0.0001);
+    reset(); puts_(&L, "theme#spacing", v); resolve();
+    CHECK(T.from[k] != 0 && nlogs == 1, "spacing %s refused", v);
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_SPACING_MAX + 0.0001);
+    reset(); puts_(&L, "theme#spacing", v); resolve();
+    CHECK(T.from[k] != 0 && nlogs == 1, "spacing %s refused", v);
+
+    /* theme#radius: the last value is taken, one step outside is not. The format
+     * admits no sign, so the lower bound cannot be reached from below. */
+    k = key_index("theme#radius");
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_RADIUS_MIN);
+    reset(); puts_(&L, "theme#radius", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "radius %s", v);
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_RADIUS_MAX);
+    reset(); puts_(&L, "theme#radius", v); resolve();
+    CHECK(T.from[k] == 0 && nlogs == 0, "radius %s", v);
+    snprintf(v, sizeof v, "%.4f", (double)CANLIN_THEME_RADIUS_MAX + 0.0001);
+    reset(); puts_(&L, "theme#radius", v); resolve();
+    CHECK(T.from[k] != 0 && nlogs == 1, "radius %s refused", v);
+}
+
 int main(void)
 {
     samples();
@@ -473,6 +533,7 @@ int main(void)
     test_every_key();
     test_values();
     test_formats();
+    test_value_ranges();
     test_per_key_fallback();
     test_log_hygiene();
     test_contrast();

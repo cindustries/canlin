@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The theme's decimal values are parsed in 1/10000 em (parse_decimal). */
+#define THEME_UNITS 10000
+
 static const char *const key_names[CANLIN_THEME_KEYS] = {
     "theme#color#background", "theme#color#surface", "theme#color#text",
     "theme#color#muted", "theme#color#accent", "theme#color#danger",
@@ -77,7 +80,8 @@ static const char *parse_color(const unsigned char *v, size_t len, canlin_theme_
     return NULL;
 }
 
-static const char *parse_size(const unsigned char *v, size_t len, int *out)
+static const char *parse_size(const unsigned char *v, size_t len, int *out, char *msg,
+                              size_t msglen)
 {
     int n = 0;
     size_t i;
@@ -88,8 +92,11 @@ static const char *parse_size(const unsigned char *v, size_t len, int *out)
             return "not a decimal integer";
         n = n * 10 + (v[i] - '0');
     }
-    if (n < 10 || n > 40)
-        return "out of range 10-40";
+    if (n < CANLIN_THEME_FONT_SIZE_MIN || n > CANLIN_THEME_FONT_SIZE_MAX) {
+        snprintf(msg, msglen, "out of range %d-%d", CANLIN_THEME_FONT_SIZE_MIN,
+                 CANLIN_THEME_FONT_SIZE_MAX);
+        return msg;
+    }
     *out = n;
     return NULL;
 }
@@ -98,7 +105,7 @@ static const char *parse_size(const unsigned char *v, size_t len, int *out)
 static const char *parse_decimal(const unsigned char *v, size_t len, long lo, long hi,
                                  float *out)
 {
-    long ip = 0, fp = 0, scale = 10000;
+    long ip = 0, fp = 0, scale = THEME_UNITS;
     size_t i = 0, nd = 0;
     if (len == 0)
         return "empty";
@@ -120,10 +127,10 @@ static const char *parse_decimal(const unsigned char *v, size_t len, long lo, lo
         if (fd == 0 || i != len)
             return "not a decimal number";
     }
-    fp += ip * 10000;
+    fp += ip * THEME_UNITS;
     if (fp < lo || fp > hi)
         return "out of range";
-    *out = (float)fp / 10000.0f;
+    *out = (float)fp / (float)THEME_UNITS;
     return NULL;
 }
 
@@ -165,8 +172,10 @@ static const char *check_logo(const unsigned char *v, size_t len)
     return NULL;
 }
 
-/* Validates one value and stores it on success; t is untouched on failure. */
-static const char *take(canlin_theme *t, int key, const unsigned char *v, size_t len)
+/* Validates one value and stores it on success; t is untouched on failure. msg holds a
+ * message the value's own check writes (the ranges come from the limits header). */
+static const char *take(canlin_theme *t, int key, const unsigned char *v, size_t len,
+                        char *msg, size_t msglen)
 {
     const char *err;
     canlin_theme_blob b;
@@ -176,11 +185,13 @@ static const char *take(canlin_theme *t, int key, const unsigned char *v, size_t
         return parse_color(v, len, &t->color[key]);
     switch (key) {
     case CANLIN_THEME_KEY_FONT_SIZE:
-        return parse_size(v, len, &t->font_size);
+        return parse_size(v, len, &t->font_size, msg, msglen);
     case CANLIN_THEME_KEY_SPACING:
-        return parse_decimal(v, len, 2500, 40000, &t->spacing);
+        return parse_decimal(v, len, (long)(CANLIN_THEME_SPACING_MIN * THEME_UNITS),
+                             (long)(CANLIN_THEME_SPACING_MAX * THEME_UNITS), &t->spacing);
     case CANLIN_THEME_KEY_RADIUS:
-        return parse_decimal(v, len, 0, 20000, &t->radius);
+        return parse_decimal(v, len, (long)(CANLIN_THEME_RADIUS_MIN * THEME_UNITS),
+                             (long)(CANLIN_THEME_RADIUS_MAX * THEME_UNITS), &t->radius);
     case CANLIN_THEME_KEY_FONT_BODY:
         if (!(err = check_font(v, len)))
             t->font_body = b;
@@ -243,6 +254,7 @@ int canlin_theme_resolve(canlin_theme *t, const canlin_theme_source *srcs, size_
             const unsigned char *v = NULL;
             size_t len = 0;
             const char *why;
+            char whybuf[64];
             int rc;
             if (!srcs[i].get)
                 continue;
@@ -256,7 +268,7 @@ int canlin_theme_resolve(canlin_theme *t, const canlin_theme_source *srcs, size_
             else if (!v)
                 why = "empty";
             else
-                why = take(t, key, v, len);
+                why = take(t, key, v, len, whybuf, sizeof whybuf);
             if (!why) {
                 t->from[key] = (unsigned char)i;
                 break;
@@ -360,7 +372,7 @@ void canlin_theme_apply_nk(const canlin_theme *t, float dpi, struct nk_context *
     tab[NK_COLOR_KNOB_CURSOR_ACTIVE] = ac;
     nk_style_from_table(ctx, tab);
 
-    unit = nk_vec2(t->spacing * 0.25f * em, t->spacing * 0.25f * em);
+    unit = nk_vec2(t->spacing * CANLIN_UI_UNIT_SCALE * em, t->spacing * CANLIN_UI_UNIT_SCALE * em);
     s->window.padding = unit;
     s->window.spacing = unit;
     s->window.group_padding = unit;

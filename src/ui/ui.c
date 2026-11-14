@@ -43,7 +43,7 @@ struct canlin_ui {
 };
 
 struct canlin_ui_output {
-    char id[CANLIN_UI_OUTPUT_ID_MAX];
+    char id[CANLIN_UI_OUTPUT_ID_BUF];
     int w, h;
     float dpi;
     int scale;
@@ -279,7 +279,9 @@ static void ui_link(canlin_ui_view *v)
 
 int canlin_ui_scale_valid(int p)
 {
-    return p == 75 || p == 100 || p == 125 || p == 150 || p == 200;
+    return p == CANLIN_UI_SCALE_STEP_75 || p == CANLIN_UI_SCALE_STEP_100 ||
+           p == CANLIN_UI_SCALE_STEP_125 || p == CANLIN_UI_SCALE_STEP_150 ||
+           p == CANLIN_UI_SCALE_STEP_200;
 }
 
 static int dpi_valid(float dpi)
@@ -299,7 +301,7 @@ canlin_ui_output *canlin_ui_output_new(const canlin_ui_output_desc *d, int *err)
         !canlin_ui_scale_valid(d->scale))
         return NULL;
     idlen = strlen(d->id);
-    if (idlen == 0 || idlen >= CANLIN_UI_OUTPUT_ID_MAX)
+    if (idlen == 0 || idlen > CANLIN_UI_OUTPUT_ID_MAX)
         return NULL;
     o = calloc(1, sizeof *o);
     if (o == NULL) {
@@ -810,7 +812,7 @@ typedef struct kb_geo {
 static int kb_geometry(const canlin_ui_view *v, kb_geo *g)
 {
     float em = v->em, inner, ph;
-    g->pad = 2.0f * v->ui->theme.spacing * 0.25f * em;
+    g->pad = CANLIN_UI_PAD_UNITS * v->ui->theme.spacing * CANLIN_UI_UNIT_SCALE * em;
     inner = (float)v->w - 2.0f * g->pad;
     g->kw = CANLIN_UI_KBD_KEY_EM * em;
     if (inner / (float)KB_COLS < g->kw)
@@ -1134,7 +1136,8 @@ static int kb_want(canlin_ui_view *v)
 static void scroll_to_focus(canlin_ui_view *v, float vh)
 {
     unsigned i;
-    float pad = 2.0f * v->ui->theme.spacing * 0.25f * v->em, top, bot;
+    float pad = CANLIN_UI_PAD_UNITS * v->ui->theme.spacing * CANLIN_UI_UNIT_SCALE * v->em;
+    float top, bot;
     for (i = 0; i < v->norder_prev; i++)
         if (v->order_prev[i].id == v->focus && v->focus && v->order_prev[i].h > 0)
             break;
@@ -1269,8 +1272,8 @@ int canlin_ui_view_frame_begin(canlin_ui_view *v)
     v->rec_over = 0;
     memset(v->labels, 0, sizeof v->labels);
     {
-        float em = v->em, unit = v->ui->theme.spacing * 0.25f * em;
-        float pad = 2.0f * unit;
+        float em = v->em, unit = v->ui->theme.spacing * CANLIN_UI_UNIT_SCALE * em;
+        float pad = CANLIN_UI_PAD_UNITS * unit;
         v->cx = pad;
         v->cw = (float)v->w - 2.0f * pad;
         if (v->cw < 1.0f)
@@ -1295,7 +1298,7 @@ void canlin_ui_view_frame_end(canlin_ui_view *v)
         return;
     ctx = &v->nk;
     em = v->em;
-    unit = v->ui->theme.spacing * 0.25f * em;
+    unit = v->ui->theme.spacing * CANLIN_UI_UNIT_SCALE * em;
     /* cy ends with one inter-widget gap; the view ends with its padding instead. */
     v->content_h = v->widgets ? (int)ceilf(v->cy) : 0;
     vh = v->h - kb_height(v);
@@ -1401,12 +1404,12 @@ static float em_of(const canlin_ui_view *v)
 
 static float unit_of(const canlin_ui_view *v)
 {
-    return v->ui->theme.spacing * 0.25f * v->em;
+    return v->ui->theme.spacing * CANLIN_UI_UNIT_SCALE * v->em;
 }
 
 static float gap_of(const canlin_ui_view *v)
 {
-    return 2.0f * unit_of(v);
+    return CANLIN_UI_GAP_UNITS * unit_of(v);
 }
 
 static float touch_of(const canlin_ui_view *v)
@@ -1917,8 +1920,9 @@ static int do_edit(lua_State *L, int multiline)
     } else {
         if (opt_field(L, 4, "rows") != LUA_TNIL) {
             rows = luaL_checkinteger(L, -1);
-            if (rows < 2 || rows > 20)
-                luaL_error(L, "ui:area: opts.rows must be 2-20");
+            if (rows < CANLIN_UI_AREA_ROWS_MIN || rows > CANLIN_UI_AREA_ROWS_MAX)
+                luaL_error(L, "ui:area: opts.rows must be %d-%d", CANLIN_UI_AREA_ROWS_MIN,
+                           CANLIN_UI_AREA_ROWS_MAX);
         }
         lua_pop(L, 1);
     }
@@ -2022,7 +2026,7 @@ static int l_toggle(lua_State *L)
         struct nk_style_toggle saved = v->nk.style.checkbox, *cs = &v->nk.style.checkbox;
         struct nk_style_item none = nk_style_item_color(nk_rgba(0, 0, 0, 0));
         const struct nk_user_font *f = font_of(v, F_BODY);
-        float em = em_of(v), bs = roundf(1.25f * em), gap = gap_of(v);
+        float em = em_of(v), bs = roundf(CANLIN_UI_TOGGLE_BOX_EM * em), gap = gap_of(v);
         float th = floorf(em / 8.0f) < 1.0f ? 1.0f : floorf(em / 8.0f);
         float rad = v->ui->theme.radius * em, inset = th + floorf(unit_of(v) / 2.0f);
         struct nk_rect box, cur;
@@ -2147,10 +2151,10 @@ static int l_meter(lua_State *L)
     count_widget(L, v);
     label = get_str(L, 2, CANLIN_UI_MAX_LABEL, "label", &llen);
     x = luaL_checknumber(L, 3);
-    if (!(x > 0))
-        x = 0; /* also NaN */
-    if (x > 1)
-        x = 1;
+    if (!(x > CANLIN_UI_METER_MIN))
+        x = CANLIN_UI_METER_MIN; /* also NaN */
+    if (x > CANLIN_UI_METER_MAX)
+        x = CANLIN_UI_METER_MAX;
     v->cy += label_row(v, CANLIN_UI_W_METER, label, llen);
     r = place(v, CANLIN_UI_W_METER, CANLIN_UI_P_BOX, v->cx, v->cy, v->cw, em_of(v), 0, 0, 0, 0);
     push(v, r);
@@ -2283,7 +2287,7 @@ static int l_columns(lua_State *L)
     y0 = v->cy;
     v->depth++;
     if (cw >= CANLIN_UI_COLUMNS_EM * em_of(v)) {
-        colgap = 2.0f * gap_of(v);
+        colgap = CANLIN_UI_COL_GAP_UNITS * unit_of(v);
         v->cw = (cw - colgap) / 2.0f;
         run_fn(L, v, 2, cx, cw, depth);
         yl = v->cy;

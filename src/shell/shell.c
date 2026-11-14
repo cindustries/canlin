@@ -650,7 +650,7 @@ int canlin_shell_set_tiling(canlin_shell *sh, canlin_ui_output *o, canlin_shell_
 {
     shell_out *so = find_out(sh, o);
     int i;
-    if (so == NULL || panes < 2 || panes > CANLIN_SHELL_PANES_MAX ||
+    if (so == NULL || panes < CANLIN_SHELL_PANES_MIN || panes > CANLIN_SHELL_PANES_MAX ||
         (orient != CANLIN_SHELL_ROW && orient != CANLIN_SHELL_COLUMN))
         return CANLIN_SHELL_EINVAL;
     for (i = panes; i < CANLIN_SHELL_PANES_MAX; i++)

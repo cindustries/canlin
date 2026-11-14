@@ -35,6 +35,16 @@
 /* Logo decoded dimensions, px per side (§6.1 "<= 1024x1024 decoded"). */
 #define CANLIN_THEME_LOGO_MAX_SIDE      1024u
 
+/* Not in the §8 table: the value ranges of the §6.1 theme keys, checked before a value
+ * is stored (§6.1 table): theme#font#size 10-40 px at DPI 1.0; theme#spacing 0.25-4.0
+ * (em multiplier); theme#radius 0.0-2.0 em. */
+#define CANLIN_THEME_FONT_SIZE_MIN      10
+#define CANLIN_THEME_FONT_SIZE_MAX      40
+#define CANLIN_THEME_SPACING_MIN        0.25f
+#define CANLIN_THEME_SPACING_MAX        4.0f
+#define CANLIN_THEME_RADIUS_MIN         0.0f
+#define CANLIN_THEME_RADIUS_MAX         2.0f
+
 /* Not in the §8 table: format bounds of the §6.1 values, checked before parsing.
  * "#RRGGBB" is exactly 7 bytes; font size 10-40 fits 2 digits; spacing/radius are
  * short decimal strings ("0.25", "1.5"). */
@@ -50,12 +60,35 @@
 #define CANLIN_UI_HEADING1_SCALE        1.5f
 #define CANLIN_UI_HEADING2_SCALE        1.25f
 
-/* Not in the §8 table: outputs (§2.1), chosen here (provisional). UI scale steps in
- * percent are fixed by the spec; the DPI factor bounds keep em (and so the baked atlas
- * size) bounded; the id is the platform's stable output identity (a settings key). */
+/* §2: "Spacing unit = theme#spacing x 0.25 em. View padding and the gap between widgets
+ * are 2 units; the gap between columns is 4 units." */
+#define CANLIN_UI_UNIT_SCALE            0.25f  /* theme#spacing x this = one unit */
+#define CANLIN_UI_PAD_UNITS             2      /* view padding, in units */
+#define CANLIN_UI_GAP_UNITS             2      /* gap between widgets, in units */
+#define CANLIN_UI_COL_GAP_UNITS         4      /* gap between columns, in units */
+
+/* §3 widget table: ui:area "multi-line; opts.rows 2-20"; ui:toggle "1.25 em framed box,
+ * label after one widget gap"; ui:meter "value clamped to 0.0-1.0". */
+#define CANLIN_UI_AREA_ROWS_MIN         2      /* ui:area opts.rows */
+#define CANLIN_UI_AREA_ROWS_MAX         20
+#define CANLIN_UI_TOGGLE_BOX_EM         1.25f  /* ui:toggle framed box */
+#define CANLIN_UI_METER_MIN             0.0f   /* ui:meter value clamp */
+#define CANLIN_UI_METER_MAX             1.0f
+
+/* §2.1: "Steps: 75, 100, 125, 150, 200 %; default 100 %." Fixed by the spec. */
+#define CANLIN_UI_SCALE_STEP_75         75
+#define CANLIN_UI_SCALE_STEP_100        100
+#define CANLIN_UI_SCALE_STEP_125        125
+#define CANLIN_UI_SCALE_STEP_150        150
+#define CANLIN_UI_SCALE_STEP_200        200
+
+/* §8 table: the output DPI factor (outside the bounds is rejected) and the stable output
+ * identity, in bytes. The identity is the platform's output identity (a settings key);
+ * the buffer that holds it is one byte longer, for the terminator. */
 #define CANLIN_UI_DPI_MIN               0.5f
 #define CANLIN_UI_DPI_MAX               4.0f
-#define CANLIN_UI_OUTPUT_ID_MAX         64u
+#define CANLIN_UI_OUTPUT_ID_MAX         63u
+#define CANLIN_UI_OUTPUT_ID_BUF         (CANLIN_UI_OUTPUT_ID_MAX + 1u)
 
 /* Not in the §8 table: per-view bounds of src/ui, chosen here (provisional).
  * Queued input events between two frames; overflow drops the queue. */

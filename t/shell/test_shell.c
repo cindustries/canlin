@@ -310,6 +310,22 @@ static void check_min_panes(float em, int row)
 
 /* ---- §2 mode choice ---- */
 
+/* §2: a tiled output holds 2 or 3 panes; the limits header owns the bounds and the
+ * shell follows them. */
+static void test_panes_min(void)
+{
+    CHECK(CANLIN_SHELL_PANES_MIN == 2);
+    h_init(1600, 900, 100, 3, CANLIN_SHELL_IN_POINTER);
+    CHECK(canlin_shell_set_tiling(H.sh, H.out, CANLIN_SHELL_ROW, CANLIN_SHELL_PANES_MIN - 1) ==
+          CANLIN_SHELL_EINVAL);
+    CHECK(canlin_shell_set_tiling(H.sh, H.out, CANLIN_SHELL_ROW, CANLIN_SHELL_PANES_MIN) ==
+          CANLIN_SHELL_OK);
+    CHECK(canlin_shell_panes(H.sh, H.out) == CANLIN_SHELL_PANES_MIN);
+    CHECK(canlin_shell_set_tiling(H.sh, H.out, CANLIN_SHELL_ROW, CANLIN_SHELL_PANES_MAX + 1) ==
+          CANLIN_SHELL_EINVAL);
+    h_done();
+}
+
 static void test_mode_thresholds(void)
 {
     /* scale 125 %: em = 20 px, so 59.9/60/79.9/80 em are 1198/1200/1598/1600 px. */
@@ -900,6 +916,7 @@ static void test_input_class(void)
 int main(void)
 {
     test_mode_thresholds();
+    test_panes_min();
     test_fallback_restore();
     test_divider_drag();
     test_focus_tap_through();

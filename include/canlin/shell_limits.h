@@ -8,6 +8,9 @@
 
 /* §6 table. */
 #define CANLIN_SHELL_PANES_MAX          3       /* panes per output */
+/* §2: "2 or 3 panes in one row or one column"; §6: "Every output keeps a tiling of 2-3
+ * slots". The §6 table names only the maximum. */
+#define CANLIN_SHELL_PANES_MIN          2       /* panes per output */
 #define CANLIN_SHELL_PANE_MIN           30.0f   /* em, pane extent in the split direction */
 #define CANLIN_SHELL_TILED_MIN          60.0f   /* em output width: tiled available */
 #define CANLIN_SHELL_TILED_DEFAULT      80.0f   /* em output width: tiled by default */
