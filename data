@@ -1,0 +1,35 @@
+---
+claimed_at: 2026-11-14T21:30:10Z
+claimed_by: canlin-worker-runtime
+class: standard
+completed: 2026-11-14T21:30:10Z
+created: 2026-11-14T06:34:46Z
+id: 88
+priority: low
+started: 2026-11-14T17:53:04Z
+status: done
+tags:
+- runtime
+- events
+- api
+title: 'C seam: type the op-complete payload at the ev boundary'
+updated: 2026-11-14T21:30:10Z
+---
+
+canlin_ev_op_complete(ev, h, status, void *payload, bytes, release) carries an untyped payload. src/module/module.c map_op casts d->payload to const canlin_module_result * with no type tag, so a second producer with a different payload shape would be read wrongly. Latent today: the only producer is src/llm/llm.c:897, which passes the correct type, and include/canlin/module.h:67 documents the contract in prose only. Done when the payload carries a type tag or a typed wrapper exists. Found by the 2026-11-14 review.
+
+Implementation in the runtime lane: canlin_module_result now begins with an ASCII-magic type tag (CANLIN_MODULE_RESULT_TAG 0x4d524553u, 'MRES', like the existing source tags); src/module/module.c map_op checks the tag (and that the payload is at least sizeof(canlin_module_result)) before reading a single field of the body, and refuses an unstamped payload with ok=false code=unavailable instead of following foreign pointers. The ev scheduler stays payload-agnostic: canlin_ev_op_complete's signature is unchanged. Test: t/module/test_module.c test_op_payload_shape (a second producer's payload of another shape, full size and truncated) - red without the check (the foreign producer's own code 'denied' reached Lua), green with it; registered in main(). Existing constructions in that file now carry the tag.
+
+Neighbour lane: src/llm/llm.c needed the producer-side stamp (one line, res->r.tag = CANLIN_MODULE_RESULT_TAG, in req_pump). Without it every llm result would be refused, so the one-line edit was made and is reported here for the netllm lane to confirm. Without it the module layer refuses every llm result and the assistant's results break.
+
+Drift found, not fixed here (other lanes): (1) src/app/assistant.c:369 route_done reads d->payload as const canlin_module_result * without checking the tag - the same hole in the platform lane; (2) core API spec 6 records 'canlin_module_result {value | code, message}' - now stale, the doc lane owns it; (3) the llm->module op-completion path (src/llm/llm.c:897) has no test at all - t/app/test_assistant.c does not drive an OP delivery.
+
+Gates: make BUILD=build/runtime test - ALL TESTS PASSED (host). i686/QEMU and android-armv7 not runnable here (no i686-linux-musl-gcc, no device attached).
+
+Ready for review: the op-complete payload now carries a type tag (CANLIN_MODULE_RESULT_TAG) that src/module/module.c checks before reading the body, so a second producer's payload is refused instead of misread. t/module/test_module.c test_op_payload_shape is red without the check. make BUILD=build/runtime test: ALL TESTS PASSED (host only; no i686/QEMU, no device). One-line producer stamp in src/llm/llm.c (neighbour lane) is included and needs the netllm lane's eye; findings for src/app/assistant.c (platform lane) and the core API spec 6 (doc lane) are in the card's notes.
+
+Evidence added. The pre-change state (git HEAD's module.c and module.h, built in a scratch tree outside the repo) with the new test: the foreign producer's own code 'denied' reached Lua (3-4 CHECK failures), and the SUCCESS case of the same foreign payload crashed the suite. ASan on that pre-change build: 'SEGV on unknown address 0x00004f544845 ... #0 check_rec module.c:77 #1 canlin_value_check module.c:116 #2 map_op module.c:446 #3 canlin_module_deliver module.c:851' - the module layer read the other producer's own word ('OTHR' = 0x4f544845) as a value pointer and dereferenced it. The latent hole was a wild-pointer read, not only a misread.
+
+With the tag check: t/module/test_module.c 2751 checks pass, and the same suite under the sanitizers (make BUILD=build/runtime SAN=asan) passes with no report. make BUILD=build/runtime test: ALL TESTS PASSED.
+
+2026-11-14 21:30 Review 2026-11-14: fixed and reviewed. The payload now begins with an in-band type tag (CANLIN_MODULE_RESULT_TAG, 'MRES'), in the shape the tree already uses for its source tags, and the module layer checks the tag and the size before it reads any field of the body - op_result_ok in src/module/module.c. An unstamped payload is refused as ok=false, code=unavailable, message='result is not a module result', and its words are never read. The producer stamps the result in src/llm/llm.c, one line in the neighbouring lane, flagged on the card. The red proof is the strongest of this session: without the tag the foreign producer's own code reached Lua and the suite crashed with a SEGV - the foreign word was taken for a value pointer and dereferenced, so the hole was a wild-pointer read, not only a misread. With the tag the module suite is green (2751 checks) and clean under the sanitizers. Committed as 36d5beb. The main agent verified the module suite and then the full host suite: ALL TESTS PASSED. Three findings are not fixed by this card: src/app/assistant.c:369 reads d->payload as a module result without the tag - the same hole in the platform lane, now k122; core API spec §6 still records the old struct - k123; and the llm to module op-completion path has no test at all, so the producer stamp is covered by no suite - k124.
