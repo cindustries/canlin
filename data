@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-22T19:40:42Z
+claimed_by: canlin-worker-4
+class: standard
+completed: 2026-11-14T06:35:52Z
+created: 2026-09-22T19:29:04Z
+id: 4
+priority: high
+started: 2026-09-22T19:29:16Z
+status: done
+tags:
+- runtime
+- events
+title: Event scheduler core with fake clock (src/ev)
+updated: 2026-11-14T06:35:52Z
+---
+
+Owner-thread scheduler per event-runtime spec §2-§7: bounded per-module queues, FIFO per (module,generation,source), coalesced invalidation, one-shot monotonic timers with cancel, generation-scoped handles, admission with reserved terminal slot, fake clock + offscreen driver. Numeric limits provisional until core API spec.
+
+Merged 9b59090 (ea9279e). Host + ASan/UBSan green. i686/QEMU skipped (no toolchain). Open questions -> #10.
+
+2026-11-14 06:35 Review 2026-11-14: the implementation holds, the card's merge citation is wrong. 9b59090 is k6's merge (sandbox/Lua), not the ev work: the ev feature is ea9279e, a first-parent commit on main. Present and correct: bounded per-module queues (ev_limits.h 64 items / 256 KiB), FIFO per (module, generation, source), coalesced invalidation, one-shot timers with cancel, generation-scoped handles, admission with a reserved terminal slot, fake clock (src/ev/ev.c:72-85). One precision: the offscreen driver is not shipped code, it is the test harness (t/ev/test_ev.c:24-39). Host make test green (test_ev all checks passed); ASan/UBSan green; P2/i686 not runnable on this host.
