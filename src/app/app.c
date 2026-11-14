@@ -2,6 +2,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "canlin/app.h"
 
+#include "app_int.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,13 +12,16 @@
 #include "canlin/theme.h"
 
 /* The built-in demo module: enough widgets to prove present, touch and the on-screen
- * keyboard (field focus on a touch output). print() goes to the backend's log. */
+ * keyboard (field focus on a touch output). print() goes to the backend's log. The
+ * module has no capability: it must see neither canlin.llm nor canlin.view. */
 static const char DEMO_SRC[] =
     "local M = {}\n"
     "local name = ''\n"
     "local shown = 'Tap the field, type a name, then press Greet.'\n"
     "local presses = 0\n"
-    "function M.init() end\n"
+    "function M.init()\n"
+    "  print('caps ' .. type(canlin.llm) .. ' ' .. type(canlin.view))\n"
+    "end\n"
     "function M.draw(ui)\n"
     "  ui:heading('CanLin')\n"
     "  ui:text('First light: this view is a Lua module drawn by the CanLin runtime.',\n"
@@ -43,12 +48,15 @@ struct canlin_app {
     canlin_shell *sh;
     canlin_module *m;
     canlin_module_source src;
+    canlin_app_session *as;   /* the assistant session (NULL without a transport) */
     canlin_render r;
     unsigned char *px, *dirty, *shadow;
     canlin_loop_shell ls;
     canlin_loop_display inner;   /* the shell display this one wraps */
-    unsigned errors;             /* module error count last logged */
-    canlin_module_state state;   /* module state last logged */
+    unsigned errors;             /* demo module error count last logged */
+    canlin_module_state state;   /* demo module state last logged */
+    unsigned as_errors;          /* assistant module error count last logged */
+    canlin_module_state as_state;/* assistant module state last logged */
 };
 
 static void app_log(canlin_app *a, int level, const char *line)
@@ -61,6 +69,12 @@ static void deliver(void *ud, canlin_ev *ev, const canlin_ev_delivery *d)
 {
     canlin_app *a = ud;
     (void)ev;
+    if (a->as && canlin_module_gen(a->as->m) == d->gen) {
+        /* The assistant session owns the gate: the module's llm and done events go
+         * into it before the module sees them. */
+        canlin_app_assistant_deliver(a->as, d);
+        return;
+    }
     if (a->m && canlin_module_gen(a->m) == d->gen)
         canlin_module_deliver(a->m, d);
 }
@@ -71,6 +85,15 @@ static void print_log(void *ud, const char *msg, size_t len)
     char line[256];
     int n = len > 200 ? 200 : (int)len;
     snprintf(line, sizeof line, "demo: %.*s%s", n, msg, len > 200 ? "..." : "");
+    app_log(a, CANLIN_APP_LOG_INFO, line);
+}
+
+static void assistant_log(void *ud, const char *msg, size_t len)
+{
+    canlin_app *a = ud;
+    char line[256];
+    int n = len > 200 ? 200 : (int)len;
+    snprintf(line, sizeof line, "assistant: %.*s%s", n, msg, len > 200 ? "..." : "");
     app_log(a, CANLIN_APP_LOG_INFO, line);
 }
 
@@ -102,25 +125,34 @@ static int frame_alloc(canlin_app *a, int w, int h)
     return CANLIN_APP_OK;
 }
 
+/* One log line per new module error or state (the demo module and the assistant). */
+static void log_module(canlin_app *a, const char *what, canlin_module *m,
+                        canlin_module_state *state, unsigned *errors)
+{
+    canlin_module_state st = canlin_module_get_state(m);
+    unsigned e = canlin_module_errors(m);
+    char line[320];
+    if (st == *state && e <= *errors)
+        return;
+    snprintf(line, sizeof line, "%s module %s: %s", what,
+             st == CANLIN_MODULE_RUNNING ? "error" :
+             st == CANLIN_MODULE_FAULTED ? "faulted" : "stopped",
+             canlin_module_errmsg(m));
+    app_log(a, st == CANLIN_MODULE_RUNNING ? CANLIN_APP_LOG_WARN : CANLIN_APP_LOG_ERROR, line);
+    *state = st;
+    *errors = e;
+}
+
 /* Display wrapper: the shell's update, then one log line per new module error or state. */
 static void d_update(void *ctx)
 {
     canlin_app *a = ctx;
-    canlin_module_state st;
-    unsigned e;
-    char line[320];
     a->inner.update(a->inner.ctx);
-    st = canlin_module_get_state(a->m);
-    e = canlin_module_errors(a->m);
-    if (st != a->state || e > a->errors) {
-        snprintf(line, sizeof line, "demo module %s: %s",
-                 st == CANLIN_MODULE_RUNNING ? "error" :
-                 st == CANLIN_MODULE_FAULTED ? "faulted" : "stopped",
-                 canlin_module_errmsg(a->m));
-        app_log(a, st == CANLIN_MODULE_RUNNING ? CANLIN_APP_LOG_WARN : CANLIN_APP_LOG_ERROR, line);
-    }
-    a->state = st;
-    a->errors = e;
+    /* The shell gave the assistant module its view: the model view is drawn into it. */
+    canlin_app_assistant_update(a->as);
+    log_module(a, "demo", a->m, &a->state, &a->errors);
+    if (a->as != NULL)
+        log_module(a, "assistant", a->as->m, &a->as_state, &a->as_errors);
 }
 
 static size_t d_outputs(void *ctx)
@@ -215,6 +247,25 @@ canlin_app *canlin_app_new(const canlin_app_config *cfg, int *err)
         goto fail;
     }
 
+    /* The assistant session (the model view, the gate and the assistant module): the
+     * loader owns it, and the module gets canlin.llm and the assistant-view binding
+     * and nothing else. */
+    a->as = canlin_app_assistant_new(a->ev, cfg, assistant_log, a, &rc);
+    if (rc != CANLIN_APP_OK) {
+        app_log(a, CANLIN_APP_LOG_ERROR, "setup: the assistant session refused");
+        e = rc;
+        goto fail;
+    }
+    if (a->as != NULL) {
+        if (canlin_shell_add_module(a->sh, a->as->m, &a->as->src) != CANLIN_SHELL_OK) {
+            app_log(a, CANLIN_APP_LOG_ERROR, "setup: the assistant module refused");
+            e = CANLIN_APP_ESETUP;
+            goto fail;
+        }
+        /* Its pane is a model view (the shell's frame around it). */
+        canlin_shell_set_model_view(a->sh, a->as->m, 1);
+    }
+
     a->ls.sh = a->sh;
     a->ls.out[0].o = a->out;
     a->ls.out[0].r = &a->r;
@@ -237,6 +288,7 @@ void canlin_app_free(canlin_app *a)
         return;
     if (a->sh)
         canlin_shell_free(a->sh);
+    canlin_app_assistant_free(a->as);
     canlin_module_free(a->m);
     if (a->ev)
         canlin_ev_free(a->ev);
@@ -304,6 +356,24 @@ canlin_module *canlin_app_module(canlin_app *a)
 canlin_ui_output *canlin_app_output(canlin_app *a)
 {
     return a ? a->out : NULL;
+}
+
+canlin_llm *canlin_app_llm(canlin_app *a)
+{
+    return a && a->as ? a->as->llm : NULL;
+}
+
+canlin_module *canlin_app_assistant(canlin_app *a)
+{
+    return a && a->as ? a->as->m : NULL;
+}
+
+int canlin_app_open_assistant(canlin_app *a)
+{
+    if (a == NULL || a->as == NULL)
+        return CANLIN_APP_EINVAL;
+    return canlin_shell_assign(a->sh, a->as->m) == CANLIN_SHELL_OK ? CANLIN_APP_OK
+                                                                   : CANLIN_APP_EINVAL;
 }
 
 int64_t canlin_app_local_clock(void *ud)

@@ -4,9 +4,11 @@
  * supplies the clock, the output's metrics and input class, a present hook, and its own
  * wait and sources for canlin_loop; it feeds normalised input through canlin_app_input.
  *
- * Not a framework: no storage, no LLM, no network, no module loading from bundles. The
- * demo module (heading, text, field, button) is compiled in and exists to prove present,
- * touch and the on-screen keyboard on a device.
+ * Not a framework: no storage, no network of its own, no module loading from bundles.
+ * The demo module (heading, text, field, button) is compiled in and exists to prove
+ * present, touch and the on-screen keyboard on a device. The built-in assistant module
+ * (conversation, set_view tool loop) is compiled in as well and needs a provider
+ * transport in the config; without one the app runs without an assistant.
  *
  * Owner thread only; none of these may be called from inside a loop hook's frame (the
  * present hook runs inside one: it may only copy pixels out).
@@ -17,6 +19,7 @@
 #include <stdint.h>
 
 #include "canlin/ev.h"
+#include "canlin/llm.h"
 #include "canlin/loop.h"
 #include "canlin/module.h"
 #include "canlin/render.h"
@@ -52,6 +55,18 @@ typedef struct canlin_app_config {
     /* One line without newline: module print(), theme warnings, module faults. */
     void (*log)(void *ud, int level, const char *line);
     void *log_ud;
+    /* The provider transport of the built-in assistant (LLM providers spec §8). NULL:
+     * the app runs without an assistant module - the device works without any LLM
+     * (module roles spec §2). The transport is the platform's (the native HTTP client,
+     * the browser adapter or the fixture transport of the tests); the app never opens
+     * a socket itself. */
+    canlin_llm_transport llm_transport;
+    /* Plain http endpoints are allowed for loopback profiles only (spec §5). */
+    int llm_allow_insecure_dev;
+    /* The provider profile the assistant asks (NULL or "": the first profile the
+     * LLM context holds). The profile itself is created by the trusted settings
+     * surface through canlin_app_llm(). */
+    const char *assistant_profile;
 } canlin_app_config;
 
 typedef struct canlin_app canlin_app;
@@ -76,6 +91,17 @@ canlin_render *canlin_app_frame(canlin_app *a);
 /* For tests: the demo module and the output. */
 canlin_module *canlin_app_module(canlin_app *a);
 canlin_ui_output *canlin_app_output(canlin_app *a);
+
+/* The LLM context of the built-in assistant (NULL without a transport): the trusted
+ * settings surface creates the profiles and sets the keys here. The modules never see
+ * it - only the assistant's canlin.llm, without URLs and without keys. */
+canlin_llm *canlin_app_llm(canlin_app *a);
+/* The assistant module (NULL without a transport): the module with the assistant role
+ * (module roles spec §2), the one the shell opens for "ask the assistant". */
+canlin_module *canlin_app_assistant(canlin_app *a);
+/* Opens the assistant: the shell shows its view in the focused slot (the switcher's
+ * action). CANLIN_APP_EINVAL without an assistant. */
+int canlin_app_open_assistant(canlin_app *a);
 
 /* Local wall clock for canlin_app_config.wall: seconds since local midnight
  * (localtime_r). */
