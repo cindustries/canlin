@@ -1,0 +1,54 @@
+---
+claimed_at: 2026-11-14T21:59:26Z
+claimed_by: canlin-test-writer
+class: standard
+completed: 2026-11-14T21:59:26Z
+created: 2026-11-14T21:30:35Z
+id: 124
+priority: medium
+started: 2026-11-14T21:30:50Z
+status: done
+tags:
+- test
+- llm
+- module
+title: 'Test: the llm to module op-completion path has no test'
+updated: 2026-11-14T21:59:26Z
+---
+
+The path from src/llm/llm.c:897 to the module's done delivery is not covered by any suite: t/app/test_assistant.c never drives an OP delivery. The producer stamp that canlin#88 added is therefore covered by no test - removing the stamp would break the assistant's tool results and nothing would fail. The card asks for a test that drives an llm result through the delivery into the module and asserts it arrives as a done event with its value. Found by the 2026-11-14 work on k88.
+
+2026-11-14 21:50 Test written, both ends of the delivery observed.
+
+Where and why: t/llm/test_llm.c gets the dedicated test (the LLM lane's suite is where the producer and the module seam meet; it already has the real sandbox, the real module, the fixture transport and the fake clock). t/module/test_module.c was the alternative and is wrong for this: mk/module.mk says the module lane needs ev, lua, render, sandbox and ui - the llm lane needs the module lane (mk/llm.mk), so a test that drives the llm producer cannot live in the module suite without inverting that dependency.
+
+- t/llm/test_llm.c: new test_result_reaches_the_module(). A module in the real sandbox watches for its own done event and prints the whole payload: the handle of its request, the ok flag and every field of the value. Three runs against the fixture transport: a plain answer (value {stop='end'}), a cut-off answer (value {stop='length', dropped_tools=1} - both fields of the table) and a failed answer (ok=false with the producer's code and message). It asserts the handle matches the request, that exactly one done event arrives, that the value's key set is exactly what the producer sent and the types of the fields.
+- t/app/test_assistant.c: test_conversation now asserts that the real built-in assistant module got the done event with its value ('turn ok tool', 'turn ok end'). Before, only the negative case was checked there.
+
+Mutation: the stamp removed in src/llm/llm.c:882 (res->r.tag), tree restored afterwards. The new llm test goes red on 9 of its checks, the app test on 2 more (14 of 212 in the app suite). The module's log shows the refusal: 'done 1 same false' and 'failure unavailable result is not a module result' - the delivery arrives, the value is gone.
+
+Finding, for the card: the premise does not hold. The path is not uncovered. At HEAD (04c0e67, before k122) the same mutation already killed 8 of 136 checks in t/app/test_assistant.c and 151 in t/llm/test_llm.c. What was missing is a test that names the contract in one place and asserts the value itself; that is what this adds.
+
+2026-11-14 21:58 Done: the llm producer's result now has a named test that watches it cross the scheduler and arrive in the module as a done event with its value.
+
+What changed (my part of the tree):
+- t/llm/test_llm.c: new test_result_reaches_the_module(), plus a small split of h_load into h_load_src/h_load so a test can load its own module source. The module runs in the real sandbox with the trusted assistant hook and the real scheduler; it asks the provider over the fixture transport and watches for its own done event, printing the whole payload: the handle of its request, the ok flag and every field of the value. Three runs: a plain answer (value {stop='end'}), a cut-off answer (value {stop='length', dropped_tools=1} - both fields of the table, with their types) and a failed answer (ok=false with the producer's code and message). Asserts the handle matches the request, that exactly one done event arrives, that the value's key set is exactly what the producer sent and the types of the fields.
+- t/app/test_assistant.c: the real built-in assistant module now asserts the done event with its value - 'turn ok tool', 'turn ok end' (the stop reason of the answer) and 'turn failed unavailable provider error: overloaded' (the failure the producer reported). Before, only the negative case was checked there.
+
+Why there and not in t/module/test_module.c: the module lane needs ev, lua, render, sandbox and ui (mk/module.mk), the llm lane needs the module lane (mk/llm.mk). A test that drives the llm producer cannot live in the module suite without inverting the dependency the Makefile's link line documents. The llm lane's suite is where the producer and the module seam meet, and it already has the real sandbox, the real module, the fixture transport and the fake clock.
+
+Verified:
+- make BUILD=build/test2 test: ALL TESTS PASSED (app assistant 254 checks, llm 250403 checks).
+- make BUILD=build/test2 SAN=asan test: ALL SANITIZER TESTS PASSED.
+- Mutation: the stamp removed in src/llm/llm.c:882 (res->r.tag), the source restored afterwards. The new llm test goes red on 9 of its checks, the app suite on 15 (three of them mine: the lines 332, 333 and 380). The module's log shows the refusal: 'done 1 same false' and 'failure unavailable result is not a module result' - the delivery arrives, the value is gone.
+- The new llm test also passes on a tree without k122 (checked on a pristine copy of 04c0e67), so it does not depend on that card's change.
+
+Finding for the card - the premise does not hold: the path is not uncovered. At HEAD (04c0e67, before k122) the same mutation already killed 8 of 136 checks in t/app/test_assistant.c and 151 in t/llm/test_llm.c. What was missing was a test that names the contract in one place and asserts the value itself; that is what this adds. The dispatcher decides what becomes of the card's wording.
+
+Skipped gates, named: i686/P2-QEMU (no i686-linux-musl-gcc on this host), WASM/backend (no gate in the repo and no emscripten here), real device (none attached). Host plus sanitizer only.
+
+Concurrent work: canlin-worker-platform's k125/k126 edit t/app/test_assistant.c and src/app/assistant.c at the same time; my three CHECKs are in that file too and are independent of their tests. The tree was green with both in it.
+
+Proposed commit subject: Cover the llm result's delivery into the module (k124)
+
+2026-11-14 21:59 Review 2026-11-14: fixed and reviewed - and the card's premise was wrong, which the worker said plainly. The path was not uncovered: at HEAD before k122 the same mutation (the producer's stamp removed) already killed 8 checks in t/app/test_assistant.c and 151 in t/llm/test_llm.c. What was missing was a test that names the contract in one place and asserts the value itself, and that is what was added: a module in the real sandbox with the trusted assistant hook asks the provider over the fixture transport and watches for its own done event; the test asserts the handle, the ok flag, the value's key set and the field types, for a plain answer ({stop='end'}), a cut-off one ({stop='length', dropped_tools=1}) and a failed one (ok=false with the producer's code and message). Mutation-verified: with the stamp removed the new test goes red on 9 checks, and the module's log shows the delivery arriving with the value gone. The test sits in t/llm/test_llm.c because a test that drives the llm producer cannot live in the module suite without inverting the dependency the link line documents. Committed as f9936a8; three further assertions in t/app/test_assistant.c (the done event with its value, the stop reason, the provider failure) could not be separated from the platform lane's in-flight work on the same file and land with that commit. Two proposals for the dispatcher: a claim of the form 'mutant X is killed by suite Y' should be checked, not asserted - this card was itself an instance of that, and it is what canlin#89 is about; and the assistant suite's cut-off case exercises p.result.dropped_tools only through the note, while the number itself is asserted in the llm suite only.
