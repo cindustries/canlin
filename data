@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T20:22:09Z
+id: 116
+priority: low
+status: backlog
+tags:
+- ui
+- shell
+- limits
+title: 'UI: the scale factor''s base percent is a literal in the ui and the shell'
+updated: 2026-11-14T20:22:09Z
+---
+
+src/ui/ui.c:355 and src/shell/shell.c:196 compute the scale factor as 'dpi * scale / 100.0f' - the 100 is the scale's base percent, still a literal rather than a named constant. include/canlin/ui_limits.h now names the steps (CANLIN_UI_SCALE_STEP_100 and the rest, added in 6d5b78b) but not the base the factor is divided by. Found by the 2026-11-14 work on k110.
