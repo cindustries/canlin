@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T05:21:04Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T17:40:53Z
+created: 2026-09-22T04:44:22Z
+id: 2
+priority: low
+started: 2026-09-23T05:21:04Z
+status: done
+tags:
+- build
+title: 'Decide how libbee is consumed: git submodule vs vendored snapshot'
+updated: 2026-11-14T17:40:53Z
+---
+
+Record the decision in the spec and in the gnx-worker agent notes.
+
+Decision (Getty 2026-09-23): git submodule. Added at third_party/libbee with url ../libbee (pins e4ad06f, docs only). Bump the pin per libbee release; never edit inside.
+
+2026-11-14 06:38 Review 2026-11-14: the decision is made and implemented, but the card is not finished - the decision is recorded in no spec. .gitmodules points third_party/libbee at ../libbee and the submodule is pinned at e4ad06f, so the decision 'git submodule' is what the tree does. But three spec places still present it as open: system-design §13 says 'libbee consumption (submodule versus pinned snapshot) remains canlin#2', core-api-design §9 says 'BeePack lookup over libbee (after canlin#2)' and ui-design §6 says 'Until libbee is consumed (canlin#2)'. The card asks for the decision to be recorded in the spec, so this stays open until the spec carries it. Not a code defect.
+
+2026-11-14 17:40 Review 2026-11-14: closed. The decision was made and implemented but recorded in no spec; the doc-writer has now written it into the system design §4 and §13, the core API design §9, the UI design §6.2 and the LLM providers design §3 - the last two of which the review had not spotted. Committed as ee91dae. The second ask, the gnx-worker agent notes, cannot be done as written: there is no gnx-worker agent any more (it was renamed to canlin-worker and split into canlin-worker-runtime, -netllm, -ui and -platform) and no agent-notes file exists; the decision now lives in the system design, which is where the specs keep decisions. One seam left for the vendor lane: the canlin-vendoring skill assumes the VERSION/SHA256SUMS snapshot discipline for every C library under third_party/, and a submodule has neither - now k97.
