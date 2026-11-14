@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-11-14T23:57:21Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-14T23:57:21Z
+created: 2026-11-14T19:57:22Z
+id: 115
+priority: low
+started: 2026-11-14T23:35:06Z
+status: done
+tags:
+- assistant
+- llm
+- json
+title: 'Assistant: the module serialises the model''s form values to JSON in Lua'
+updated: 2026-11-14T23:57:21Z
+---
+
+The binding hands the submission out as a Lua table, and the built-in assistant module (k109) serialises those values back to JSON in Lua - a hand-written jstr/jval in the module source. The house has a JSON reader in C (src/net/json.c) but no writer, and the module's writer is not the house's bounded one: it is unbounded in depth except for its own depth > 4 guard, and it replaces control characters with '?'. Two ways out: the binding hands out the submission's own JSON bytes instead of a table (the core built them already, so they are the contract), or the core grows a bounded JSON writer the module uses. The first is smaller. Found by the 2026-11-14 work on k109.
+
+Binding side done (approach a, the smaller one): canlin.view.submission() now hands out the submission's own JSON bytes instead of a Lua table. src/assistant/view.c: canlin_assistant_view_take_lua -> canlin_assistant_view_take_json (the table machinery is deleted, no writer in Lua); include/canlin/assistant_view.h and include/canlin/assistant_binding.h document the new contract; src/assistant/binding.c calls it. t/assistant/test_binding.c pins it: the module receives the core's own bytes (compared with the submission the C side takes) and the values survive, the graph's nodes and ports included - the old Lua writer dropped them at depth > 4. Red/green shown: 19 of 130 checks failed against the old binding, all pass now. Host suite green: make BUILD=build/llm4 test -> ALL TESTS PASSED.
+
+Still open in the platform lane (src/app/assistant.c, not touched here): delete the jstr/jval (lines 49-88) and make line 224 turn(sub) instead of turn('action=' .. tostring(sub.action) .. ' values=' .. jval(sub.values, 1)). Until that hunk lands the module sends 'action=nil values=null' to the provider (indexing a string yields nil, no error). t/app/test_assistant.c does not catch it: its 'Milch' check is satisfied by the set_view tool-call arguments, so it needs a check on the submission's values in the request body.
+
+Nachbesserung: der Vertrag von canlin_assistant_view_take_json() ist im Header vollstaendig. include/canlin/assistant_view.h nennt alle drei Faelle: CANLIN_AV_OK (die Bytes liegen als Lua-String auf dem Stack), CANLIN_AV_ESTALE (es wartet keine Submission, nichts auf dem Stack), CANLIN_AV_EARG (keine View oder kein Lua-State, nichts auf dem Stack). Der Kommentar in src/assistant/view.c nennt dieselben drei Faelle.
+
+Zur Frage nach dem Code: EARG bekommt keinen eigenen Modul-Code. CANLIN_AV_EARG ist C API misuse (include/canlin/assistant_view.h:75) - ein Fehler des Aufrufers, kein Zustand, den ein Modul ausloesen oder verstehen kann, und keiner der Modul-Codes der core API spec §3.1. Das Haus mappt es selbst so: canlin_av_code() (src/assistant/view.c:80-89) schickt jeden ungenannten Status nach invalid, EARG eingeschlossen. Der default-Zweig in src/assistant/binding.c ist also die Hausregel, nicht eine Vermutung; der Kommentar dort sagt es jetzt ausdruecklich. Zudem ist EARG vom Binding aus nicht erreichbar: die Installation verweigert ein Binding ohne View (src/assistant/binding.c:79-80), und L ist der laufende Zustand.
+
+Ergaenzt: t/assistant/test_view.c hat test_take_json_earg() - der Missbrauch wird verweigert (nichts auf dem Stack). Host: make BUILD=build/llm4 test -> ALL TESTS PASSED (assistant view 1925 checks, assistant binding 130, assistant response 3582, app assistant 286). src/app/assistant.c und src/shell/ unberuehrt; die App-Haelfte liegt als k137 im Backlog.
+
+Nachbesserung fertig: der Vertrag von canlin_assistant_view_take_json() nennt im Header jetzt alle drei Faelle (OK, ESTALE, EARG); EARG bleibt ohne eigenen Modul-Code, weil canlin_av_code() jeden ungenannten Status nach invalid schickt; t/assistant/test_view.c pinnt den Missbrauch. Host: make BUILD=build/llm4 test -> ALL TESTS PASSED. Der Baum bleibt commit-faehig, kein Commit von mir.
+
+2026-11-15 review (main): the diff is read and holds - the table machinery is gone, the module receives the core's own bytes, the test compares them byte for byte with the submission the core keeps and reads them with the house JSON reader. The EARG contract is now named in the header and pinned by a test; EARG keeps no module code of its own because canlin_av_code() sends every unnamed status to invalid, which the binding's default does. Committed as 0ba2432 (the six assistant files). The app half - the built-in module that still reads the submission as a table - is card k137 and is not part of this commit; until it lands the module sends action=nil values=null, which t/app/test_assistant.c does not catch (that gap is k139).
