@@ -6,6 +6,7 @@
  * capability never sees canlin.view (it is nil); a revoked grant answers denied, never
  * a pretend success. Exits 0 on success. */
 #include "canlin/assistant_binding.h"
+#include "canlin/json.h"
 #include "canlin/module.h"
 #include "canlin/theme.h"
 #include "canlin/ui.h"
@@ -197,6 +198,7 @@ static const canlin_ui_rect *find(harness *h, int kind, int part, int nth)
 
 static const char mod_src[] =
     "local M = {}\n"
+    "local history = {}\n"   /* the conversation: what goes to the provider */
     "function M.init(ctx)\n"
     "  print('init', type(canlin.view))\n"
     "  if canlin.view then print('fns', type(canlin.view.draw), type(canlin.view.submission)) end\n"
@@ -207,19 +209,25 @@ static const char mod_src[] =
     "  print('draw', rev, code, msg)\n"
     "  local sub, scode, smsg = canlin.view.submission()\n"
     "  if sub then\n"
-    "    print('sub', sub.revision, sub.action)\n"
-    "    print('vals', sub.values.item, sub.values.urgent, sub.values.shop)\n"
-    "    local p = sub.values.plan\n"
-    "    if p then\n"
-    "      local n = p.nodes\n"
-    "      print('graph', #n, n[1].id, n[2].id, n[2].x, p.edges[1].from[1], p.edges[1].from[2],\n"
-    "            p.edges[1].to[1])\n"
-    "    end\n"
+    "    print('sub', type(sub), sub)\n"
+    "    -- what the assistant module does with it: the submission goes into the\n"
+    "    -- conversation as it is, so the provider gets the values the JSON carries\n"
+    "    history[#history + 1] = {role = 'user', text = sub}\n"
+    "    print('msg', history[#history].text)\n"
     "  elseif scode then\n"
     "    print('subfail', scode, smsg)\n"
     "  else\n"
     "    print('subnone')\n"
     "  end\n"
+    "end\n"
+    "return M\n";
+
+/* The module that draws the model view but never takes the submission: the C side
+ * takes it and compares the bytes with the ones the other module received. */
+static const char mod_quiet[] =
+    "local M = {}\n"
+    "function M.draw(ui)\n"
+    "  canlin.view.draw()\n"
     "end\n"
     "return M\n";
 
@@ -251,6 +259,109 @@ static void set_form(harness *h)
     CHECK(r.revision == 1);
 }
 
+/* Presses the submit button of the form: the core builds the submission and the
+ * module takes it in its draw. */
+static void press_submit(harness *h)
+{
+    const canlin_ui_rect *b;
+    int x, y;
+    b = find(h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (b == NULL)
+        return;
+    x = b->x + b->w / 2;
+    y = b->y + b->h / 2;
+    canlin_ev_fake_clock_advance(&h->clock, 1000);
+    post(h, CANLIN_UI_IN_MOTION, x, y, 0);
+    post(h, CANLIN_UI_IN_BUTTON, x, y, 1);
+    h_turns(h, 4);
+    post(h, CANLIN_UI_IN_BUTTON, x, y, 0);
+    h_turns(h, 4);
+}
+
+/* ---- the values of a JSON document ---- */
+
+/* The text of the log line that starts with (prefix), copied into buf. The JSON of a
+ * submission holds no newline (the core escapes the control bytes), so the line ends
+ * where the JSON ends. */
+static int line_copy(const char *log, const char *prefix, char *buf, size_t cap)
+{
+    const char *p = strstr(log, prefix);
+    size_t n = 0;
+    if (p == NULL)
+        return 0;
+    p += strlen(prefix);
+    while (p[n] != 0 && p[n] != '\n' && n + 1 < cap) {
+        buf[n] = p[n];
+        n++;
+    }
+    buf[n] = 0;
+    return 1;
+}
+
+/* The pairs of a JSON document: "key=value" for every scalar, the value decoded (the
+ * house reader resolves the escapes). The pairs of the values a module hands back are
+ * the pairs of the submission: the values are what the JSON carries. */
+typedef struct pairs {
+    char buf[8192];
+    size_t len;
+    char key[64];
+} pairs;
+
+static int pair_token(void *ud, const canlin_json_token *t)
+{
+    pairs *p = ud;
+    char v[256];
+    size_t n = 0;
+    switch (t->type) {
+    case CANLIN_JSON_KEY:
+        if (t->len < sizeof p->key) {
+            memcpy(p->key, t->ptr, t->len);
+            p->key[t->len] = 0;
+        }
+        return 0;
+    case CANLIN_JSON_STRING:
+    case CANLIN_JSON_NUMBER:
+        n = t->len < sizeof v - 1 ? t->len : sizeof v - 1;
+        memcpy(v, t->ptr, n);
+        v[n] = 0;
+        break;
+    case CANLIN_JSON_TRUE:
+        strcpy(v, "true");
+        break;
+    case CANLIN_JSON_FALSE:
+        strcpy(v, "false");
+        break;
+    case CANLIN_JSON_NULL:
+        strcpy(v, "null");
+        break;
+    default:
+        return 0; /* a container: it holds the values */
+    }
+    if (p->len + strlen(p->key) + strlen(v) + 2 < sizeof p->buf)
+        p->len += (size_t)snprintf(p->buf + p->len, sizeof p->buf - p->len, "%s=%s\n",
+                                   p->key, v);
+    return 0;
+}
+
+/* The pairs of a JSON document; 0 when the bytes are not the JSON they claim to be. */
+static int json_pairs(const char *json, pairs *p)
+{
+    canlin_json js;
+    canlin_json_limits lim;
+    char tok[256];
+    memset(p, 0, sizeof *p);
+    lim.max_depth = 16;
+    lim.max_string = 200;
+    lim.max_number = 32;
+    lim.max_total = CANLIN_AV_SUBMIT_MAX;
+    if (canlin_json_init(&js, &lim, tok, sizeof tok, pair_token, p) != CANLIN_JSON_OK)
+        return 0;
+    if (canlin_json_feed(&js, json, strlen(json)) != CANLIN_JSON_OK)
+        return 0;
+    return canlin_json_finish(&js) == CANLIN_JSON_OK;
+}
+
 /* The capability not granted: the API is absent, the module sees nil. */
 static void test_absent(void)
 {
@@ -270,7 +381,6 @@ static void test_binding(void)
 {
     harness h;
     const canlin_ui_rect *b;
-    int x, y;
     h_init(&h, 600, 800);
     CHECK(h_load(&h, mod_src, 1) == CANLIN_MODULE_OK);
     set_form(&h);
@@ -293,22 +403,70 @@ static void test_binding(void)
     /* nothing is submitted before the user presses the button */
     CHECK(!has(h.log.buf, "sub\t"));
     CHECK(has(h.log.buf, "subnone"));
-    x = b->x + b->w / 2;
-    y = b->y + b->h / 2;
-    canlin_ev_fake_clock_advance(&h.clock, 1000);
-    post(&h, CANLIN_UI_IN_MOTION, x, y, 0);
-    post(&h, CANLIN_UI_IN_BUTTON, x, y, 1);
-    h_turns(&h, 4);
-    post(&h, CANLIN_UI_IN_BUTTON, x, y, 0);
-    h_turns(&h, 4);
-    /* the submission: the declared values of that view, nothing else */
-    CHECK(has(h.log.buf, "sub\t1\tok"));
-    CHECK(has(h.log.buf, "vals\tMilk\tfalse\t2"));
-    CHECK(has(h.log.buf, "graph\t2\ta\tb\t20\ta\tout\tb"));
-    CHECK(count(h.log.buf, "sub\t1\tok") == 1);
+    press_submit(&h);
+    /* the submission: the bytes of that view, nothing else */
+    CHECK(has(h.log.buf, "sub\tstring\t{\"revision\":1,\"action\":\"ok\""));
+    CHECK(count(h.log.buf, "sub\t") == 1);
     /* it waits for one consumer only */
     CHECK(count(h.log.buf, "subnone") >= 1);
     h_done(&h);
+}
+
+/* The submission the module receives: the core's own JSON bytes (UI spec §7), so the
+ * values the module hands back to the provider are the values the JSON carries. The
+ * module used to serialise them in Lua again, which dropped what the JSON held. */
+static void test_submission_json(void)
+{
+    harness h;
+    harness hc;
+    char sub[4096], msg[4096];
+    canlin_av_submission s;
+    pairs pm, ps;
+
+    /* the module takes the submission */
+    h_init(&h, 600, 800);
+    CHECK(h_load(&h, mod_src, 1) == CANLIN_MODULE_OK);
+    set_form(&h);
+    h_turns(&h, 2);
+    press_submit(&h);
+    /* the module receives the bytes, not a table of the module's own making */
+    CHECK(line_copy(h.log.buf, "sub\tstring\t", sub, sizeof sub));
+    CHECK(strstr(sub, "{\"revision\":1,\"action\":\"ok\",\"values\":{") == sub);
+    /* what the module hands back to the provider: the submission's own bytes */
+    CHECK(line_copy(h.log.buf, "msg\t", msg, sizeof msg));
+    CHECK_STR(msg, sub);
+    /* the bytes are the contract's JSON: the house reader reads them */
+    CHECK(json_pairs(msg, &pm));
+    /* the values of the view, the graph's nodes included */
+    CHECK(has(pm.buf, "revision=1\n"));
+    CHECK(has(pm.buf, "action=ok\n"));
+    CHECK(has(pm.buf, "item=Milk\n"));
+    CHECK(has(pm.buf, "urgent=false\n"));
+    CHECK(has(pm.buf, "shop=2\n"));
+    CHECK(has(pm.buf, "id=a\n"));
+    CHECK(has(pm.buf, "title=A\n"));
+    CHECK(has(pm.buf, "x=20\n"));
+    CHECK(has(pm.buf, "id=out\n"));
+    CHECK(has(pm.buf, "id=in\n"));
+    CHECK(has(pm.buf, "from=a\n"));
+    CHECK(has(pm.buf, "to=b\n"));
+    h_done(&h);
+
+    /* the same form, but no module takes the submission: the core's own bytes */
+    h_init(&hc, 600, 800);
+    CHECK(h_load(&hc, mod_quiet, 1) == CANLIN_MODULE_OK);
+    set_form(&hc);
+    h_turns(&hc, 2);
+    press_submit(&hc);
+    CHECK(canlin_assistant_view_pending(hc.av));
+    CHECK(canlin_assistant_view_take(hc.av, &s) == 1);
+    /* the module received the submission's own bytes */
+    CHECK_STR(sub, s.json);
+    /* and the values it hands back are the values the submission carried */
+    CHECK(json_pairs(s.json, &ps));
+    CHECK_STR(pm.buf, ps.buf);
+    canlin_av_submission_free(&s);
+    h_done(&hc);
 }
 
 /* The grant revoked: every answer is denied, never a pretend success. */
@@ -333,6 +491,7 @@ int main(void)
 {
     test_absent();
     test_binding();
+    test_submission_json();
     test_revoked();
     if (failures) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);

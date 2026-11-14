@@ -921,6 +921,17 @@ static void test_submit(void)
     vh_done(&h);
 }
 
+/* The hand-out of the submission names three cases (assistant_view.h): the bytes, no
+ * submission waiting, and the C API misuse. The misuse is refused, not answered. */
+static void test_take_json_earg(void)
+{
+    vh h;
+    vh_init(&h, 600, 400);
+    CHECK(canlin_assistant_view_take_json(NULL, NULL) == CANLIN_AV_EARG);
+    CHECK(canlin_assistant_view_take_json(h.av, NULL) == CANLIN_AV_EARG);
+    vh_done(&h);
+}
+
 static const char *GRAPH =
     "{\"widgets\":[{\"type\":\"graph\",\"id\":\"plan\",\"height\":20,\"nodes\":["
     "{\"id\":\"a\",\"title\":\"A\",\"x\":1,\"y\":1,\"outputs\":[{\"id\":\"out\","
@@ -1188,6 +1199,7 @@ int main(void)
     test_stale_click();
     test_replaced_submission();
     test_submit();
+    test_take_json_earg();
     test_multiline_render();
     test_graph_round_trip();
     test_shell_frame();

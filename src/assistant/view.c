@@ -1785,177 +1785,31 @@ unsigned canlin_assistant_view_submit_refused(const canlin_assistant_view *av)
     return av ? av->refused : 0;
 }
 
-/* ---- the submission as a Lua table ---- */
+/* ---- the submission as its own JSON bytes ---- */
 
-/* The submission's bytes are the contract (UI spec §7); a module sees the same values
- * as a table. The house tokenizer reads them and num_val reads the numbers (both
- * locale-free), so the table carries exactly what the JSON carries. */
-
-#define JL_MAX 16
-
-typedef struct jl {
-    lua_State *L;
-    int depth;
-    int ctype[JL_MAX];   /* 1: object, 2: array */
-    int cidx[JL_MAX];    /* the container's absolute index on the stack */
-    unsigned cn[JL_MAX]; /* the array's next index */
-    char *key[JL_MAX];   /* the object's pending key (owned) */
-    size_t keylen[JL_MAX];
-    int err;
-} jl;
-
-static void jl_keys_free(jl *j)
-{
-    int i;
-    for (i = 0; i < JL_MAX; i++) {
-        free(j->key[i]);
-        j->key[i] = NULL;
-        j->keylen[i] = 0;
-    }
-}
-
-/* The value on top of the stack becomes the value of the current container; the root
- * value (no container) stays on the stack. */
-static void jl_put(jl *j)
-{
-    lua_State *L = j->L;
-    int d = j->depth;
-    if (d < 1)
-        return;
-    if (j->ctype[d] == 1) {
-        /* lua_rawset wants the key below the value. */
-        lua_pushlstring(L, j->key[d] ? j->key[d] : "", j->keylen[d]);
-        lua_insert(L, -2);
-        lua_rawset(L, j->cidx[d]); /* pops the key and the value */
-        free(j->key[d]);
-        j->key[d] = NULL;
-        j->keylen[d] = 0;
-    } else {
-        lua_rawseti(L, j->cidx[d], (lua_Integer)++j->cn[d]);
-    }
-}
-
-static int jl_token(void *ud, const canlin_json_token *t)
-{
-    jl *j = ud;
-    lua_State *L = j->L;
-    switch (t->type) {
-    case CANLIN_JSON_OBJ_BEGIN:
-    case CANLIN_JSON_ARR_BEGIN: {
-        int d;
-        if (j->depth + 1 >= JL_MAX) {
-            j->err = 1;
-            return 1;
-        }
-        lua_createtable(L, 0, 0);
-        d = ++j->depth;
-        j->cidx[d] = lua_gettop(L);
-        j->ctype[d] = t->type == CANLIN_JSON_OBJ_BEGIN ? 1 : 2;
-        j->cn[d] = 0;
-        j->key[d] = NULL;
-        j->keylen[d] = 0;
-        return 0;
-    }
-    case CANLIN_JSON_OBJ_END:
-    case CANLIN_JSON_ARR_END:
-        if (j->depth < 1) {
-            j->err = 1;
-            return 1;
-        }
-        j->depth--;
-        jl_put(j);
-        return 0;
-    case CANLIN_JSON_KEY: {
-        int d = j->depth;
-        char *k;
-        if (d < 1 || j->ctype[d] != 1) {
-            j->err = 1;
-            return 1;
-        }
-        free(j->key[d]);
-        k = malloc(t->len + 1);
-        if (k == NULL) {
-            j->err = 1;
-            return 1;
-        }
-        memcpy(k, t->ptr, t->len);
-        k[t->len] = 0;
-        j->key[d] = k;
-        j->keylen[d] = t->len;
-        return 0;
-    }
-    case CANLIN_JSON_STRING:
-        lua_pushlstring(L, t->ptr, t->len);
-        jl_put(j);
-        return 0;
-    case CANLIN_JSON_NUMBER: {
-        int isint;
-        double v = num_val(t->ptr, t->len, &isint);
-        if (isint)
-            lua_pushinteger(L, (lua_Integer)v);
-        else
-            lua_pushnumber(L, v);
-        jl_put(j);
-        return 0;
-    }
-    case CANLIN_JSON_TRUE:
-        lua_pushboolean(L, 1);
-        jl_put(j);
-        return 0;
-    case CANLIN_JSON_FALSE:
-        lua_pushboolean(L, 0);
-        jl_put(j);
-        return 0;
-    default: /* CANLIN_JSON_NULL */
-        lua_pushnil(L);
-        jl_put(j);
-        return 0;
-    }
-}
-
-int canlin_assistant_view_take_lua(canlin_assistant_view *av, struct lua_State *L)
+/* The submission's bytes are the contract (UI spec §7): the module receives them as the
+ * core built them, so the values it hands back to the provider are the values the JSON
+ * carries. No writer in Lua, no second reading of the values.
+ *
+ * CANLIN_AV_OK: the bytes were pushed (a Lua string). CANLIN_AV_ESTALE: no submission
+ * waits. CANLIN_AV_EARG: no view or no Lua state. */
+int canlin_assistant_view_take_json(canlin_assistant_view *av, struct lua_State *L)
 {
     canlin_av_submission s;
-    jl j;
-    canlin_json js;
-    canlin_json_limits lim;
-    char *tok;
-    int rc;
 
     if (av == NULL || L == NULL)
         return CANLIN_AV_EARG;
     if (!canlin_assistant_view_pending(av))
         return CANLIN_AV_ESTALE;
     /* Charge the work before doing it: the size is known, and the house charges one
-     * unit per byte for parsing a source (sandbox limits). A fault here leaves the
+     * unit per byte for handing a source to the sandbox. A fault here leaves the
      * submission pending; nothing is half-built. */
     canlin_sandbox_charge(L, av->sub.len + 1);
     if (!canlin_assistant_view_take(av, &s))
         return CANLIN_AV_ESTALE;
-    memset(&j, 0, sizeof j);
-    j.L = L;
-    lim.max_depth = JL_MAX - 1;
-    lim.max_string = CANLIN_UI_MAX_TEXT;
-    lim.max_number = CANLIN_AV_MAX_NUMBER;
-    lim.max_total = CANLIN_AV_SUBMIT_MAX;
-    tok = malloc(CANLIN_UI_MAX_TEXT);
-    if (tok == NULL) {
-        canlin_av_submission_free(&s);
-        return CANLIN_AV_ENOMEM;
-    }
-    if (canlin_json_init(&js, &lim, tok, CANLIN_UI_MAX_TEXT, jl_token, &j) != CANLIN_JSON_OK) {
-        free(tok);
-        canlin_av_submission_free(&s);
-        return CANLIN_AV_ENOMEM;
-    }
-    canlin_json_feed(&js, s.json, s.len);
-    rc = canlin_json_finish(&js);
-    free(tok);
-    jl_keys_free(&j);
+    lua_pushlstring(L, s.json, s.len);
     canlin_av_submission_free(&s);
-    if (rc != CANLIN_JSON_OK || j.err)
-        return CANLIN_AV_EINVALID;
-    return CANLIN_AV_OK; /* the table is on the stack */
+    return CANLIN_AV_OK;
 }
 
 /* ---- rendering through the ui object ---- */

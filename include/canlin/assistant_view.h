@@ -255,13 +255,16 @@ void canlin_av_submission_free(canlin_av_submission *s);
  * refused because the values exceeded CANLIN_AV_SUBMIT_MAX. */
 unsigned canlin_assistant_view_submit_refused(const canlin_assistant_view *av);
 
-/* The pending submission as a Lua table {revision = N, action = "id", values = {...}}:
- * the values of the input widgets of that view, exactly as the submission's JSON
- * carries them (the graph value is {nodes, edges}). The table is on the stack.
+/* The pending submission as its own JSON bytes: the submission is the contract (UI spec
+ * §7: {revision, action, values}), so the module receives the bytes the core built and
+ * the values it hands back to the provider are the values the JSON carries. The bytes
+ * are a Lua string on the stack.
  *
- * CANLIN_AV_OK: the table was pushed. CANLIN_AV_ESTALE: no submission waits.
- * CANLIN_AV_EINVALID: the submission could not be read; nothing is on the stack. */
-int canlin_assistant_view_take_lua(canlin_assistant_view *av, struct lua_State *L);
+ * CANLIN_AV_OK: the bytes were pushed (a Lua string on the stack).
+ * CANLIN_AV_ESTALE: no submission waits; nothing is on the stack.
+ * CANLIN_AV_EARG: no view or no Lua state (C API misuse); nothing is on the stack.
+ * The binding answers such a code "invalid", like canlin_av_code does. */
+int canlin_assistant_view_take_json(canlin_assistant_view *av, struct lua_State *L);
 
 #ifdef __cplusplus
 }

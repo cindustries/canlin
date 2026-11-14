@@ -20,9 +20,12 @@
  *         The model view drawn into this module's own view (the ui of M.draw). The
  *         revision drawn (0: no model view yet). nil, "unavailable", <message> when
  *         this module has no view to draw into.
- *   canlin.view.submission() -> {revision = N, action = "id", values = {...}}
- *         The pending submission, taken: it waits for one consumer. nil when none
- *         waits. nil, "denied", <message> when the capability was revoked.
+ *   canlin.view.submission() -> "<the submission's JSON>"
+ *         The pending submission, taken: it waits for one consumer. The bytes are the
+ *         submission's own JSON (UI spec §7: {revision, action, values}), so the
+ *         values the module hands back to the provider are the values the JSON
+ *         carries. nil when none waits. nil, "denied", <message> when the capability
+ *         was revoked.
  */
 #ifndef CANLIN_ASSISTANT_BINDING_H
 #define CANLIN_ASSISTANT_BINDING_H

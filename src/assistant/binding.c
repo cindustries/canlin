@@ -52,23 +52,26 @@ static int l_draw(lua_State *L)
     return 1;
 }
 
-/* canlin.view.submission(): the pending submission, taken. */
+/* canlin.view.submission(): the pending submission, taken: its own JSON bytes. */
 static int l_submission(lua_State *L)
 {
     canlin_assistant_binding *b = bind_of(L);
     int rc;
     if (!b->granted)
         return lfail(L, "denied", "the assistant-view capability was revoked");
-    rc = canlin_assistant_view_take_lua(b->view, L);
+    rc = canlin_assistant_view_take_json(b->view, L);
     switch (rc) {
     case CANLIN_AV_OK:
-        return 1; /* the table */
+        return 1; /* the submission's JSON */
     case CANLIN_AV_ESTALE:
         lua_pushnil(L);
         return 1; /* no submission waits */
     case CANLIN_AV_ENOMEM:
         return lfail(L, "unavailable", "out of memory");
     default:
+        /* EARG is C API misuse (a NULL view or state): canlin_av_code maps it to
+         * "invalid" like every code the house does not name, and a module cannot cause
+         * it. */
         return lfail(L, "invalid", "the submission could not be read");
     }
 }
