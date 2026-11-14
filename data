@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-23T05:49:05Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:42:55Z
+created: 2026-09-23T05:25:20Z
+id: 46
+priority: low
+started: 2026-09-23T05:25:46Z
+status: done
+tags:
+- ui
+title: Scroll keyboard-focused widget into view; test canlin.cancel refuses core timer
+updated: 2026-11-14T06:42:55Z
+---
+
+From canlin#26/#33.
+
+Merged (2052ee9). Host + ASan/UBSan green; i686 musl build of all suites green (native 32-bit run, no xmm in disassembly); QEMU pentium2 not run.
+
+2026-11-14 06:42 Review 2026-11-14: both halves hold. scroll_to_focus (src/ui/ui.c:1115) scrolls by the least amount that shows the focused widget's box with its label row and the view padding, and runs in frame_begin when the tab was used or the keyboard appeared (:1231); test_tab_scroll (t/ui/test_ui.c:2132) covers the already-visible widget, the field with its label row and the wrapping reset. canlin.cancel refuses the core-owned timer handle as stale without disturbing it (src/module/module.c:284), while the module's own handle stays cancellable; test_cancel_refuses_core_timer (t/ui/test_graph.c:1303) covers it. The merge 2052ee9 carries the feature commit 97b03f7. Host make test green (ui 12464, graph 13363 checks); ASan/UBSan green for the ui half, the graph half ran on the host only; the card's i686 native run is not reproducible on this host.
