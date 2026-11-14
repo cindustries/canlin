@@ -2,7 +2,9 @@
  *
  * The contract limits are in ui_limits.h (UI spec §8: CANLIN_UI_TOOL_MAX_BYTES,
  * CANLIN_UI_TOOL_MAX_WIDGETS, CANLIN_UI_MAX_DEPTH, the graph limits). The values below
- * are not in the §8 table: chosen for canlin#20 (provisional, to be checked on P2).
+ * are the GUI tool schema's own (UI spec §7): CANLIN_AV_ID_MAX and CANLIN_AV_CALLS_MAX
+ * are the spec's and carry its wording, the rest were chosen for canlin#20
+ * (provisional, to be checked on P2).
  */
 #ifndef CANLIN_ASSISTANT_LIMITS_H
 #define CANLIN_ASSISTANT_LIMITS_H
@@ -17,12 +19,15 @@
 #define CANLIN_AV_MAX_KEYS          16u
 /* Characters of a JSON number (no view needs more). */
 #define CANLIN_AV_MAX_NUMBER        32u
-/* Widget and graph-element ids: [a-z0-9_-]{1,CANLIN_AV_ID_MAX}. */
+/* Widget and graph-element ids: [a-z0-9_-]{1,CANLIN_AV_ID_MAX} (UI spec §7:
+ * "[a-z0-9_-]{1,32}", unique within the view). */
 #define CANLIN_AV_ID_MAX            32u
 /* Tool-call id bytes (provider-assigned, opaque). */
 #define CANLIN_AV_CALL_ID_MAX       128u
-/* Recorded tool-call results per turn scope (duplicate receipt returns them). A turn
- * with more calls is refused with "full"; results are never evicted within a scope. */
+/* Recorded tool-call results per turn scope (UI spec §7: "Recorded results per turn: at
+ * most 16; a repeated call id returns the recorded result, the same id with different
+ * arguments is invalid"). A turn with more calls is refused with "full"; results are
+ * never evicted within a scope. */
 #define CANLIN_AV_CALLS_MAX         16u
 /* Structured error: JSON path and message bytes including the NUL. */
 #define CANLIN_AV_PATH_MAX          160u
