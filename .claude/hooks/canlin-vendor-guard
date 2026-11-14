@@ -2,7 +2,8 @@
 """Lane guard for the canlin-vendor agent (hooks in .claude/agents/canlin-vendor.md).
 
 pre  — PreToolUse: Edit/Write only inside the vendoring paths; Bash without git
-       history writes or karr mutations.
+       history writes and without karr mutations except the worker's own note,
+       block reason and handoff on its card.
 stop — Stop: every changed path in the working tree must be a vendoring path.
 Exit 2 blocks the call (or the stop) and hands stderr back to the agent.
 """
@@ -45,6 +46,53 @@ def block(msg):
     sys.stderr.write("canlin-vendor lane: " + msg + "\n")
     sys.exit(2)
 
+# karr flags that take a value: they consume the next token, so a note that starts
+# with a dash is a value and not a flag.
+KARR_VALUE_FLAGS = {"-a", "--note", "--block", "-b", "--status", "--claim",
+                    "--priority", "--tags", "--body", "--title", "--reason",
+                    "-t", "--to", "--from", "--release"}
+# What the house rules ask of the worker: note its progress on its card, block it
+# with a reason, hand it over. Everything else on the board is the dispatcher's.
+KARR_EDIT_OK = {"-a", "--note", "--block", "-b"}
+# Read-only: they change nothing on the board.
+KARR_READ_OK = {"list", "show", "board", "help", "version", "log", "diff"}
+
+def karr_calls(cmd):
+    """Every karr invocation in a shell line: (subcommand, flag keys)."""
+    for seg in re.split(r"\|\|?|&&|;|&|\n|\$\(|`|[()]", cmd):
+        try:
+            toks = shlex.split(seg)
+        except ValueError:
+            toks = seg.split()
+        for i, t in enumerate(toks):
+            if os.path.basename(t) != "karr":
+                continue
+            rest = toks[i + 1:]
+            if not rest:
+                continue
+            sub, rest = rest[0], rest[1:]
+            flags, j = [], 0
+            while j < len(rest):
+                tok = rest[j]
+                if not tok.startswith("-"):
+                    j += 1
+                    continue
+                key = tok.split("=", 1)[0]
+                flags.append(key)
+                j += 1
+                if key in KARR_VALUE_FLAGS and j < len(rest):
+                    j += 1  # the value belongs to the flag
+            yield sub, flags
+
+def karr_allowed(sub, flags):
+    if sub in KARR_READ_OK:
+        return True
+    if sub == "handoff":
+        return True
+    if sub == "edit":
+        return all(f in KARR_EDIT_OK for f in flags)
+    return False
+
 data = json.load(sys.stdin)
 ROOT = data.get("cwd") or os.getcwd()
 top = subprocess.run(["git", "-C", ROOT, "rev-parse", "--show-toplevel"],
@@ -70,8 +118,11 @@ if mode == "pre":
         bad = sorted(set(git_subcommands(cmd)) & GIT_WRITES)
         if bad:
             block(f"git {bad[0]}: git history and working-tree resets belong to the dispatcher.")
-        if re.search(r"\bkarr\b\s+(?!list\b|show\b|board\b)\w", cmd):
-            block("karr board mutations belong to the dispatcher; propose tickets in the report.")
+        bad = [(s, f) for s, f in karr_calls(cmd) if not karr_allowed(s, f)]
+        if bad:
+            sub, flags = bad[0]
+            block(f"karr {sub}: board mutations belong to the dispatcher; the worker may "
+                  "note, block and hand over its own card, nothing else.")
     sys.exit(0)
 
 if mode == "stop":
