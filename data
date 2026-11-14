@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-23T05:25:21Z
+claimed_by: orchestrator
+class: standard
+completed: 2026-11-14T06:42:18Z
+created: 2026-09-23T04:21:25Z
+id: 30
+priority: low
+started: 2026-09-23T05:06:44Z
+status: done
+tags:
+- ui
+title: Wake views blocked on EFONT when a font slot frees
+updated: 2026-11-14T06:42:18Z
+---
+
+Today a skipped draw retries only on next invalidation. From canlin#24.
+
+Merged f26f21d. Host + ASan/UBSan green. i686 skipped.
+
+2026-11-14 06:42 Review 2026-11-14: the mechanism holds. font_wake (src/ui/ui.c:224) marks every view of the ui whose last frame was skipped with EFONT as dirty and tells its owner, so the view retries without an external invalidate; ui_unlink runs before the view's own release so a view never wakes itself; the flag is set at ui.c:1208 and cleared on success at :1221. Test test_font_cache_wake (t/ui/test_ui.c:2185) covers four pinned sizes, a module skipped at 200 % and the wake on a freed slot. FINDING: the nk_init_default failure path releases the slot with a NULL ui (ui.c:536), so the wake does not run there - a hole in exactly this mechanism, now k92. Host make test green (ui 12464 checks); ASan/UBSan green; P2/i686 not runnable on this host.
