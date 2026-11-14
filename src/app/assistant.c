@@ -375,16 +375,52 @@ static int op_result_ok(const canlin_ev_delivery *d)
     return tag == CANLIN_MODULE_RESULT_TAG;
 }
 
+/* The code set of core API spec §3.1. The module layer takes a failure code only when
+ * it is one of these (module.c) and falls back to "unavailable" otherwise; the
+ * assistant judges the same completion and must judge it the same way, so a code the
+ * module would never pass on does not reach the user. */
+static const char *const result_codes[] = {"full", "invalid", "unsupported", "denied",
+                                           "unavailable", "stale", NULL};
+
+static int known_code(const char *code)
+{
+    const char *const *p;
+    if (code == NULL)
+        return 0;
+    for (p = result_codes; *p; p++)
+        if (strcmp(*p, code) == 0)
+            return 1;
+    return 0;
+}
+
 /* The module's "done": the turn ends. The gate dispatches the held tool calls only
- * when the turn ended ok. */
+ * when the turn ended ok.
+ *
+ * The judgement is the module layer's judgement (module.c): the same delivery must get
+ * the same code and the same message on both sides, because the assistant is a module
+ * too and its own "done" event carries the module layer's code. A result that exceeded
+ * a bound is a "full" (core API spec §5.2), not an "unavailable": a full refuses
+ * admission now and a retry later may succeed, while "unavailable" says the
+ * capability itself is not usable. */
 static void route_done(canlin_app_session *s, const canlin_ev_delivery *d)
 {
     const canlin_module_result *r = NULL;
+    const canlin_value *v = NULL;
     const char *stop;
     size_t stop_len;
     int typed = op_result_ok(d);
 
     open_response(s, d->handle);
+    if (typed) {
+        r = d->payload; /* the payload is a module result: its fields may be read */
+        v = r->value;
+    }
+    if (d->detail == CANLIN_EV_DETAIL_OVERSIZE) {
+        /* The result exceeded its reservation: the module layer fails it "full". */
+        canlin_assistant_response_finish(s->gate, s->av, 0, "full",
+                                          "result exceeded its reserved size");
+        return;
+    }
     if (d->payload != NULL && !typed) {
         /* A completion of another shape: the turn fails the way the module layer
          * fails it, the words of a foreign payload are not read. */
@@ -392,22 +428,40 @@ static void route_done(canlin_app_session *s, const canlin_ev_delivery *d)
                                           "result is not a module result");
         return;
     }
-    if (typed)
-        r = d->payload; /* the payload is a module result: its fields may be read */
     if (d->status == CANLIN_EV_SUCCESS) {
-        stop = r ? value_str(r->value, "stop", &stop_len) : NULL;
+        int rc = canlin_value_check(v);
+        if (rc == CANLIN_VALUE_ETOOBIG) {
+            /* The result exceeds the marshalling limits: the module layer fails it
+             * "full" (core API spec §5.2), and so does the assistant. */
+            canlin_assistant_response_finish(s->gate, s->av, 0, "full",
+                                              "result exceeds the marshalling limits");
+            return;
+        }
+        if (rc != CANLIN_VALUE_OK) {
+            /* The result is not a marshallable value: the module layer fails it
+             * "invalid" (an argument outside the documented domain). */
+            canlin_assistant_response_finish(s->gate, s->av, 0, "invalid",
+                                              "result is not a marshallable value");
+            return;
+        }
+        stop = v ? value_str(v, "stop", &stop_len) : NULL;
         if (stop != NULL && stop_len == 6 && memcmp(stop, "length", 6) == 0) {
-            int64_t dropped = r ? value_int(r->value, "dropped_tools", 0) : 0;
+            int64_t dropped = v ? value_int(v, "dropped_tools", 0) : 0;
             if (dropped < 0)
                 dropped = 0;
             canlin_assistant_response_finish_length(s->gate, s->av, (unsigned)dropped);
         } else {
             canlin_assistant_response_finish(s->gate, s->av, 1, NULL, NULL);
         }
+    } else if (typed && known_code(r->code)) {
+        /* A code of the spec's set: the module layer passes it on with its message. */
+        canlin_assistant_response_finish(s->gate, s->av, 0, r->code,
+                                          r->message ? r->message : "");
     } else {
-        canlin_assistant_response_finish(s->gate, s->av, 0,
-                                          r && r->code ? r->code : "unavailable",
-                                          r && r->message ? r->message : "");
+        /* An unknown or missing code: the module layer falls back to "unavailable",
+         * so a code the module would never pass on does not reach the user. */
+        canlin_assistant_response_finish(s->gate, s->av, 0, "unavailable",
+                                          "operation failed");
     }
 }
 

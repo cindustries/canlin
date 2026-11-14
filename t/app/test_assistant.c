@@ -326,6 +326,12 @@ static void test_conversation(void)
     CHECK(strstr(record_body(&h, 1), "revision") != NULL);
     CHECK(strstr(record_body(&h, 1), "call_A") != NULL);
 
+    /* the assistant module got the done event with the value of the result: the stop
+     * reason of the answer, once for the turn with the tool call and once for the
+     * plain answer that ended it */
+    CHECK(has(&h, "turn ok tool"));
+    CHECK(has(&h, "turn ok end"));
+
     /* the user's submission of the model's form reaches the provider */
     b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
     CHECK(b != NULL);
@@ -369,6 +375,9 @@ static void test_failed_answer(void)
     /* the discarded call never went back to the provider */
     CHECK(canlin_llm_fixture_records(h.fx) == 1);
     CHECK(!has(&h, "turn ok"));
+    /* the done event carried the failure the producer reported: its code and its
+     * message reached the assistant module */
+    CHECK(has(&h, "turn failed unavailable provider error: overloaded"));
 
     CHECK(h.errors == 0);
     if (h.errors)
@@ -653,6 +662,324 @@ static void test_no_transport(void)
     canlin_app_free(a);
 }
 
+/* ---- the module layer, the other half of the comparison ---- */
+
+/* A witness module in a scheduler of its own: it prints what the module layer tells a
+ * module about a completion. The assistant's gate and the module's own "done" event
+ * are two readings of one delivery, so the witness shows the second reading: both must
+ * judge the same completion the same way. */
+typedef struct witness {
+    canlin_ev_fake_clock clock;
+    canlin_ev *ev;
+    canlin_module *m;
+    char log[LOGMAX];
+    size_t loglen;
+} witness;
+
+static void witness_log(void *ud, const char *msg, size_t len)
+{
+    witness *w = ud;
+    if (w->loglen + len + 2 < sizeof w->log) {
+        memcpy(w->log + w->loglen, msg, len);
+        w->loglen += len;
+        w->log[w->loglen++] = '\n';
+        w->log[w->loglen] = 0;
+    }
+}
+
+static int witness_has(const witness *w, const char *needle)
+{
+    return strstr(w->log, needle) != NULL;
+}
+
+static void witness_deliver(void *ud, canlin_ev *ev, const canlin_ev_delivery *d)
+{
+    witness *w = ud;
+    (void)ev;
+    if (w->m)
+        canlin_module_deliver(w->m, d);
+}
+
+static const char witness_src[] =
+    "local M = {}\n"
+    "function M.event(name, p)\n"
+    "  if name == 'done' then\n"
+    "    if p.ok then print('done ok', p.handle)\n"
+    "    else print('done fail', p.handle, p.code, p.message) end\n"
+    "  end\n"
+    "end\n"
+    "return M\n";
+
+static void witness_init(witness *w)
+{
+    canlin_ev_clock clk;
+    canlin_ev_callbacks cb;
+    canlin_module_source src;
+    canlin_sandbox_config sc;
+    int err = 0;
+
+    memset(w, 0, sizeof *w);
+    w->clock.now = 1000;
+    clk = canlin_ev_fake_clock_bind(&w->clock);
+    cb.deliver = witness_deliver;
+    w->ev = canlin_ev_new(&clk, &cb, w);
+    CHECK(w->ev != NULL);
+    if (w->ev == NULL)
+        exit(1);
+    memset(&src, 0, sizeof src);
+    src.name = "witness";
+    src.version = "1";
+    src.main = witness_src;
+    src.main_len = sizeof witness_src - 1;
+    memset(&sc, 0, sizeof sc);
+    sc.log = witness_log;
+    sc.ud = w;
+    w->m = canlin_module_load(w->ev, &src, &sc, &err);
+    CHECK(w->m != NULL && err == CANLIN_MODULE_OK);
+    if (w->m == NULL)
+        exit(1);
+}
+
+static void witness_done(witness *w)
+{
+    canlin_module_free(w->m);
+    canlin_ev_free(w->ev);
+}
+
+/* An oversize completion: the result exceeded its reservation, so the scheduler
+ * refuses the payload and marks the delivery OVERSIZE. The contract is the module
+ * layer's: a bound refused the result, so the turn fails "full" (core API spec §5.2)
+ * and not "unavailable" - a full is a bound that refuses admission now, a retry later
+ * may succeed, while "unavailable" says the capability itself is not usable. The
+ * assistant must fail it the same way. */
+static void test_oversize_completion(void)
+{
+    session h;
+    witness w;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh, wh;
+    canlin_ev_turn_result tr;
+    canlin_module_result r;
+    const canlin_ar_outcome *o;
+    char line[160];
+
+    session_init(&h);
+    witness_init(&w);
+
+    /* the completion both sides judge: a result bigger than its reservation */
+    memset(&r, 0, sizeof r);
+    r.tag = CANLIN_MODULE_RESULT_TAG;
+    r.code = "denied";
+    r.message = "not allowed";
+
+    /* the assistant's completion */
+    gen = canlin_module_gen(h.s->m);
+    CHECK(gen != 0);
+    CHECK(canlin_ev_op_begin(h.ev, gen, 8, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_SUCCESS, &r, sizeof r, NULL) ==
+          CANLIN_EV_OVERSIZE);
+    canlin_ev_turn(h.ev, &tr);
+
+    /* the assistant says "full": the result exceeded its reserved size */
+    o = canlin_assistant_response_outcome(h.s->gate);
+    CHECK(o != NULL);
+    if (o != NULL) {
+        CHECK(o->state == CANLIN_AR_FAILED);
+        CHECK(strcmp(o->code, "full") == 0);
+        CHECK(strcmp(o->message, "result exceeded its reserved size") == 0);
+    }
+
+    /* the module layer says the same about the same completion */
+    CHECK(canlin_ev_op_begin(w.ev, canlin_module_gen(w.m), 8, NULL, &wh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(w.ev, wh, CANLIN_EV_SUCCESS, &r, sizeof r, NULL) ==
+          CANLIN_EV_OVERSIZE);
+    canlin_ev_turn(w.ev, &tr);
+    snprintf(line, sizeof line, "done fail\t%lld\tfull\tresult exceeded its reserved size",
+             (long long)wh);
+    CHECK(witness_has(&w, line));
+
+    witness_done(&w);
+    session_done(&h);
+}
+
+/* A result whose value exceeds the marshalling limits: the module layer fails it
+ * "full" (core API spec §5.2 - a result exceeding the limits is converted into
+ * ok=false, code="full", never truncated silently), and the assistant must fail it
+ * the same way. */
+static canlin_value_pair many_pairs[CANLIN_MARSHAL_MAX_ENTRIES + 1];
+
+static void test_oversize_value(void)
+{
+    session h;
+    witness w;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh, wh;
+    canlin_ev_turn_result tr;
+    canlin_module_result r;
+    canlin_value many;
+    const canlin_ar_outcome *o;
+    char line[160];
+    unsigned k;
+
+    for (k = 0; k <= CANLIN_MARSHAL_MAX_ENTRIES; k++) {
+        many_pairs[k].key.type = CANLIN_VALUE_INT;
+        many_pairs[k].key.i = (int64_t)k + 1;
+        many_pairs[k].val.type = CANLIN_VALUE_BOOL;
+        many_pairs[k].val.i = 1;
+    }
+    memset(&many, 0, sizeof many);
+    many.type = CANLIN_VALUE_TABLE;
+    many.pairs = many_pairs;
+    many.n = CANLIN_MARSHAL_MAX_ENTRIES + 1;
+    CHECK(canlin_value_check(&many) == CANLIN_VALUE_ETOOBIG);
+
+    session_init(&h);
+    witness_init(&w);
+
+    /* the completion both sides judge: a success whose value is too big */
+    memset(&r, 0, sizeof r);
+    r.tag = CANLIN_MODULE_RESULT_TAG;
+    r.value = &many;
+
+    /* the assistant's completion */
+    gen = canlin_module_gen(h.s->m);
+    CHECK(gen != 0);
+    CHECK(canlin_ev_op_begin(h.ev, gen, sizeof r, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_SUCCESS, &r, sizeof r, NULL) ==
+          CANLIN_EV_OK);
+    canlin_ev_turn(h.ev, &tr);
+
+    /* the assistant says "full": the result exceeds the marshalling limits */
+    o = canlin_assistant_response_outcome(h.s->gate);
+    CHECK(o != NULL);
+    if (o != NULL) {
+        CHECK(o->state == CANLIN_AR_FAILED);
+        CHECK(strcmp(o->code, "full") == 0);
+        CHECK(strcmp(o->message, "result exceeds the marshalling limits") == 0);
+    }
+
+    /* the module layer says the same about the same completion */
+    CHECK(canlin_ev_op_begin(w.ev, canlin_module_gen(w.m), sizeof r, NULL, &wh) ==
+          CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(w.ev, wh, CANLIN_EV_SUCCESS, &r, sizeof r, NULL) ==
+          CANLIN_EV_OK);
+    canlin_ev_turn(w.ev, &tr);
+    snprintf(line, sizeof line, "done fail\t%lld\tfull\tresult exceeds the marshalling limits",
+             (long long)wh);
+    CHECK(witness_has(&w, line));
+
+    witness_done(&w);
+    session_done(&h);
+}
+
+/* A failure code outside the set of core API spec §3.1: the module layer takes the
+ * code only when it is one of the six and falls back to "unavailable" otherwise. A
+ * producer could put a code in front of the user that the module would never pass on,
+ * so the assistant must refuse it the same way. */
+static void test_unknown_failure_code(void)
+{
+    session h;
+    witness w;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh, wh;
+    canlin_ev_turn_result tr;
+    canlin_module_result r;
+    const canlin_ar_outcome *o;
+    char line[160];
+
+    session_init(&h);
+    witness_init(&w);
+
+    /* the completion both sides judge: a failure with a code of the producer's own */
+    memset(&r, 0, sizeof r);
+    r.tag = CANLIN_MODULE_RESULT_TAG;
+    r.code = "boom";
+    r.message = "the producer made a code of its own";
+
+    /* the assistant's completion */
+    gen = canlin_module_gen(h.s->m);
+    CHECK(gen != 0);
+    CHECK(canlin_ev_op_begin(h.ev, gen, sizeof r, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_FAILURE, &r, sizeof r, NULL) ==
+          CANLIN_EV_OK);
+    canlin_ev_turn(h.ev, &tr);
+
+    /* the assistant refuses the code: it becomes "unavailable" */
+    o = canlin_assistant_response_outcome(h.s->gate);
+    CHECK(o != NULL);
+    if (o != NULL) {
+        CHECK(o->state == CANLIN_AR_FAILED);
+        CHECK(strcmp(o->code, "unavailable") == 0);
+        CHECK(strcmp(o->message, "operation failed") == 0);
+        /* the code of the producer never reaches the user */
+        CHECK(strstr(o->code, "boom") == NULL);
+        CHECK(strstr(o->message, "boom") == NULL);
+    }
+
+    /* the module layer refuses it the same way */
+    CHECK(canlin_ev_op_begin(w.ev, canlin_module_gen(w.m), sizeof r, NULL, &wh) ==
+          CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(w.ev, wh, CANLIN_EV_FAILURE, &r, sizeof r, NULL) ==
+          CANLIN_EV_OK);
+    canlin_ev_turn(w.ev, &tr);
+    snprintf(line, sizeof line, "done fail\t%lld\tunavailable\toperation failed",
+             (long long)wh);
+    CHECK(witness_has(&w, line));
+    CHECK(!witness_has(&w, "boom"));
+
+    witness_done(&w);
+    session_done(&h);
+}
+
+/* A code of the set of core API spec §3.1 passes on unchanged, with the message of
+ * the producer: both sides say "denied". */
+static void test_known_failure_code(void)
+{
+    session h;
+    witness w;
+    canlin_ev_gen gen;
+    canlin_ev_handle oh, wh;
+    canlin_ev_turn_result tr;
+    canlin_module_result r;
+    const canlin_ar_outcome *o;
+    char line[160];
+
+    session_init(&h);
+    witness_init(&w);
+
+    memset(&r, 0, sizeof r);
+    r.tag = CANLIN_MODULE_RESULT_TAG;
+    r.code = "denied";
+    r.message = "not allowed";
+
+    /* the assistant's completion */
+    gen = canlin_module_gen(h.s->m);
+    CHECK(canlin_ev_op_begin(h.ev, gen, sizeof r, NULL, &oh) == CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(h.ev, oh, CANLIN_EV_FAILURE, &r, sizeof r, NULL) ==
+          CANLIN_EV_OK);
+    canlin_ev_turn(h.ev, &tr);
+
+    o = canlin_assistant_response_outcome(h.s->gate);
+    CHECK(o != NULL);
+    if (o != NULL) {
+        CHECK(o->state == CANLIN_AR_FAILED);
+        CHECK(strcmp(o->code, "denied") == 0);
+        CHECK(strcmp(o->message, "not allowed") == 0);
+    }
+
+    /* the module layer says the same */
+    CHECK(canlin_ev_op_begin(w.ev, canlin_module_gen(w.m), sizeof r, NULL, &wh) ==
+          CANLIN_EV_OK);
+    CHECK(canlin_ev_op_complete(w.ev, wh, CANLIN_EV_FAILURE, &r, sizeof r, NULL) ==
+          CANLIN_EV_OK);
+    canlin_ev_turn(w.ev, &tr);
+    snprintf(line, sizeof line, "done fail\t%lld\tdenied\tnot allowed", (long long)wh);
+    CHECK(witness_has(&w, line));
+
+    witness_done(&w);
+    session_done(&h);
+}
+
 int main(void)
 {
     test_conversation();
@@ -662,6 +989,10 @@ int main(void)
     test_foreign_payload_survives();
     test_no_transport();
     test_foreign_bytes();
+    test_oversize_completion();
+    test_oversize_value();
+    test_unknown_failure_code();
+    test_known_failure_code();
     if (failures) {
         fprintf(stderr, "%d of %d checks failed\n", failures, checks);
         return 1;
