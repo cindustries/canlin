@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-14T23:51:47Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-14T23:51:47Z
+created: 2026-11-14T20:42:18Z
+id: 120
+priority: low
+started: 2026-11-14T23:35:13Z
+status: done
+tags:
+- ui
+- shell
+- api
+title: 'UI: the shell duplicates the ui''s scale factor formula'
+updated: 2026-11-14T23:51:47Z
+---
+
+src/shell/shell.c:196 computes the chrome font factor as 'dpi * scale / base' and src/ui/ui.c:355 computes the same thing for the ui's em. Two copies of one formula: the shell's factor is not observable through any public API, so it cannot be tested behaviourally - it is proven only by compilation and by sharing the constant. A public canlin_ui_output_factor() would remove the duplication and make the shell's factor testable, but that adds API to the public header. Decide: one helper in the ui, or keep the duplication. Found by the 2026-11-14 work on k116.
+
+Decided: one helper in the ui. Added the public canlin_ui_output_factor(const canlin_ui_output *) to include/canlin/ui.h (next to the other output getters); src/ui/ui.c now owns the one formula (the static factor_of is gone, its three call sites use the public function) and src/shell/shell.c:208 takes its chrome factor from it instead of copying 'dpi * scale / base'. Test first: t/ui/test_ui.c test_output_factor pins the factor against CANLIN_UI_SCALE_BASE_PERCENT in the header and against the em built from it; it failed to compile before the accessor (implicit declaration) and fails when the formula drifts (checked with a mutated divisor: 5 of its checks fail). Evidence: make BUILD=build/ui5 test - ALL TESTS PASSED (ui: 12719 checks passed, shell: 3893 checks passed).
+
+One formula in the ui: the public canlin_ui_output_factor() replaces the shell's copy of 'dpi * scale / base'; the new t/ui/test_ui.c test_output_factor pins it against the header. make BUILD=build/ui5 test: ALL TESTS PASSED. Ready for review.
+
+2026-11-15 review (main): the diff is read and correct - canlin_ui_output_factor() replaces the static factor_of() in the ui and the shell's copy takes it from there; the new test pins the factor against the header's base percent and against the em built from it, so a second copy elsewhere cannot drift. The worker's own second finding does not hold: the theme's factor does reach the drawn chrome (src/ui/theme.c:386 s->button.padding = unit, the roundings at :391-397); only the window's own padding/spacing/border are zeroed by the shell (src/shell/shell.c:231-233). That zeroing is filed as its own card (k138). Committed as 438d987.
