@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T18:43:37Z
+id: 102
+priority: medium
+status: backlog
+tags:
+- runtime
+- limits
+- api
+title: 'Runtime: eight of the ten core API §7 ceilings exist only as prose'
+updated: 2026-11-14T18:43:37Z
+---
+
+Core API spec §7 says 'Each has a compile-time maximum; configuration can lower, never raise, a value beyond its maximum', and its table gives a ceiling for ten rows. Two are real constants and are enforced: CANLIN_SB_MEM_MAX (include/canlin/sandbox_limits.h:14, clamped at src/sandbox/sandbox.c:538) and CANLIN_SB_BUDGET_MAX (:19, clamped at :542). The other eight have no constant anywhere: CANLIN_EV_MAX_MODULES 32, CANLIN_EV_MOD_MAX_ITEMS 256, CANLIN_EV_MOD_MAX_BYTES 1 MiB, CANLIN_EV_PROC_MAX_ITEMS 2048, CANLIN_EV_PROC_MAX_BYTES 16 MiB, CANLIN_EV_MOD_MAX_OPS 128, CANLIN_EV_MOD_MAX_TIMERS 64, CANLIN_MARSHAL_MAX_BYTES 1 MiB. include/canlin/ev_limits.h documents the gap ('recorded in the comment until configuration exists'), so it is a known deviation - but the treatment is inconsistent, and the marshal-bytes ceiling is not even recorded in a comment. Why it matters: three of the eight (module ops, module timers, module count) are already enforced at their v1 value, so when configuration arrives they could be raised past the spec's ceiling without anything stopping them. Give each a constant and clamp it. Found by the 2026-11-14 limits sweep.
