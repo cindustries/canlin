@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T18:22:11Z
+id: 100
+priority: low
+status: backlog
+tags:
+- docs
+- spec
+title: 'Core API spec: §6 still reads forward-looking about what is implemented, and
+  §7 points at the wrong card'
+updated: 2026-11-14T18:22:11Z
+---
+
+Found while marking the core API spec implemented for canlin#4-#16 (k10). Three stale spots in docs/superpowers/specs/2026-09-23-canlin-core-api-design.md: (1) §6 at line 134 still says 'The existing canlin_sandbox_run only executes a chunk. The slice adds one module object' - the module object exists (include/canlin/module.h:131 has canlin_module_load, _deliver, _reload, _stop). (2) §6 at line 149 still says 'Inside the sandbox this needs canlin_sandbox_call(...)' - it exists (include/canlin/sandbox.h:103). (3) §7 at line 201 says the values are 'to be re-measured on real hardware (canlin#3)', while include/canlin/ev_limits.h and module_limits.h also cite canlin#3 but sandbox_limits.h cites canlin#13 - the calibration card whose blocker is the canlin-os QEMU harness. Decide which card the re-measurement belongs to and make the spec and the headers say the same. The doc-writer flagged these and did not touch them, because they are body text and not the status paragraph.
