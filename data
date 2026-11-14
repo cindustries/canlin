@@ -1,0 +1,38 @@
+---
+claimed_at: 2026-11-14T20:13:45Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-14T20:13:45Z
+created: 2026-11-14T18:43:59Z
+id: 104
+priority: low
+started: 2026-11-14T19:57:51Z
+status: done
+tags:
+- net
+- llm
+- limits
+- docs
+title: 'Net/LLM: the limits headers claim the spec is silent where the spec speaks'
+updated: 2026-11-14T20:13:45Z
+---
+
+include/canlin/net_limits.h:22-40 marks nine constants 'Not in the spec' that the HTTP transport spec §8 lists with the same values: CANLIN_NET_IDLE_TIMEOUT_MS 60000, CANLIN_NET_INTERIM_MAX 8, CANLIN_NET_ADDRS_MAX 8, CANLIN_NET_URL_MAX 2048, CANLIN_NET_HOST_MAX 255, CANLIN_NET_REQUEST_HEAD_MAX 16 KiB, CANLIN_NET_REQ_HEADERS_MAX 32, CANLIN_NET_CHUNK_HEX_MAX 8, CANLIN_NET_MSG_MAX 128 (http-transport-design.md:155-162). The header even argues why the spec is silent ('§6 says the idle timeout covers stalls without naming a transport constant') - the spec's §8 table was extended after the header was written (spec commit 198a1e9 at 20:19, header commit 88f2dc7 at 19:45). And include/canlin/llm_limits.h:42 borrows the id pattern [a-z0-9_-]{1,32} from the UI spec, while the LLM spec states no id format - the comment should say where it comes from, so nobody looks for it in llm-providers-design.md. Correct the attribution; the values are right. Found by the 2026-11-14 limits sweep.
+
+net_limits.h: the nine 'Not in the spec' constants are all in the HTTP transport spec §8 table (http-transport-design.md:155-162) with identical values (60 000 / 8 / 8 / 2048 / 255 / 16 KiB / 32 / 8 / 128) - the header predates the spec table (88f2dc7 vs 198a1e9). Comments rewritten to cite §8 and quote its wording; the header preamble now says the whole §8 table is here. No value, macro, code path or behaviour changed (verified: code with comments stripped is byte-identical to HEAD).
+
+llm_limits.h: the CANLIN_LLM_ID_MAX pattern [a-z0-9_-]{1,32} is stated only in the UI spec §7 (ui-design.md:305), not in the LLM providers spec; the comment now says so, so nobody looks for it in llm-providers-design.md.
+
+Checked all 20 net header constants against the §8 table value for value (all match) and all 14 llm constants outside the LLM spec §7 table (all genuinely absent from it, so their 'Not in the spec' marks stay).
+
+Tests: net/llm suites green (sse_test, json_test, http_wire_test, http_test 979 checks, test_llm 250337 checks, test_llm_http 1658 checks), plus ev/sandbox/ui/graph/kbd/render/shell/assistant/app/loop all pass. The full 'make BUILD=build/llm2 test' is currently blocked by t/module/test_module.c failing to compile - that is another agent's uncommitted WIP (their new test_op_payload_shape is not yet registered in the test list), unrelated to this card: the pristine HEAD version of that file compiles and passes (2669 checks) against my headers.
+
+Done: comment-only attribution fix in include/canlin/net_limits.h and include/canlin/llm_limits.h. The nine net constants (IDLE_TIMEOUT_MS 60000, INTERIM_MAX 8, ADDRS_MAX 8, URL_MAX 2048, HOST_MAX 255, REQUEST_HEAD_MAX 16 KiB, REQ_HEADERS_MAX 32, CHUNK_HEX_MAX 8, MSG_MAX 128) are all in the HTTP transport spec §8 table at http-transport-design.md:155-162 with identical values - the header predated the spec table (88f2dc7 19:45 vs 198a1e9 20:19). Comments now cite §8 and quote its wording; the preamble says the whole §8 table is here. llm_limits.h: the CANLIN_LLM_ID_MAX pattern [a-z0-9_-]{1,32} is stated only in the UI spec §7 (ui-design.md:305); the comment now says so.
+
+Verified: all 20 net constants match the §8 table value for value (parsed and compared numerically); all 11 LLM §7 constants match; all 14 remaining llm constants genuinely are absent from the LLM spec, so their 'Not in the spec' marks stay. Code with comments stripped is byte-identical to HEAD - no value, macro, code path or behaviour changed. Both headers compile standalone with -Wall -Wextra -Werror -pedantic.
+
+Tests: make BUILD=build/llm2 test cannot complete because t/module/test_module.c fails to compile - another agent's uncommitted WIP (a module.h payload-tag refactor plus their unregistered test_op_payload_shape). Unrelated to this card: the module suite's include chain never reaches net_limits.h or llm_limits.h, and the pristine HEAD version of test_module.c compiles and passes (2669 checks). Every suite that does build passes: sse_test, json_test, http_wire_test, http_test (972 checks), test_llm (250337 checks), test_llm_http (1634 checks), plus test_ev, test_sandbox, test_theme, test_ui, test_graph, test_kbd, test_render, test_shell, test_view, test_response, test_binding, test_app, test_assistant, test_loop, test_loop_native.
+
+Not committed. Proposed subject: 'docs(net): attribute the transport limits to the spec §8 table they came from'.
+
+2026-11-14 20:13 Review 2026-11-14: fixed and reviewed. Comments only - stripping them from both headers leaves the code byte-identical to HEAD. The nine transport constants are now cited to the HTTP transport spec §8 table with its own wording ('60 000 without a byte', '8 1xx responses', '8 addresses tried', '2048 / 255 bytes', '16 KiB', '32 caller headers', '8 hex digits', '128 bytes error text'); the preamble no longer claims the spec is silent. The LLM id pattern is now named as the UI spec's view-widget id, the LLM spec states no id format. The worker checked all 20 net constants and all 11 LLM constants against their tables value for value - all match - and confirmed the remaining llm constants genuinely are absent from the LLM spec, so their 'Not in the spec' marks stay correct. Committed as 2fd9530. The full suite could not run in the shared tree because another lane's uncommitted work leaves t/module/test_module.c uncompilable; every suite that does build passed, and the pristine HEAD version of test_module.c compiles and passes against these headers. One comment left alone as outside the card's lane: include/canlin/http.h:33 marks CANLIN_VERSION and the User-Agent as 'Not in the spec', while the spec does name the User-Agent at §6 but not the version value - noted on k62.
