@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-11-14T20:21:54Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-14T20:21:54Z
+created: 2026-11-14T18:44:13Z
+id: 106
+priority: low
+started: 2026-11-14T19:57:56Z
+status: done
+tags:
+- platform
+- loop
+- limits
+- docs
+title: 'Platform: loop_limits.h marks two constants ''not in the spec'' that the native
+  loop spec numbers'
+updated: 2026-11-14T20:21:54Z
+---
+
+include/canlin/loop_limits.h:13-15 says CANLIN_LOOP_TURNS_MAX 4u is 'Not in the spec (it names the constant, not its value)', and :21-25 says CANLIN_LOOP_POLLFDS_MAX 32u is 'Not in the spec'. The native loop spec gives both values: 'until !more or CANLIN_LOOP_TURNS_MAX (4) turns' (docs/superpowers/specs/2026-09-24-canlin-native-loop-design.md:36) and 'More descriptors than CANLIN_LOOP_POLLFDS_MAX (32) is counted as an overflow' (:48-49). Same shape as the transport header (k104): the header was written before the spec text was pinned down. Correct the attribution; the values are right. Found by the 2026-11-14 limits sweep.
+
+2026-11-14 20:05 Working: the two constants are correct in value; only the attribution is wrong. The native loop spec §3 numbers both (spec file lines 36 and 48-49), so the 'Not in the spec' marks go and the comments now quote the spec's own wording, the way include/canlin/ui_limits.h does after k101. Also reworded the header preamble: it claimed every 'not in the spec' value 'was chosen by the canlin#61 implementation where the spec is silent' - that is no longer true for these two, and CANLIN_LOOP_OUTPUTS_MAX (still 'not in the spec') does come from the shell spec's CANLIN_SHELL_OUTPUTS_MAX, so the preamble now says such a value names where it comes from (another spec's constant, or the implementation that chose it). Comments only: no value, no macro, no code path, no behaviour. Values 4u and 32u untouched.
+
+2026-11-14 20:17 Done: the two constants keep their values (4u, 32u); only the attribution changed. include/canlin/loop_limits.h now quotes the native loop spec for both - CANLIN_LOOP_TURNS_MAX cites spec §3 step 1 ('canlin_ev_turn() until !more or CANLIN_LOOP_TURNS_MAX (4) turns'), CANLIN_LOOP_POLLFDS_MAX cites spec §3 ('More descriptors than CANLIN_LOOP_POLLFDS_MAX (32) is counted as an overflow and the loop does not wait at all rather than wait on a subset'). The header preamble changed too: it claimed every 'not in the spec' value 'was chosen by the canlin#61 implementation where the spec is silent', which is no longer true for these two and was never right for CANLIN_LOOP_OUTPUTS_MAX (that one comes from the shell spec's CANLIN_SHELL_OUTPUTS_MAX); the preamble now says such a value names where it comes from (another spec's constant, or the implementation that chose it). Comments only - no value, no macro, no code path, no behaviour.
+
+Verified: 'make BUILD=build/plat2 test' -> ALL TESTS PASSED on a pristine copy of HEAD plus this change (the shared tree's t/module/test_module.c does not compile - another agent's in-flight k88 edit, unrelated to this card). The i686/P2 gate was not run: i686-linux-musl-gcc is not installed on this host.
+
+2026-11-14 20:21 Review 2026-11-14: fixed and reviewed. Comments only, no value, no macro, no code path. CANLIN_LOOP_TURNS_MAX now cites the native loop spec §3 step 1 and CANLIN_LOOP_POLLFDS_MAX cites §3 with the spec's own wording. The preamble no longer claims every such value was chosen by the canlin#61 implementation - that was never true of CANLIN_LOOP_OUTPUTS_MAX, which comes from the shell spec's CANLIN_SHELL_OUTPUTS_MAX; the preamble now says such a value names where it comes from. Committed as 2a605ec.
