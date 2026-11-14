@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-14T06:35:04Z
+id: 90
+priority: medium
+status: backlog
+tags:
+- android
+- platform
+title: 'Android: ACTION_CANCEL semantics and the device paths k72 left unverified'
+updated: 2026-11-14T06:35:04Z
+---
+
+k72 landed (82d5dfb, spec 232e49d) and the APK builds here: 'make TARGET=android-armv7 apk' produces build/android-armv7/canlin.apk (377 KB, aapt2/zipalign/apksigner, v1+v2, minSdk 19, package industries.conflict.canlin). Not verified on the A7600-H and still open: the APP_CMD_DESTROY path (no graceful destroy trigger via adb on 4.4), LOW_MEMORY, ACTION_CANCEL semantics, the config-change path, the hardware keyboard, and the event-runtime spec §4 sleep-delay test. No device is attached to this host, so these need a device run. The package name is k84. Found by the 2026-11-14 review of k72.
