@@ -1,0 +1,60 @@
+---
+claimed_at: 2026-11-15T18:27:44Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T18:27:44Z
+created: 2026-11-15T00:29:14Z
+id: 147
+priority: high
+started: 2026-11-15T18:19:28Z
+status: done
+tags:
+- docs
+- spec
+- ui
+- assistant
+title: 'Docs: the specs do not state that the model''s view and the module''s view
+  are two views'
+updated: 2026-11-15T18:27:44Z
+---
+
+Der ADR 0001 (docs/adr/0001-model-view-and-module-view-are-two-views.md) listet die vier Spec-Saetze, die die Entscheidung verpflichtet. Keine davon steht bisher in den Specs: UI §2 (der Begleiter zu "View = the Inhaltsbereich des Moduls, ein vertikaler Scrollbereich im Kern" - die View des Modells ist eine eigene View), UI §4 (die View des Modells sitzt im Rahmen, die eigenen Widgets des Moduls nicht), Shell §1 (der Begleiter zu "One view per module instance") und Shell §3 (was der Rahmen der Modell-View rahmt und wo die Submit-Grenze gezeichnet wird). Die Entscheidung ist vom Maintainer am 2026-11-14 getroffen, die Umsetzung laeuft (k129, k130, k131, k132) - die Specs beschreiben aber, was existiert, nicht was gewuenscht ist: die Saetze muessen mit der umgesetzten Form uebereinstimmen, nicht mit einem Entwurf. Reihenfolge: k129 und k130 zuerst, dann die Spec-Saetze. Fundstellen aus dem ADR: docs/superpowers/specs/2026-09-23-canlin-ui-design.md:30-32 und :130-134, docs/superpowers/specs/2026-09-23-canlin-shell-design.md:20-21 und :53-54.
+
+Die vier Spec-Saetze aus ADR 0001 nachgezogen. Alle vier sitzen in den vorhandenen Abschnitten, es gibt keine neue Ueberschrift.
+
+docs/superpowers/specs/2026-09-23-canlin-ui-design.md:32-35 (UI §2, direkt nach dem View-Bullet):
+- **Model view** = the model's own view, a view of its own: a second vertical scroll region with its own identity space, its own focus and focus order, its own widget state and its own rectangle. An explicit `opts.id` of the module names no identity in the model view, and the module cannot draw into it.
+
+docs/superpowers/specs/2026-09-23-canlin-ui-design.md:137-138 (UI §4, nach dem Satz ueber den Rahmen):
+The model view sits in that frame; the module's own widgets sit outside it, in the module's own view.
+
+docs/superpowers/specs/2026-09-23-canlin-shell-design.md:23-27 (Shell §1, nach "One view per module instance"):
+- **A model pane holds two views.** The model's own view and the module's own view are two views: two identity spaces, two rectangles. The model's widgets live in the model's view, the module's in the module's; a pane without a model view of its own - or too small for two - keeps the old arrangement: the module's own view sits in the frame.
+
+docs/superpowers/specs/2026-09-23-canlin-shell-design.md:60-63 (Shell §3, im Bullet "Model-view frame"):
+The frame frames the model's own view - the label strip and the view - and nothing else: the module's own view sits below it, outside the frame. The submit action of the model's form is drawn inside the frame; the module's own widgets - the assistant's question field among them - sit outside it.
+
+Check gegen die Umsetzung (die Saetze sind in der umgesetzten Form geschrieben, nicht in der Entwurfsform):
+- Die Modell-View ist eine eigene canlin_ui_view: die App erzeugt sie (src/app/app.c:265), haengt den Assistant-View an sie (src/app/assistant.c:433-441) und gibt sie der Shell (src/app/app.c:280-281); die Shell haelt sie (src/shell/shell.c:810-828). Eigene Slot-Tabelle, eigene Identity, eigene Fokusfolge, eigener Graph-Zustand, eigenes Rechteck: der View-Struct traegt sie (src/ui/ui.c:67-141), die Identity entsteht je View (src/ui/ui.c:1679-1704).
+- Das Binding zeichnet das Modell in die Modell-View, nicht in die Modul-View (src/assistant/binding.c:29-53, src/assistant/view.c:2309-2351); das Modul pusht in seinem draw nur seine eigene View (src/module/module.c:398), ein Modul kann also nicht in die Modell-View zeichnen.
+- Die Shell rahmt die Modell-View (src/shell/shell.c:397-424, 1418-1428): der Rahmen umfasst Label-Streifen und Modell-View, die Modul-View sitzt darunter, ausserhalb. Der Submit-Knopf des Modells ist ein Widget der Modell-View (src/assistant/view.c:2250-2258), also im Rahmen; die Frage des Assistant-Moduls ist ein Widget der Modul-View (src/app/assistant.c:169-187), also ausserhalb.
+- Die Tasten und der Text gehen an die Modell-View, wenn sie den Fokus hat (src/shell/shell.c:986-995, 1037-1039).
+- Der Legacy-Fall bleibt bestehen und steht als Ausnahme im Shell-Spec §1: ohne eigene Modell-View oder zu klein fuer zwei Views sitzt die Modul-View im Rahmen (src/shell/shell.c:399-423).
+
+ADR gegen Code:
+(1) Die ADR-Folge "die Tasten und der Text erreichen das fokussierte Modul, und die Shell kann nicht wissen, welche der beiden Views den Tastaturfokus haelt (k131)" ist ueberholt: k131 ist implementiert, die Shell fragt die Modell-View nach ihrem Fokus (src/shell/shell.c:991-995). Die Saetze der Specs nennen das nicht, sie muessen es aber auch nicht.
+(2) Die ADR-Folge "Die Modell-View wird von ihrem eigenen Rahmen getrieben ... das Modell kann gezeichnet werden, ohne dass der draw() des Moduls laeuft" trifft heute nur zur Haelfte zu: der private Lua-Zustand ist da (src/assistant/view.c:2325), getrieben wird der Rahmen aber aus dem Binding heraus im draw des Moduls (src/assistant/binding.c:41, Kommentar src/assistant/binding.c:36-40). Die vier Saetze haengen nicht daran.
+(3) Die Fundstellen des ADR sind teils gewandert: "ui: two stateful widgets with identity" steht jetzt src/ui/ui.c:1700 (ADR nennt 1693). Die Spec-Zeilen des ADR passen (UI 30-32 und 130-134, Shell 20-21 und 53-54; Shell 21 ist heute 21-22, eine Zeile Drift).
+(4) k132 ist offen (die Ereignisse der Modell-View behalten das t=0 des Backends). Dazu steht in den Specs nichts, das ist eine offene Karte und kein Widerspruch.
+
+Ausserdem auf dem Board: k148 (Test: nichts pinnt, dass die Modell-View und die Modul-View zwei Views sind) ist offen und deckt genau diese Trennung noch nicht ab.
+
+Tree: nur die beiden Spec-Dateien geaendert, kein Code, kein ADR, keine andere Spec. Kein Commit - der Baum ist commit-ready.
+
+Proposed commit subject: State that the model's view and the module's view are two views (k147)
+
+Vier Spec-Saetze aus ADR 0001 geschrieben: UI §2 (Model view), UI §4 (Model-View im Rahmen, Modul-Widgets ausserhalb), Shell §1 (Model-Pane hat zwei Views), Shell §3 (was der Rahmen rahmt, wo die Submit-Grenze gezeichnet wird). Geprueft gegen src/app, src/shell, src/assistant und src/ui. Nur docs/superpowers/specs/ geaendert, kein Commit - der Baum ist commit-ready. Details in der Notiz.
+
+Sprache: die vier Saetze sind Englisch, wie alle 16 Specs (en=..., de=0) und wie der ADR, der sie auf Englisch zitiert. Die Hausregel "alles auf Deutsch in den Specs" trifft auf diese Dateien nicht zu - Deutsch sind hier Karten, Notizen und Fachbegriffe. Sonst brechen die Saetze die Stimme der Dokumente.
+
+2026-11-15 (dispatcher): reviewed and committed (23ab60e). The four sentences sit in UI §2 (the model view is a view of its own), UI §4 (the model view sits in the frame, the module's own widgets outside it), Shell §1 (a model pane holds two views; too small for two keeps the old arrangement) and Shell §3 (the frame frames the model's own view and nothing else; the submit action inside, the question field outside). I checked two claims against the code myself: the identity is formed per view (src/ui/ui.c:1680 identity(L, v, ...)), and the shell has the fallback for a pane too small for two (src/shell/shell.c:408). The sentences are English like the other 16 specs - the brief had said German, which was my mistake; the doc writer wrote them in the voice of the files they go into. Was mit noch offen ist: k148 pinnt die Trennung der beiden Views noch nicht mit einem Test, und k132 (die Events der Modell-View behalten t=0) ist weiterhin offen.
