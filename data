@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T01:02:07Z
+id: 166
+priority: low
+status: backlog
+tags:
+- ui
+- kbd
+title: 'UI: the keyboard''s geometry lives in a private enum, so the fixtures cannot
+  follow it'
+updated: 2026-11-15T01:02:07Z
+---
+
+Aus der Arbeit an k117 (2026-11-15): die Tastatur-Geometrie steht in einem privaten Enum in src/ui/ui.c:780 (KB_COLS 11, KB_ROWS 4, KB_KEYS 36) und ist in t/ui/test_kbd.c:450 (5.5f fuer die Spaltenbreite), :469 (keys == 36 und rows == 4), :476 und :486 hart kodiert. Wenn sich die Tastatur aendert, melden die Tests den Bruch nicht - sie pruefen eine Zahl, die es an zwei Stellen gibt. Nach dem Muster von k117 (die Zahl steht genau einmal, in einem Limits-Header) gehoeren KB_COLS, KB_ROWS und KB_KEYS nach include/canlin/ui_limits.h, und die Fixtures lesen sie von dort. Nebenbei: die Trennstaerke des Graphen steht als em/8.0f an zwei Stellen (src/ui/graph.c:917, :1173 und t/ui/test_graph.c:944) - dieselbe Luecke in kleiner.
