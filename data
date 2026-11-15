@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-15T00:28:58Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T00:28:58Z
+created: 2026-11-14T23:59:44Z
+id: 144
+priority: medium
+started: 2026-11-14T23:59:52Z
+status: done
+tags:
+- docs
+- spec
+title: 'Docs: the P2 gate names only the full-system emulator, the user-mode one already
+  runs'
+updated: 2026-11-15T00:28:58Z
+---
+
+The system design (2026-09-22-canlin-system-design.md, §2) says: "The i686 test suite runs under qemu-system-i386 -cpu pentium2 -m 1024 because the host silently executes SSE." That is the full-system harness and it needs a canlin-os image (canlin-os k2, still open). Since 2026-11-15 the suites also run under the user-mode emulator: the musl cross toolchain is at ~/opt/i686-linux-musl-cross, `make TARGET=i686` builds with -march=i686 -mno-sse -static, and the binaries run under `qemu-i386 -cpu pentium2` - a program with movaps dies there with signal 4, so the profile really has no SSE. The spec should say what each of the two gates proves and that the user-mode one is the interim until the image exists. The same goes for the build spine: the target needs a RUNNER hook (k143), otherwise the gate is a hand-typed command.
+
+Specs updated (docs only, no code touched). System design §2 now names the two i686 gates and what each proves: the user-mode gate `qemu-i386 -cpu pentium2 ./build/i686/t/<suite>` (in use since 2026-11-15; instruction compatibility on a Pentium II profile — a program with movaps dies there with signal 4 while plain qemu-i386 runs it) and the full-system gate `qemu-system-i386 -cpu pentium2 -m 1024` with a canlin-os image (system operation: kernel, drivers, framebuffer, boot). The user-mode gate is named as the interim gate; the canlin-os image does not exist yet (canlin-os board, ticket k2, still backlog — its own card says 'Until then canlin has only qemu-i386 user-mode evidence'), and the two are never reported as one QEMU result. §2 also names the musl cross toolchain and the -march=i686 -mno-sse -static build. System design §12 (Testing) follows: portable suites run on host + user-mode QEMU, the full-system P2-QEMU run waits for the image, the i686 suites have no runner hook yet so the gate is started by hand, the machine-readable result comes with the canlin-os harness. http-transport §9 (Gates) and libs §8 (Verification of a lib) now name the user-mode gate in their gate lists and point at system design §2; the http-transport handshake-time number on P2-QEMU is marked as waiting for the canlin-os image. Status line records the 2026-11-15 amendment.
+
+Also found, not touched (outside the doc-writer lane): .claude/skills/canlin-vendoring/SKILL.md:92 names only 'qemu-system-i386 -cpu pentium2 -m 1024 if present' as the i686 gate; .claude/rules/canlin-rules.md:65 says only 'qemu-system-i386 -cpu pentium2' catches an illegal instruction; CLAUDE.md:12 names only the full-system harness as the i686 test command. .claude/skills/canlin-core/SKILL.md:57 already says 'name which one ran' and is fine. The core-api spec (canlin#13, 'blocked on the canlin-os QEMU harness') still stands as written: the interim gate exists, but no budget has been calibrated on it — that is a decision, not a doc fix.
+
+Done: the specs now split the i686 gate into two named gates. system-design §2 (status line records the 2026-11-15 amendment) carries a Gate/Command/What-it-proves table: the user-mode gate 'qemu-i386 -cpu pentium2 ./build/i686/t/<suite>' — the gate that runs today, proving instruction compatibility on a Pentium II profile (a program with movaps dies there with signal 4 while plain qemu-i386 runs it) — and the full-system P2-QEMU gate 'qemu-system-i386 -cpu pentium2 -m 1024' with a canlin-os image, proving system operation (kernel, drivers, framebuffer, boot). §2 states that the user-mode gate is the interim until the canlin-os image exists (canlin-os ticket k2), that the two are never reported as one QEMU result, and that neither emulator substitutes for real P2 hardware for performance. §12 Testing follows (portable suites on host + user-mode QEMU, the full-system run waits for the image, no runner hook yet so the gate is started by hand). The gate lists in http-transport §9 and libs §8 now name the user-mode gate and point at system design §2. Files changed (docs only): 2026-09-22-canlin-system-design.md (status line, §2, §12), 2026-09-23-canlin-http-transport-design.md (§9), 2026-09-24-canlin-libs-design.md (§8). Verified with git diff: only these three spec files changed; the tree also carries k138's code edits (include/canlin/ev_limits.h, t/ev/test_ev.c), untouched by me. No build or test run — the change is documentation only and the tree holds another worker's uncommitted code. Proposed subject: 'Name the i686 user-mode gate beside the full-system one in the specs (k144)'.
+
+2026-11-15 review (main): gelesen und akzeptiert. Die Gate-Tabelle in §2 nennt beide Gates, sagt, was jedes beweist, und haelt fest, dass die beiden nie als ein "QEMU"-Ergebnis berichtet werden. Committet als fadbecc. Der Drift, den der Worker in Dateien ausserhalb seiner Spur gemeldet hat, ist behoben: .claude/rules/canlin-rules.md und .claude/skills/canlin-vendoring/SKILL.md nennen jetzt ebenfalls das User-Mode-Gate (7eaa672). Der Hinweis, dass der i686-Target keinen Runner-Hook hat (k143), ist richtig und als Karte erfasst.
