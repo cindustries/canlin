@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-15T18:06:24Z
+claimed_by: canlin-worker-platform
+class: standard
+created: 2026-11-15T17:45:11Z
+id: 167
+priority: high
+started: 2026-11-15T17:49:30Z
+status: in-progress
+tags:
+- app
+- platform
+- build
+title: 'Build: the runtime has no main() - there is no program the P2 image could
+  boot'
+updated: 2026-11-15T18:06:24Z
+---
+
+Der Release-Manager (k43) und die canlin-os-Sitzung (k1) haben unabhaengig voneinander dasselbe gefunden: es gibt kein Runtime-Binary. Das Makefile sagt es selbst (Makefile:11-12): "The runtime binary that consumes LIBOBJ as a whole does not exist yet"; in src/ gibt es kein main() - nur in t/ und tools/. Gebaut werden Testbinaries, das Kosten-Werkzeug, und nur fuer TARGET=android-armv7 die libcanlin.so und das APK. Es gibt kein install-/dist-/package-Target.
+Damit ist das Abnahmekriterium des canlin-os-Gates ("bis die CanLin-Runtime laeuft") derzeit nicht erreichbar: im Image waere nichts zu booten. Die Kette, die fehlt: (a) ein main(), das die App (src/app/app.c) aufsetzt und die Hauptschleife (src/loop/) fahrt, (b) ein Backend, das die Ausgabe und die Eingabe bringt - das rawfb+evdev-Backend (k64) fuer den P2 oder das SDL2-Backend (k65), beide noch backlog, (c) das Runtime-Paket fuer Buildroot (canlin-os k3).
+Das ist die Karte, an der die P2-Systemlegende haengt: das User-Mode-Gate beweist die Befehle, aber nicht den Betrieb des Systems. Zuerst zu entscheiden ist die Frage, ob main() und Backend in einer Karte oder in zweien kommen - und ob der P2 zuerst ueber das rawfb-Backend laufen soll oder ueber den Desktop-Weg (SDL2) derselben Runtime, was die Bild-Arbeit sparen wuerde.
+
+Arbeit begonnen (Claim canlin-worker-platform). Wegentscheidung: der Desktop-Weg (SDL2) zuerst traegt den Code NICHT - SDL2 ist nicht im Build (k65 offen: vendor oder Systemlib?), und Vendoring ist die Spur von canlin-vendor. Ich mache deshalb zuerst den P2-Weg (rawfb+evdev, k64), der ohne neue Abhaengigkeit auskommt und genau das Artefakt liefert, das ein canlin-os-Image booten kann. Neu: include/canlin/backend.h (Backend-Naht), include/canlin/fb.h (Linux-Framebuffer-Backend, reiner Teil), src/backend/fb.c (Framebuffer + evdev), src/app/runtime.c (App + Loop + Backend verdrahtet), src/app/main.c (das main(), das es nicht gab), mk/backend.mk, t/backend/test_backend.c. Das Runtime-Binary ist /canlin (baut LIBOBJ als Ganzes - zum ersten Mal). Host: build/plat5/canlin zeichnet die UI in eine Datei (Screenshot als Beleg), t/backend laeuft gruen (38 Checks). i686-Gate laeuft.
+
+Korrektur zur letzten Notiz: das Runtime-Binary ist build/<target>/canlin (BUILD ?= build/$(TARGET)), nicht "/canlin".
