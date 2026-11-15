@@ -1,0 +1,52 @@
+CanLin: do not ignore the errors reported by skip_bytes().
+
+Applies to: cmp v20 cmp.c (third_party/cmp), exact context (-F0).
+Upstream: camgunz/cmp PR #81, commit eeceeea7632dfdaded119f0716b17e3c4e235ba1
+("Don't ignore errors reported by skip_bytes()"), merged as e564b7a (2025-08-06).
+See patches/cmp/README.
+
+--- a/cmp.c
++++ b/cmp.c
+@@ -2763,7 +2763,9 @@ bool cmp_skip_object(cmp_ctx_t *ctx, cmp_object_t *obj) {
+             break;
+         }
+ 
+-        skip_bytes(ctx, size);
++        if (!skip_bytes(ctx, size)) {
++          return false;
++        }
+       }
+   }
+ 
+@@ -2830,7 +2832,9 @@ bool cmp_skip_object_flat(cmp_ctx_t *ctx, cmp_object_t *obj) {
+               break;
+           }
+ 
+-          skip_bytes(ctx, size);
++          if (!skip_bytes(ctx, size)) {
++            return false;
++          }
+         }
+     }
+ 
+@@ -2907,7 +2911,9 @@ bool cmp_skip_object_no_limit(cmp_ctx_t *ctx) {
+               break;
+           }
+ 
+-          skip_bytes(ctx, size);
++          if (!skip_bytes(ctx, size)) {
++            return false;
++          }
+         }
+     }
+ 
+@@ -2999,7 +3005,9 @@ bool cmp_skip_object_limit(cmp_ctx_t *ctx, cmp_object_t *obj, uint32_t limit) {
+               break;
+           }
+ 
+-          skip_bytes(ctx, size);
++          if (!skip_bytes(ctx, size)) {
++            return false;
++          }
+         }
+     }

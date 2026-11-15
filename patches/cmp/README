@@ -1,0 +1,37 @@
+Patches applied to vendored cmp at build time
+==============================================
+
+third_party/cmp stays byte-identical to the upstream release tag (v20). mk/cmp.mk
+copies the affected source into $(BUILD)/patched/cmp, applies the patch there with
+`patch -F0` (exact context, no fuzz) and compiles the copy instead of the
+original. If a patch does not apply, the build fails; it never falls back to the
+unpatched file.
+
+Applies to: cmp v20 (third_party/cmp), file cmp.c. Re-check every patch on each
+cmp upgrade: a clean apply is necessary, not sufficient. v20 (2022-03-29) is the
+newest release upstream publishes, and the fix below is on upstream master only,
+so a later release may carry it and make the patch obsolete. The read path of
+cmp.c must keep checking its callback errors, and the skip path must keep
+returning false when a skip fails.
+
+0001-skip-bytes-error-propagation.patch
+    Why: cmp_skip_object, cmp_skip_object_flat, cmp_skip_object_no_limit and
+    cmp_skip_object_limit ignore the return value of skip_bytes(). On a truncated
+    or hostile MessagePack stream the read or skip callback fails, the skip
+    leaves the reader at a wrong offset, and the function still reports success,
+    so the caller goes on parsing from the wrong place. Ticket k69.
+    What: the upstream fix, unchanged: each of the four call sites becomes
+        if (!skip_bytes(ctx, size)) {
+          return false;
+        }
+    Upstream: camgunz/cmp PR #81, commit eeceeea7632dfdaded119f0716b17e3c4e235ba1
+    ("Don't ignore errors reported by skip_bytes()", 2025-02-07), merged as
+    e564b7a (2025-08-06). Nothing of that commit beyond the four call sites is
+    in this patch.
+    Not covered: the reader's offset is not restored after a failed skip - the
+    function now reports the failure, but the reader stays where the failed skip
+    left it, so the caller has to discard it. The patch does not set ctx->error;
+    that field keeps its old value (upstream's behaviour, unchanged). Upstream's
+    own test for the fix (commit b2e0186, test/tests.c) is not vendored, because
+    the upstream test tree is not part of third_party/cmp; a CanLin regression
+    test belongs to t/ and is separate work.
