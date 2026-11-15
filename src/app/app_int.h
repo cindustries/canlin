@@ -15,13 +15,15 @@
 #include "canlin/module.h"
 
 typedef struct canlin_app_session {
+    canlin_ev *ev;                      /* the scheduler: the app asks it for a redraw */
     canlin_llm *llm;                    /* the provider context */
     canlin_assistant_view *av;          /* the model view */
     canlin_assistant_response *gate;    /* the response gate */
     canlin_module *m;                   /* the assistant module */
     canlin_assistant_binding bind;      /* the module's assistant-view capability */
     canlin_module_source src;           /* the module's source (the shell keeps it) */
-    canlin_ui_view *attached;           /* the ui view the assistant view draws into */
+    canlin_ui_view *mview;              /* the model's own view (the app owns it) */
+    uint32_t rev;                       /* the model revision the app has seen */
     canlin_ev_handle cur;               /* the request handle of the open response */
     int have_cur;                       /* 1: cur names a request */
     uint64_t turn;                      /* the scope counter: one per response */
@@ -37,8 +39,13 @@ void canlin_app_assistant_free(canlin_app_session *s);
  * results), then the module. */
 void canlin_app_assistant_deliver(canlin_app_session *s, const canlin_ev_delivery *d);
 
-/* Attaches the assistant view to the module's view (the shell gives the module one
- * when it shows it). */
+/* The model's own view: the app owns it and frees it, the shell holds it and never
+ * frees it. The assistant view is attached to it: the model is drawn into it and a
+ * set_view drops its queued input. */
+void canlin_app_assistant_model_view(canlin_app_session *s, canlin_ui_view *v);
+
+/* The update of the app: the session asks for a redraw of the model's own view when
+ * the view needs a frame (the model was replaced or the view has queued input). */
 void canlin_app_assistant_update(canlin_app_session *s);
 
 #endif

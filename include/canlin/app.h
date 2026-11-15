@@ -88,9 +88,15 @@ int canlin_app_input(canlin_app *a, const canlin_ui_input *in);
 
 /* The output's current frame (full RGB, always the latest rendered state). */
 canlin_render *canlin_app_frame(canlin_app *a);
-/* For tests: the demo module and the output. */
+/* For tests: the demo module, the output and the shell. */
 canlin_module *canlin_app_module(canlin_app *a);
 canlin_ui_output *canlin_app_output(canlin_app *a);
+canlin_shell *canlin_app_shell(canlin_app *a);
+
+/* The model's own view of the assistant (NULL without an assistant): the app owns it
+ * and frees it, the shell holds it and never frees it. The assistant view is attached
+ * to it: the model is drawn into it and a set_view drops its queued input. */
+canlin_ui_view *canlin_app_model_view(canlin_app *a);
 
 /* The LLM context of the built-in assistant (NULL without a transport): the trusted
  * settings surface creates the profiles and sets the keys here. The modules never see

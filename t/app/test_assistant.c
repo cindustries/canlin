@@ -38,7 +38,12 @@ static int failures, checks;
     } while (0)
 
 #define W 800
-#define H 480
+/* The assistant's pane holds two views now: the model's own in the frame and the
+ * module's own below it (half of the pane each). The module's half must fit the
+ * chat content and the on-screen keyboard above it, so the output is taller than a
+ * 480 px screen: on a short pane the keyboard panel lies over the content and
+ * covers the assistant's own button (the UI lane's card). */
+#define H 800
 #define LOGMAX 16384
 
 typedef struct harness {
@@ -217,6 +222,36 @@ static void press(harness *h, const canlin_ui_rect *r)
     settle(h);
 }
 
+/* The press without the release: the press edge is applied in the next frame and the
+ * button asks. No edge follows, so nothing draws after the answer arrives - the test
+ * sees the redraw the app asks for and not one the input causes. */
+static void press_down(harness *h, const canlin_ui_rect *r)
+{
+    canlin_ui_input in;
+    int x, y, i;
+    if (r == NULL) {
+        CHECK(0);
+        return;
+    }
+    x = r->x + r->w / 2;
+    y = r->y + r->h / 2;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_MOTION;
+    in.x = x;
+    in.y = y;
+    canlin_app_input(h->a, &in);
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.x = x;
+    in.y = y;
+    in.down = 1;
+    canlin_app_input(h->a, &in);
+    /* the press edge is applied in the next frame: the button asks the provider */
+    for (i = 0; i < 16 && canlin_llm_fixture_records(h->fx) == 0; i++)
+        CHECK(canlin_loop_iterate(h->l) == CANLIN_LOOP_OK);
+    CHECK(canlin_llm_fixture_records(h->fx) > 0);
+}
+
 static void push_body(harness *h, const char *body)
 {
     canlin_llm_fixture_response r;
@@ -345,8 +380,6 @@ static void test_conversation(void)
     CHECK(strstr(record_body(&h, 2), "ok") != NULL);
 
     CHECK(h.errors == 0);
-    if (h.errors)
-        fprintf(stderr, "log:\n%s", h.log);
     h_done(&h);
 }
 
@@ -410,6 +443,135 @@ static void test_cut_off_answer(void)
     CHECK(h.errors == 0);
     if (h.errors)
         fprintf(stderr, "log:\n%s", h.log);
+    h_done(&h);
+}
+
+/* ---- the model's own view ---- */
+
+/* The app creates the model's own view and hands it to the shell: the pane holds two
+ * views then, the model's own in the frame and the module's own below it. The view
+ * belongs to the app: the shell holds it and never frees it. */
+static void test_model_view(void)
+{
+    harness h;
+    canlin_shell *sh;
+    canlin_ui_view *mv;
+    canlin_shell_rect mr, vr;
+    canlin_ui_input in;
+    int pane = -1, i, np;
+
+    h_init(&h);
+    CHECK(canlin_app_open_assistant(h.a) == CANLIN_APP_OK);
+    settle(&h);
+
+    /* the app owns a view for the model, and it is not the module's own view */
+    mv = canlin_app_model_view(h.a);
+    CHECK(mv != NULL);
+    CHECK(mv != canlin_module_view(canlin_app_assistant(h.a)));
+
+    /* the shell holds it: the pane shows the model's own view in the frame */
+    sh = canlin_app_shell(h.a);
+    CHECK(sh != NULL);
+    np = canlin_shell_panes(sh, canlin_app_output(h.a));
+    for (i = 0; i < np; i++)
+        if (canlin_shell_pane_module(sh, canlin_app_output(h.a), i) == canlin_app_assistant(h.a))
+            pane = i;
+    CHECK(pane >= 0);
+    if (pane < 0) {
+        h_done(&h);
+        return;
+    }
+    CHECK(canlin_shell_part_rect(sh, canlin_app_output(h.a), CANLIN_SHELL_P_MODEL_VIEW, pane,
+                                 &mr) == 1);
+    CHECK(canlin_shell_part_rect(sh, canlin_app_output(h.a), CANLIN_SHELL_P_VIEW, pane, &vr) == 1);
+    CHECK(mr.w > 0 && mr.h > 0);
+    CHECK(mr.y < vr.y); /* the model's own view is above the module's own */
+
+    /* a click in the model's block reaches the model's own view */
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_BUTTON;
+    in.x = mr.x + 2;
+    in.y = mr.y + 2;
+    in.down = 1;
+    CHECK(canlin_app_input(h.a, &in) == CANLIN_SHELL_R_VIEW);
+    CHECK(canlin_ui_view_pending(mv) > 0);
+
+    h_done(&h);
+}
+
+/* The answer replaces the model: the app asks for a redraw, so the new model is on
+ * screen without waiting for the next input. And a set_view drops the queued input of
+ * the model's own view: the assistant view is attached to it. */
+static void test_model_redraw(void)
+{
+    harness h;
+    canlin_ui_view *mv, *modv;
+    canlin_ui_input in;
+    const canlin_ui_rect *f, *b;
+    uint32_t frames;
+    int i;
+
+    h_init(&h);
+    push_body(&h, BODY_FORM);
+    push_body(&h, BODY_TEXT);
+
+    CHECK(canlin_app_open_assistant(h.a) == CANLIN_APP_OK);
+    settle(&h);
+    mv = canlin_app_model_view(h.a);
+    modv = canlin_module_view(canlin_app_assistant(h.a));
+    CHECK(mv != NULL && modv != NULL);
+    if (mv == NULL || modv == NULL) {
+        h_done(&h);
+        return;
+    }
+
+    /* the user asks */
+    f = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0);
+    CHECK(f != NULL);
+    if (f == NULL) {
+        h_done(&h);
+        return;
+    }
+    press(&h, f);
+    press(&h, key(&h, 'h'));
+    press(&h, key(&h, 'i'));
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    press_down(&h, b);
+
+    /* a click waits in the model's own view and in the module's own view, where the
+     * model's widgets are until the binding draws them into the model's own view */
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_MOTION;
+    in.x = f->x + 1;
+    in.y = f->y + 1;
+    CHECK(canlin_ui_view_input(mv, &in) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_input(modv, &in) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_pending(mv) == 1);
+    CHECK(canlin_ui_view_pending(modv) == 1);
+
+    /* the answer arrives and replaces the model */
+    for (i = 0; i < 64 && !has(&h, "turn ok tool"); i++)
+        CHECK(canlin_loop_iterate(h.l) == CANLIN_LOOP_OK);
+    CHECK(has(&h, "turn ok tool"));
+
+    /* the set_view dropped the queued input of the model's own view: the assistant
+     * view is attached to it */
+    CHECK(canlin_ui_view_pending(mv) == 0);
+    /* FINDING (k130): the queued click in the module's own view survived the model
+     * replacement. There the model's widgets are until the binding draws them into
+     * the model's own view, and a click meant for the old model would act on the new
+     * one's widget. k130 closes the gap; this check fails then. */
+    CHECK(canlin_ui_view_pending(modv) == 1);
+
+    /* the app asked for a redraw: the new model is on screen without a new input */
+    frames = canlin_ui_view_frames(modv);
+    for (i = 0; i < 8 && canlin_ui_view_frames(modv) == frames; i++)
+        CHECK(canlin_loop_iterate(h.l) == CANLIN_LOOP_OK);
+    CHECK(canlin_ui_view_frames(modv) > frames);
+    /* the model is drawn: its button and the assistant's own */
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 1) != NULL);
+
     h_done(&h);
 }
 
@@ -985,6 +1147,8 @@ int main(void)
     test_conversation();
     test_failed_answer();
     test_cut_off_answer();
+    test_model_view();
+    test_model_redraw();
     test_foreign_payload();
     test_foreign_payload_survives();
     test_no_transport();

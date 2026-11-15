@@ -46,46 +46,6 @@ static const char ASSISTANT_SRC[] =
     "  history[#history + 1] = m\n"
     "end\n"
     "\n"
-    "-- One JSON text of a string (the model's form values go back to the provider).\n"
-    "local function jstr(s)\n"
-    "  local out = {}\n"
-    "  for i = 1, #s do\n"
-    "    local c = s:sub(i, i)\n"
-    "    if c == '\"' then out[#out + 1] = '\\\\\"'\n"
-    "    elseif c == '\\\\' then out[#out + 1] = '\\\\\\\\'\n"
-    "    elseif c == '\\n' then out[#out + 1] = '\\\\n'\n"
-    "    elseif c == '\\t' then out[#out + 1] = '\\\\t'\n"
-    "    elseif c == '\\r' then out[#out + 1] = '\\\\r'\n"
-    "    elseif c < ' ' then out[#out + 1] = '?'\n"
-    "    else out[#out + 1] = c end\n"
-    "  end\n"
-    "  return '\"' .. table.concat(out) .. '\"'\n"
-    "end\n"
-    "\n"
-    "-- One JSON text of a value of the model's form.\n"
-    "local function jval(v, depth)\n"
-    "  if depth > 4 then return 'null' end\n"
-    "  local t = type(v)\n"
-    "  if t == 'string' then return jstr(v) end\n"
-    "  if t == 'boolean' then return tostring(v) end\n"
-    "  if t == 'number' then return string.format('%g', v) end\n"
-    "  if t ~= 'table' then return 'null' end\n"
-    "  local n = #v\n"
-    "  if n > 0 then\n"
-    "    local out = {}\n"
-    "    for i = 1, n do out[i] = jval(v[i], depth + 1) end\n"
-    "    return '[' .. table.concat(out, ',') .. ']'\n"
-    "  end\n"
-    "  local ks = {}\n"
-    "  for k in pairs(v) do ks[#ks + 1] = k end\n"
-    "  table.sort(ks, function(a, b) return tostring(a) < tostring(b) end)\n"
-    "  local out = {}\n"
-    "  for i = 1, #ks do\n"
-    "    out[i] = jstr(tostring(ks[i])) .. ':' .. jval(v[ks[i]], depth + 1)\n"
-    "  end\n"
-    "  return '{' .. table.concat(out, ',') .. '}'\n"
-    "end\n"
-    "\n"
     "-- The text the view can show: the tail, cut at a UTF-8 boundary.\n"
     "local function show(s)\n"
     "  if #s <= MAX_SHOW then return s end\n"
@@ -218,10 +178,11 @@ static const char ASSISTANT_SRC[] =
     "  if ui:button('Fragen') and question ~= '' then\n"
     "    turn(question)\n"
     "  end\n"
-    "  -- The submission of the model's form goes back to the provider.\n"
+    "  -- The submission of the model's form goes back to the provider: its own JSON\n"
+    "  -- bytes, so the values are the ones the core built.\n"
     "  local sub = canlin.view.submission()\n"
     "  if sub ~= nil then\n"
-    "    turn('action=' .. tostring(sub.action) .. ' values=' .. jval(sub.values, 1))\n"
+    "    turn(sub)\n"
     "  end\n"
     "end\n"
     "\n"
@@ -469,18 +430,47 @@ void canlin_app_assistant_deliver(canlin_app_session *s, const canlin_ev_deliver
     canlin_module_deliver(s->m, d);
 }
 
+void canlin_app_assistant_model_view(canlin_app_session *s, canlin_ui_view *v)
+{
+    if (s == NULL)
+        return;
+    s->mview = v;
+    /* The assistant view draws the model into this view, and a set_view drops its
+     * queued input: the queued input of the old model must not act on the new one. */
+    canlin_assistant_view_attach(s->av, v);
+}
+
+/* The app asks the assistant module to draw again: the draw produces the frame of the
+ * model's own view (the binding draws the model into it), and the shell draws that
+ * new frame. The app owns the view and holds the scheduler, so it is the layer that
+ * can ask. */
+static void ask_frame(canlin_app_session *s)
+{
+    if (s->ev == NULL || s->m == NULL)
+        return;
+    if (canlin_module_get_state(s->m) != CANLIN_MODULE_RUNNING)
+        return;
+    canlin_ev_invalidate(s->ev, canlin_module_gen(s->m));
+}
+
 void canlin_app_assistant_update(canlin_app_session *s)
 {
-    canlin_ui_view *v;
+    uint32_t rev;
     if (s == NULL || s->m == NULL)
         return;
-    v = canlin_module_view(s->m);
-    if (v != NULL && v != s->attached) {
-        /* The model view is drawn into the module's own view; the attach is what
-         * resets the queued input when the model replaces the view. */
-        canlin_assistant_view_attach(s->av, v);
-        s->attached = v;
+    /* The model was replaced: the model's own view needs a frame of the new model. */
+    rev = canlin_assistant_view_revision(s->av);
+    if (rev != s->rev) {
+        s->rev = rev;
+        ask_frame(s);
     }
+    /* The model's own view has queued input: only a frame applies it (the shell routes
+     * the pointer input of the model's block into the view). The count is only read
+     * when the view has a frame: a view that nobody draws into keeps its queued input
+     * for ever, and asking again and again would keep the scheduler busy. */
+    if (s->mview != NULL && canlin_ui_view_frames(s->mview) > 0 &&
+        canlin_ui_view_pending(s->mview) > 0)
+        ask_frame(s);
 }
 
 /* ---- the session ---- */
@@ -507,6 +497,7 @@ canlin_app_session *canlin_app_assistant_new(canlin_ev *ev, const canlin_app_con
     memset(&lc, 0, sizeof lc);
     lc.transport = cfg->llm_transport;
     lc.allow_insecure_dev = cfg->llm_allow_insecure_dev;
+    s->ev = ev;
     s->llm = canlin_llm_new(ev, &lc);
     s->av = canlin_assistant_view_new();
     s->gate = canlin_assistant_response_new();

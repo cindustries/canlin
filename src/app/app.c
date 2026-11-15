@@ -50,6 +50,7 @@ struct canlin_app {
     canlin_module *m;
     canlin_module_source src;
     canlin_app_session *as;   /* the assistant session (NULL without a transport) */
+    canlin_ui_view *mview;    /* the model's own view (the app owns it) */
     canlin_render r;
     unsigned char *px, *dirty, *shadow;
     canlin_loop_shell ls;
@@ -258,13 +259,30 @@ canlin_app *canlin_app_new(const canlin_app_config *cfg, int *err)
         goto fail;
     }
     if (a->as != NULL) {
+        /* The model's own view: the app owns it and frees it, the shell holds it and
+         * never frees it. The model is drawn into it, in its own identity space, focus
+         * and slot table. */
+        a->mview = canlin_ui_view_new(a->ui, a->out, &rc);
+        if (a->mview == NULL) {
+            app_log(a, CANLIN_APP_LOG_ERROR, "setup: the model's view refused");
+            e = CANLIN_APP_ESETUP;
+            goto fail;
+        }
         if (canlin_shell_add_module(a->sh, a->as->m, &a->as->src) != CANLIN_SHELL_OK) {
             app_log(a, CANLIN_APP_LOG_ERROR, "setup: the assistant module refused");
             e = CANLIN_APP_ESETUP;
             goto fail;
         }
-        /* Its pane is a model view (the shell's frame around it). */
+        /* The assistant view draws the model into the model's own view. */
+        canlin_app_assistant_model_view(a->as, a->mview);
+        /* Its pane is a model view (the shell's frame around it) and holds the
+         * model's own view in that frame. */
         canlin_shell_set_model_view(a->sh, a->as->m, 1);
+        if (canlin_shell_attach_model_view(a->sh, a->as->m, a->mview) != CANLIN_SHELL_OK) {
+            app_log(a, CANLIN_APP_LOG_ERROR, "setup: the shell refused the model's view");
+            e = CANLIN_APP_ESETUP;
+            goto fail;
+        }
     }
 
     a->ls.sh = a->sh;
@@ -291,6 +309,9 @@ void canlin_app_free(canlin_app *a)
         canlin_shell_free(a->sh);
     canlin_app_assistant_free(a->as);
     canlin_module_free(a->m);
+    /* The model's own view outlives the shell that held it. */
+    if (a->mview)
+        canlin_ui_view_free(a->mview);
     if (a->ev)
         canlin_ev_free(a->ev);
     if (a->out)
@@ -357,6 +378,16 @@ canlin_module *canlin_app_module(canlin_app *a)
 canlin_ui_output *canlin_app_output(canlin_app *a)
 {
     return a ? a->out : NULL;
+}
+
+canlin_shell *canlin_app_shell(canlin_app *a)
+{
+    return a ? a->sh : NULL;
+}
+
+canlin_ui_view *canlin_app_model_view(canlin_app *a)
+{
+    return a ? a->mview : NULL;
 }
 
 canlin_llm *canlin_app_llm(canlin_app *a)
