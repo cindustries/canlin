@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-11-15T00:55:53Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T00:55:53Z
+created: 2026-11-14T23:41:50Z
+id: 135
+priority: low
+started: 2026-11-15T00:41:10Z
+status: done
+tags:
+- docs
+- house
+title: 'Docs: the specs write card ids as canlin#N, the project rule says kNN'
+updated: 2026-11-15T00:55:53Z
+---
+
+Die Hausregel schreibt Ticket-Ids als kNN (k12) in Commits, Notizen und Doks - nie #12. Jede Spec unter docs/superpowers/specs/ schreibt sie als canlin#N; sie stammen vom 2026-09-22/23, als es das karr-Board noch nicht gab. Umstellen: in allen Specs, in docs/adr/ und in docs/THIRD-PARTY.md wird canlin#N zu kN. Die Nummern sind eindeutig: alle 48 referenzierten Nummern (2,3,4,7,8,9,10,13,14,15,16,17,19,20,21,22,23,25,26,27,30,31,32,33,34,35,36,37,38,39,40,41,43,45,46,51,59,61,64,65,67,72,74,88,92) existieren als Karte auf dem canlin-Board, es gibt keine Mehrdeutigkeit. Die Umstellung ist mechanisch, aber sie beruehrt vierzehn Spec-Dateien, deshalb eine eigene Karte statt eines Nebenbeiwechs. Nicht Teil dieser Karte: die Erwaehnungen in Code-Kommentaren (include/, src/, t/ - 117 Stueck) und die Notizen auf dem canlin-os-Board; dort ist canlin#N nicht eindeutig, weil "kN" auf dem jeweils anderen Board eine andere Karte meint. Fuer die Specs gilt: die Regel sagt kNN, also gilt kNN. Die Karten-Ids in den Doks bleiben kNN - das ist die Regel, keine Ausnahme.
+
+Inventory done: 48 Vorkommen von 'canlin#N' in 13 Dateien (12 Specs + docs/THIRD-PARTY.md), 27 verschiedene Nummern. Alle Nummern gegen 'karr show N' geprueft - jede hat eine Karte. docs/adr/0001 hat keine 'canlin#'-Vorkommen (schreibt schon k112/k114/k131/k132). Zwei Range-Formen 'canlin#4–#16' und 'canlin#4–#6' in der core-api-Spec; ein 'canlin-os#4' im Android-Adapter ist eine Karte des canlin-os-Boards und bleibt unberuehrt (anderes Board, kN waere dort eine andere Karte). Umstellung startet.
+
+Umgestellt: 48 Vorkommen der Form 'canlin#N' in 13 Dateien unter docs/ (12 Specs + docs/THIRD-PARTY.md) auf die Hausform kN. Zaehlung: 46 Einzelverweise + 2 Bereichsverweise ('canlin#4–#16' und 'canlin#4–#6' in der core-api-Spec, jetzt 'k4–k16' und 'k4–k6'); 28 verschiedene Nummern betroffen. Jede Nummer einzeln per 'karr show N' geprueft - alle haben eine Karte auf dem canlin-Board, keine Tippfehler. docs/adr/0001 war nicht betroffen (schreibt bereits k112/k114/k131/k132). Bewusst unberuehrt: 'canlin-os#4' im Android-Adapter - das ist eine Karte des canlin-os-Boards, 'k4' waere dort eine andere Karte; die Karte nimmt die canlin-os-Erwaehnungen ausdruecklich aus. Ebenfalls unberuehrt: die Nicht-Ticket-#'s in Backticks (lua#main, theme#logo, meta#requires, icon#<name>). Verifikation: jede geaenderte Datei ist byteweise HEAD plus genau der Ersetzung, keine Zeilenzahl geaendert, kein Whitespace-Fehler, 13 Dateien alle unter docs/, keine C-/Header-/Makefile-Datei angefasst. Proposed commit subject: 'Write the card ids in the specs as kNN (k135)'.
+
+2026-11-15 review (main): gelesen und akzeptiert. 48 Ersetzungen in 13 Dateien, 46 Zeilen geaendert (reine Ersetzung, keine Zeilenzahl geaendert), jede der 28 Nummern einzeln mit `karr show N` geprueft. Richtig entschieden: canlin-os#4 bleibt (das ist eine Karte des canlin-os-Boards, k4 waere dort eine andere), und die API-Namen mit # (lua#main, theme#logo, meta#requires, icon#<name>) bleiben unangetastet - das sind keine Ticket-Ids. Die Bereichsform kannlin#4-#16 wurde als Einheit umgestellt, sonst waere ein nacktes #16 stehen geblieben, das die Hausregel verbietet. Committet als 4d2a700. Die Reststellen im Code sind als eigene Karte erfasst (k152), der kannlin-os-Hinweis auf dem Board dort ebenfalls.
