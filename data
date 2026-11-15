@@ -1,0 +1,81 @@
+---
+claimed_at: 2026-11-15T17:44:59Z
+claimed_by: canlin-release-manager
+class: standard
+completed: 2026-11-15T17:44:59Z
+created: 2026-09-23T05:19:01Z
+id: 43
+priority: medium
+started: 2026-11-15T00:44:23Z
+status: done
+tags:
+- release
+- licence
+title: Ship third-party licence texts with every build/package
+updated: 2026-11-15T17:44:59Z
+---
+
+DejaVu licence must accompany every copy; also Nuklear, Lua, stb notices. From canlin#22.
+
+2026-11-15: die Praemisse der Karte ist ueberholt - die DejaVu-Schrift ist nicht mehr im Baum (k22), seit k55 sitzt der Inter-4.1-Subset in third_party/fonts/inter, und die Lizenz, die jede Kopie begleiten muss, ist die SIL OFL 1.1 (third_party/fonts/inter/LICENSE), nicht ein DejaVu-Hinweis. Die Karte wird als Pruefung gestellt, nicht als Aenderung: docs/THIRD-PARTY.md sagt ("each vendored component keeps its original licence text next to it, and every build or package ships these texts"), die Frage ist, ob das heute wahr ist. Zu pruefen: (1) legt jedes Artefakt, das gebaut wird (das Binary, das APK, das canlin-os-Image), die Lizenztexte der eingebundenen Komponenten bei - Inter OFL 1.1, Nuklear (MIT/public domain, mit dem ProggyClean-Hinweis), Lua (MIT), cmp (MIT), mbedtls (Apache-2.0), die stb-Hinweise, und die Anpassung aus dem Nuklear-rawfb-Demo in src/render/render.c (MIT, Patrick Rudolph, der Hinweis steht in der Datei)? (2) Traegt der eingebettete Font-Subset (src/render/font_builtin.c) den Copyright-Hinweis mit, und bleibt der Name "Inter" (OFL-Bedingung 3 verlangt keine Umbenennung, weil die Lizenz keinen Reserved Font Name nennt)? (3) Was fehlt, ist eine Karte in der zustaendigen Spur (Packaging: der canlin-Repo-Build oder canlin-os) - nicht diese Karte. Bericht: was wird heute mitgeliefert, was nicht, und welche Karte daraus folgt.
+
+Pruefung (Release-Manager, 2026-11-15): Ist "every build or package ships these texts" (docs/THIRD-PARTY.md:6) heute wahr? NEIN.
+
+Kurz: Die Lizenztexte liegen alle im vendorten Baum (das ist wahr) - aber keine Build-Regel kopiert einen davon in ein Artefakt. Es gibt kein NOTICE, keine Lizenz im APK, keine Lizenz in einem Image. "Die Lizenz liegt im vendorten Baum" ist nicht "die Lizenz wird mitgeliefert".
+
+== 1) Welche Artefakte baut dieses Repo ueberhaupt? ==
+
+* KEIN Runtime-Binary: Makefile:11-12 sagt es selbst ("The runtime binary that consumes LIBOBJ as a whole does not exist yet."), und in src/ gibt es kein main() (nur t/ und tools/ haben eins). Der Desktop-/P2-Weg liefert aus diesem Repo heute nichts Auslieferbares.
+* Gebaut werden: Testbinaries unter build/<target>/t/<part>/<suite> (Makefile:113, generische Regel mit LIBOBJ), das Kosten-Werkzeug (mk/sandbox.mk:24-28) und - nur fuer TARGET=android-armv7 - libcanlin.so (mk/android.mk:61) und canlin.apk (mk/android.mk:72-83).
+* Das APK ist damit das einzige auslieferbare Artefakt, das dieses Repo heute baut: 'make TARGET=android-armv7 apk' -> build/android-armv7/canlin.apk (mk/android.mk:85).
+* TARGET=i686 baut nur statische Testbinaries (Makefile:20-23, -static); keine ausgelieferte Binary (Beleg: build/i686/t/ev/test_ev = "ELF 32-bit LSB pie executable, static-pie linked").
+* Es gibt kein install/dist/package-Target: grep nach install|dist|package|NOTICE|LICENSE in Makefile und mk/ findet nichts (nur das Wort "install" in einem Kommentar).
+* Der dritte Weg (canlin-os-Image) ist ein anderes Repo: dort laeuft k1 (Buildroot-Baum), k3 "CanLin runtime package for Buildroot" ist backlog; der canlin-os-Baum ist noch leer (nur CLAUDE.md/README.md/.gitignore). Ich habe das Image nicht gebaut - ich halte nur fest, was die Kette heute tut.
+
+== 2) Traegt das APK die Lizenztexte? NEIN. ==
+
+* Inhalt (gemessen): 'unzip -l build/android-armv7/canlin.apk' -> genau 6 Eintraege: AndroidManifest.xml, resources.arsc, lib/armeabi-v7a/libcanlin.so, META-INF/{ANDROIDD.SF,ANDROIDD.RSA,MANIFEST.MF}. Kein assets/, keine NOTICE, kein Lizenztext.
+* Die Regel, die das entscheidet: mk/android.mk:72-83 - aapt2 linkt das Manifest (74), llvm-strip legt die .so nach lib/armeabi-v7a/ (75), zip fuegt genau diese eine Datei hinzu (76), zipalign (77), apksigner (78-80). Kein weiterer Datei kommt je in das APK. src/android/AndroidManifest.xml deklariert keine Assets, ein assets/-Verzeichnis gibt es im Repo nicht.
+* Was im .so ankommt, ist kein Lizenztext. Byte-Pruefung an build/android-armv7/lib/libcanlin.so UND an der gestrippten Datei im APK: "Permission is hereby granted" (MIT) nicht vorhanden, "Apache License"/"Version 2.0, January 2004" nicht vorhanden, der volle OFL-Text nicht vorhanden. Vorhanden ist nur: "$LuaVersion: Lua 5.4.9 Copyright (C) 1994-2026 Lua.org, PUC-Rio ..." (die Copyright-Zeile aus luaconf.h) und - als UTF-16BE in der Name-Table des eingebetteten Fonts - der Copyright-/Trademark-/OFL-Hinweis.
+* Kommentare in Quelldateien ueberleben die Uebersetzung nicht: die Hinweise in src/render/render.c:3-19 und third_party/nuklear/nuklear.h sind Kommentare; weder render.c noch nuklear.h werden mitgeliefert.
+* Was wirklich im .so steckt: Nuklear (nk_ 3251 Treffer), stb_truetype (stbtt_ 334), Lua (lua_ 314) - aber NICHT mbedtls (0 Treffer) und NICHT cmp (0 Treffer): mk/app.mk:28-30 (APP_LINK_OBJ) nennt weder $(MBEDTLS_OBJ) noch $(CMP_OBJ), obwohl beide in LIBOBJ stehen (mk/mbedtls.mk:10, mk/cmp.mk:15). Die Lizenzliste muss also aus der Linkzeile abgeleitet werden, nicht aus der Tabelle in docs/THIRD-PARTY.md.
+
+== 3) Der eingebettete Font-Subset: Traegt den Hinweis, und der Name bleibt "Inter". ==
+
+* src/render/font_builtin.c:1-7 (generierter Kopf) nennt den Copyright-Hinweis und verweist auf third_party/fonts/inter/LICENSE.
+* Die Name-Table des committeten Byte-Arrays (ab src/render/font_builtin.c:36) traegt: nameID 0 = "Copyright 2016 The Inter Project Authors", nameID 1 = "Inter", nameID 4 = "Inter Regular", nameID 6 = "Inter-Regular", nameID 7 = "Inter UI and Inter is a trademark of rsms.", nameID 13 = "This Font Software is licensed under the SIL Open Font License, Version 1.1. ... http://scripts.sil.org/OFL", nameID 14 = die OFL-URL. Dieselben Strings stehen in der gestrippten .so im APK (UTF-16BE, Offsets 134194 / 134232 / 134528 / 134718).
+* Der Name bleibt "Inter": die Lizenz nennt keinen Reserved Font Name (third_party/fonts/inter/LICENSE:1-4; third_party/fonts/inter/VERSION:9-12), also verlangt OFL-Bedingung 3 keine Umbenennung des Subset - und der Name ist unveraendert.
+* Was NICHT mitkommt: der volle OFL-Text. Der Subset nennt die Lizenz und ihre FAQ-URL (nameID 13/14) - das ist der OFL-eigene Weg, auf die Lizenz zu zeigen; der Text selbst muss als Datei mitreisen (third_party/fonts/inter/LICENSE).
+
+== 4) Was fehlt: Komponente -> Ort des Textes -> im Artefakt? ==
+
+* Inter (OFL 1.1): third_party/fonts/inter/LICENSE -> NEIN (nur der Hinweis in der Name-Table)
+* Nuklear (MIT/PD, unsere Wahl MIT): third_party/nuklear/LICENSE -> NEIN
+* stb_truetype/stb_rect_pack/stb_textedit (MIT/PD): Hinweise in third_party/nuklear/nuklear.h:11193, 11779-11810, 11817, 16857-16888, 27375, 31406-31424 -> NEIN (nuklear.h wird nicht mitgeliefert)
+* ProggyClean: third_party/nuklear/nuklear.h:17462-17465 -> nicht gelinkt (UI-Spec 6.3, docs/superpowers/specs/2026-09-23-canlin-ui-design.md:279-280), also nichts zu liefern; der Hinweis steht im Quellbaum
+* Lua (MIT): third_party/lua/LICENSE -> NEIN (nur die Copyright-Zeile im Binary)
+* mbedtls (Apache-2.0): third_party/mbedtls/LICENSE -> heute nicht im Artefakt; muss mit, sobald sie gelinkt ist (kein NOTICE upstream, das sagt THIRD-PARTY.md)
+* cmp (MIT): third_party/cmp/LICENSE -> heute nicht im Artefakt
+* rawfb-Anpassung (MIT, (c) Patrick Rudolph): src/render/render.c:3-19 -> NEIN; der Hinweis steht in der Datei, die Datei wird nicht mitgeliefert
+* libbee (Artistic-1.0 oder GPL-1.0-or-later): third_party/libbee/LICENSE -> heute in keinem Artefakt
+
+== 5) Verdict je Behauptung ==
+
+* "each vendored component keeps its original licence text next to it" -> WAHR. Alle Texte liegen im Baum: third_party/lua/LICENSE, third_party/nuklear/LICENSE, third_party/fonts/inter/LICENSE, third_party/mbedtls/LICENSE, third_party/cmp/LICENSE, third_party/libbee/LICENSE.
+* "every build or package ships these texts" -> FALSCH. Keine Build-Regel kopiert einen Lizenztext; es gibt kein NOTICE, keine Lizenz im APK, keine Lizenz in einem Image.
+
+== 6) Vorschlag: welchen Karten die fehlende Arbeit folgt ==
+
+Ich habe keine Karte angelegt (die Karte bleibt die Release-Pruefung). Die fehlende Arbeit teilt sich auf die beiden Verpackungsspuren:
+
+* canlin-Repo, NEUE Karte "APK: die Lizenztexte der gelinkten Komponenten mit dem Paket ausliefern". Die APK-Regel (mk/android.mk:72-83) muss die Texte mitnehmen - als NOTICE in assets/ oder als eine Datei neben der .so; der Inhalt wird aus dem Linkstand abgeleitet (heute Nuklear/stb, Lua, Inter, plus die rawfb-Anpassung aus src/render/render.c), nicht aus der Tabelle in docs/THIRD-PARTY.md. Eigner: canlin-worker-platform (mk/android.mk gehoert zu src/android/); die gemeinsame Regel (ein aus dem vendorten Baum erzeugtes licenses/-Verzeichnis, das jede Verpackungsregel kopiert) gehoert in die Build-Spine (canlin-test-writer). Diese Karte muss auch die spätere statische Runtime-Binary bedienen, sobald es sie gibt (canlin#64 rawfb-Backend + Runtime-Binary).
+* canlin-os-Repo, NEUE Karte auf dem canlin-os-Board "Image: die Lizenztexte in die rootfs legen", im Muster von k4 (dort liegen ca-certificates.crt und /etc/hosts). Eigner: canlin-os-worker; sie haengt an k3 (statisches Binary und Basismodule installieren).
+* Diese Karte k43 bleibt die Pruefung: sie wird gruen, wenn die beiden Verpackungskarten die Texte nachweisen.
+
+Gates: kein Gate gelaufen - das war eine Quell- und Artefaktpruefung, kein Build. Der Baum ist unveraendert; die uncommitteten Makefile-Aenderungen im Arbeitsbaum stammen aus k143 (Gate-Runner), nicht von mir.
+
+Pruefung erledigt, Ergebnis: NICHT erfuellt. Die Lizenztexte liegen im vendorten Baum, aber kein Artefakt traegt sie - das APK (mk/android.mk:72-83) enthaelt nachweislich nur Manifest, resources.arsc, die .so und die Signaturdateien, kein NOTICE; es gibt kein install/dist-Target. Der Font-Subset traegt Copyright- und OFL-Hinweis in seiner Name-Table und behaelt den Namen Inter (kein Reserved Font Name); der volle OFL-Text kommt nicht mit. Die fehlende Arbeit gehoert in zwei Spuren: neue Karte im canlin-Repo (APK-Paketierung, Eigner canlin-worker-platform, gemeinsame licenses-Regel in die Build-Spine von canlin-test-writer) und neue Karte auf dem canlin-os-Board (rootfs, im Muster von k4, Eigner canlin-os-worker). Vollstaendiger Bericht mit Datei und Zeile steht im Kartenleib; kein Gate gelaufen, kein Build, keine Aenderung am Baum.
+
+2026-11-15 review (main): die Pruefung ist gelesen und das Ergebnis ist klar: docs/THIRD-PARTY.md:6 ist heute nicht wahr. Der erste Halbsatz stimmt (alle Texte liegen im vendorten Baum), der zweite nicht - keine Build-Regel kopiert einen Lizenztext in ein Artefakt. Konkret: das APK (das einzige auslieferbare Artefakt dieses Repos, denn es gibt kein Runtime-Binary und kein install/dist-Target) enthaelt genau sechs Eintraege - Manifest, resources.arsc, lib/armeabi-v7a/libcanlin.so und drei Signaturdateien. Kein assets/, keine NOTICE, kein Lizenztext. In der .so steht kein Apache-Lizenztext, kein MIT-Text, kein OFL-Text; die Kommentare der Uebernommenen Dateien ueberleben die Uebersetzung nicht, weil die Dateien nicht mitgeliefert werden.
+Zwei Nuancen, die der Bericht sauber getrennt hat und die ich uebernehme: (1) die Lizenzliste muss aus der LINKZEILE abgeleitet werden, nicht aus der Tabelle in THIRD-PARTY.md - im APK stecken Nuklear, stb_truetype und Lua, aber nicht mbedtls und nicht cmp (mk/app.mk:28-30 nennt weder MBEDTLS_OBJ noch CMP_OBJ, obwohl beide in LIBOBJ stehen). (2) Der eingebettete Font-Subset traegt den Copyright-Hinweis und nennt die OFL samt FAQ-URL in der Name-Table, und der Name bleibt "Inter" (kein Reserved Font Name, also verlangt OFL-Bedingung 3 keine Umbenennung) - was fehlt, ist der vollstaendige OFL-Text als Datei.
+Die beiden Verpackungskarten sind angelegt: eine im canlin-Repo (das APK liefert die Lizenztexte der gelinkten Komponenten mit), eine auf dem canlin-os-Board (das Image legt sie in die rootfs). k43 bleibt die Release-Pruefung und wird gruen, wenn die beiden das nachweisen.
