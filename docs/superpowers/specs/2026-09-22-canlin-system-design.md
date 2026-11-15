@@ -2,7 +2,10 @@
 
 Status: draft for review, incorporating the architecture review and the browser target.
 §2 amended 2026-11-15: the i686 gate is split into the user-mode gate that runs today and
-the full-system gate that waits for the canlin-os image.
+the full-system gate that waits for the canlin-os image; the browser row drops SDL2 — the
+browser shows the frame through the canvas over the runtime's present hook (ADR 0003),
+while the desktop and the iOS rows keep SDL2.
+§4 amended 2026-11-15: the render line no longer routes the browser through SDL2.
 §12 amended 2026-11-15: the i686 run has a runner hook, so it is one command, its timeout
 follows the target and its result names the gate that ran.
 This is the family-level design. Each sub-project gets its own spec and plan; the first
@@ -59,7 +62,7 @@ Principles that decide every later question:
 | Desktop (development, kiosks) | SDL2 | binary | CanLin |
 | Android tablet, phone | NativeActivity + NDK (amended 2026-09-30, see [Android adapter](2026-09-30-canlin-android-adapter-design.md)) | sideloaded APK | CanLin |
 | iPad, iPhone | SDL2 + Xcode | signed app (TestFlight or 7-day dev signing) | CanLin |
-| Browser | Emscripten + SDL2/Canvas, browser I/O adapters | WASM + loader + assets over HTTPS | CanLin |
+| Browser | Emscripten, Canvas over the present hook, browser I/O adapters | WASM + loader + assets over HTTPS | CanLin |
 
 Compiler flags for every i686 build: `-march=i686 -mno-sse`, statically linked against a
 musl cross toolchain (`i686-linux-musl-gcc`; a prebuilt one from musl.cc is unpacked at
@@ -80,9 +83,13 @@ result. Neither emulator substitutes for real P2 hardware, which checks performa
 
 The browser build is **CanLin compiled to WASM**, including Lua and the portable libraries,
 not a second JavaScript UI and not a PC emulator. It runs the same module format and Lua
-API where capabilities are available. Building a v86-compatible canlin-os image is an
-optional, separately scoped system demo; it is neither this target nor a substitute for
-the P2-QEMU gate.
+API where capabilities are available. Its display backend is the canvas over the runtime's
+present hook: SDL2 is not compiled into the browser module, while the desktop and the iOS
+targets keep it ([ADR 0003](../../adr/0003-the-browser-slice-has-one-display-backend-one-wait-model-and-a-size-budget.md)).
+The browser adapters — clock, wait, present, input — are specified in
+[the browser adapter design](2026-11-15-canlin-browser-adapter-design.md). Building a
+v86-compatible canlin-os image is an optional, separately scoped system demo; it is
+neither this target nor a substitute for the P2-QEMU gate.
 
 ## 3. Decomposition and repos
 
@@ -130,9 +137,10 @@ Subsystems, each testable at its boundary:
   the browser schedules callbacks and always returns control. No generic system daemon,
   distributed event bus or unrestricted cross-module publish/subscribe in v1.
 - **render**: Nuklear with a software rasterizer into an RGB buffer in RAM. `rawfb` copies
-  dirty rows to `/dev/fb0`; `sdl2` uploads the buffer as a texture, including through
-  Emscripten in the browser. Redraw on invalidation, not an unconditional frame loop.
-  One DPI scale factor from the theme or platform.
+  dirty rows to `/dev/fb0`; `sdl2` uploads the buffer as a texture, on desktop and on iOS.
+  The browser has no SDL2: it shows the frame through the canvas, over the runtime's
+  present hook, which copies the dirty rows out. Redraw on invalidation, not an
+  unconditional frame loop. One DPI scale factor from the theme or platform.
 - **input**: evdev, SDL2 or browser input, normalised before delivery. The platform owns
   mobile text input/keyboard integration; rawfb touch targets use a Nuklear keyboard.
 - **audio**: 16 kHz mono 16-bit PCM at the protocol boundary, ALSA on images, SDL2/native
