@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T00:29:21Z
+id: 148
+priority: medium
+status: backlog
+tags:
+- test
+- ui
+- assistant
+title: 'Test: nothing pins that the model''s view and the module''s view are two views'
+updated: 2026-11-15T00:29:21Z
+---
+
+Der ADR 0001 nennt es als Folge: es gibt keinen Regressionstest, der die Trennung festnagelt. t/shell/test_shell.c test_model_view_pane deckt die Shell-Seite ab (zwei Rechtecke, Eingabe-Routing), aber nichts schlaegt fehl, wenn die beiden Views wieder zusammengelegt werden. Der Test soll pruefen: der Slot-Tabellen-, Fokus- und Graph-Zustand der Modell-View ist von dem der Modul-View getrennt (ein Zustandswert, den ein Modul setzen kann, taucht nicht in der Modell-View auf), und der Rahmen der Modell-View umschliesst die Modell-View, nicht die eigenen Widgets des Moduls. Die Messung, aus der die Entscheidung entstanden ist, steht auf k112 (2026-11-14) - sie ist der naturalliche Test: das, was dort still passierte, muss heute laut scheitern.
