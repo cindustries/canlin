@@ -3,6 +3,7 @@
  * scope, revision-scoped input, submit contents, graph round trip, rendering offscreen in
  * the shell's model-view frame. Built-in theme and font. Exits 0 on success. */
 #include "canlin/assistant_view.h"
+#include "canlin/llm_limits.h"
 #include "canlin/shell.h"
 
 #include <stdio.h>
@@ -628,6 +629,42 @@ static void test_calls(void)
     canlin_assistant_view_free(av);
 }
 
+/* ---- the tool-call id bound is one number (k57) ---- */
+
+/* The GUI tool schema and the provider dialects share one bound for the tool-call id:
+ * an id the dialect admits is an id set_view admits. The bound is the one in
+ * llm_limits.h (t/llm/test_llm.c holds the dialect half). */
+static void test_call_id_bound(void)
+{
+    canlin_assistant_view *av = canlin_assistant_view_new();
+    canlin_av_result r;
+    canlin_av_call c;
+    char ok_id[CANLIN_LLM_TOOL_ID_MAX + 1];
+    char big_id[CANLIN_LLM_TOOL_ID_MAX + 2];
+
+    memset(ok_id, 'i', CANLIN_LLM_TOOL_ID_MAX);
+    ok_id[CANLIN_LLM_TOOL_ID_MAX] = 0;
+    memset(big_id, 'i', CANLIN_LLM_TOOL_ID_MAX + 1);
+    big_id[CANLIN_LLM_TOOL_ID_MAX + 1] = 0;
+
+    canlin_assistant_view_set_scope(av, 1, 1);
+
+    /* an id of CANLIN_LLM_TOOL_ID_MAX bytes is admitted */
+    c = call_of(1, 1, ok_id);
+    CHECK(c.id_len == CANLIN_LLM_TOOL_ID_MAX);
+    CHECK(canlin_assistant_view_set_view(av, &c, VALID, strlen(VALID), &r) == CANLIN_AV_OK);
+    CHECK(r.revision == 1 && !r.duplicate);
+
+    /* one byte more: refused as invalid, nothing applied */
+    c = call_of(1, 1, big_id);
+    CHECK(c.id_len == CANLIN_LLM_TOOL_ID_MAX + 1);
+    CHECK(canlin_assistant_view_set_view(av, &c, VALID, strlen(VALID), &r) == CANLIN_AV_EINVALID);
+    CHECK(!r.duplicate);
+    CHECK(canlin_assistant_view_revision(av) == 1);
+
+    canlin_assistant_view_free(av);
+}
+
 /* ---- rendering, input and submit on an offscreen view ---- */
 
 typedef struct vh {
@@ -1196,6 +1233,7 @@ int main(void)
     test_invalid();
     test_limits();
     test_calls();
+    test_call_id_bound();
     test_stale_click();
     test_replaced_submission();
     test_submit();

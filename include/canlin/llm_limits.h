@@ -24,8 +24,10 @@
 
 /* Not in the spec: characters of one JSON number token in a stream chunk. */
 #define CANLIN_LLM_JSON_NUMBER_MAX   32u
-/* Not in the spec: tool call id and tool name bytes (a longer one is `full`). */
-#define CANLIN_LLM_TOOL_ID_MAX       256u
+/* Not in the spec: tool call id and tool name bytes (a longer one is `full`). The
+ * tool-call id is provider-assigned and opaque; this bound is also the GUI tool schema's
+ * (set_view), so an id the dialect admits is an id set_view admits (k57). */
+#define CANLIN_LLM_TOOL_ID_MAX       128u
 #define CANLIN_LLM_TOOL_NAME_MAX     64u
 /* Not in the spec: messages in one request (the body limit bounds their bytes). */
 #define CANLIN_LLM_MESSAGES_MAX      256u

@@ -319,6 +319,50 @@ static void test_two_parallel_tools(void)
     h_done(&h);
 }
 
+/* The tool-call id bound (k57): the dialect admits an id of
+ * CANLIN_LLM_TOOL_ID_MAX bytes and refuses one byte more. The GUI tool schema
+ * (set_view) admits the same ids, so an id that passed the dialect is never
+ * refused later as "invalid" (t/assistant/test_view.c holds that half). */
+static void test_tool_id_bound(void)
+{
+    harness h;
+    char *body = malloc(4096 + 2 * CANLIN_LLM_TOOL_ID_MAX);
+    char id[CANLIN_LLM_TOOL_ID_MAX + 2];
+    char want[CANLIN_LLM_TOOL_ID_MAX + 64];
+
+    /* an id of exactly CANLIN_LLM_TOOL_ID_MAX bytes is admitted */
+    memset(id, 'i', sizeof id);
+    id[CANLIN_LLM_TOOL_ID_MAX] = 0;
+    sprintf(body, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\","
+                  "\"tool_calls\":[{\"index\":0,\"id\":\"%s\",\"type\":\"function\","
+                  "\"function\":{\"name\":\"set_view\","
+                  "\"arguments\":\"{}\"}}]}}]}\n\n"
+                  "data: {\"choices\":[{\"index\":0,\"delta\":{},"
+                  "\"finish_reason\":\"tool_calls\"}]}\n\n"
+                  "data: [DONE]\n\n", id);
+    run_one(&h, body, 64, 0, req_tools);
+    snprintf(want, sizeof want, "tool\t%s\tset_view\t{}", id);
+    CHECK(has(&h.log, want));
+    CHECK(has(&h.log, "done ok\ttool"));
+    h_done(&h);
+
+    /* one byte more: the response fails with "full", no tool is delivered */
+    memset(id, 'i', sizeof id);
+    id[CANLIN_LLM_TOOL_ID_MAX + 1] = 0;
+    sprintf(body, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\","
+                  "\"tool_calls\":[{\"index\":0,\"id\":\"%s\",\"type\":\"function\","
+                  "\"function\":{\"name\":\"set_view\","
+                  "\"arguments\":\"{}\"}}]}}]}\n\n"
+                  "data: {\"choices\":[{\"index\":0,\"delta\":{},"
+                  "\"finish_reason\":\"tool_calls\"}]}\n\n"
+                  "data: [DONE]\n\n", id);
+    run_one(&h, body, 64, 0, req_tools);
+    CHECK(has(&h.log, "done fail\tfull\ttool call id exceeds CANLIN_LLM_TOOL_ID_MAX"));
+    CHECK(!has(&h.log, "tool\t"));
+    h_done(&h);
+    free(body);
+}
+
 static void expect_fail(const char *body, const char *setup, const char *line)
 {
     harness h;
@@ -1350,6 +1394,46 @@ static void test_am_tool_many_deltas(void)
     free(body);
 }
 
+/* The tool-call id bound (k57): the dialect admits an id of
+ * CANLIN_LLM_TOOL_ID_MAX bytes and refuses one byte more. The GUI tool schema
+ * (set_view) admits the same ids, so an id that passed the dialect is never
+ * refused later as "invalid" (t/assistant/test_view.c holds that half). */
+static void test_am_tool_id_bound(void)
+{
+    harness h;
+    char *body = malloc(4096 + 2 * CANLIN_LLM_TOOL_ID_MAX);
+    char *p;
+    char id[CANLIN_LLM_TOOL_ID_MAX + 2];
+    char want[CANLIN_LLM_TOOL_ID_MAX + 64];
+
+    /* an id of exactly CANLIN_LLM_TOOL_ID_MAX bytes is admitted */
+    memset(id, 'i', sizeof id);
+    id[CANLIN_LLM_TOOL_ID_MAX] = 0;
+    p = body + sprintf(body, "%s", AM_START);
+    p += sprintf(p, "event: content_block_start\ndata: {\"type\":\"content_block_start\","
+                    "\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"%s\","
+                    "\"name\":\"set_view\",\"input\":{}}}\n\n", id);
+    p += sprintf(p, "%s", AM_STOP_BLOCK(0) AM_DELTA("tool_use") AM_MSTOP);
+    run_one_am(&h, body, 64, 0, req_tools);
+    snprintf(want, sizeof want, "tool\t%s\tset_view\t{}", id);
+    CHECK(has(&h.log, want));
+    CHECK(has(&h.log, "done ok\ttool"));
+    h_done(&h);
+
+    /* one byte more: the response fails with "full", no tool is delivered */
+    memset(id, 'i', sizeof id);
+    id[CANLIN_LLM_TOOL_ID_MAX + 1] = 0;
+    p = body + sprintf(body, "%s", AM_START);
+    p += sprintf(p, "event: content_block_start\ndata: {\"type\":\"content_block_start\","
+                    "\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"%s\","
+                    "\"name\":\"set_view\",\"input\":{}}}\n\n", id);
+    run_one_am(&h, body, 64, 0, req_tools);
+    CHECK(has(&h.log, "done fail\tfull\ttool call id exceeds CANLIN_LLM_TOOL_ID_MAX"));
+    CHECK(!has(&h.log, "tool\t"));
+    h_done(&h);
+    free(body);
+}
+
 static void test_am_parallel_tools(void)
 {
     static const char body[] =
@@ -1950,6 +2034,7 @@ int main(void)
     test_text_random_large();
     test_tool_many_deltas();
     test_two_parallel_tools();
+    test_tool_id_bound();
     test_failures();
     test_no_partial_tool();
     test_length_tools();
@@ -1968,6 +2053,7 @@ int main(void)
     test_am_text_every_split();
     test_am_tool_many_deltas();
     test_am_parallel_tools();
+    test_am_tool_id_bound();
     test_am_length();
     test_am_length_tools();
     test_am_failures();

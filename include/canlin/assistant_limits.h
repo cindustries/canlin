@@ -4,11 +4,13 @@
  * CANLIN_UI_TOOL_MAX_WIDGETS, CANLIN_UI_MAX_DEPTH, the graph limits). The values below
  * are the GUI tool schema's own (UI spec §7): CANLIN_AV_ID_MAX and CANLIN_AV_CALLS_MAX
  * are the spec's and carry its wording, the rest were chosen for canlin#20
- * (provisional, to be checked on P2).
+ * (provisional, to be checked on P2). The tool-call id bound is the LLM part's: the
+ * dialects and this schema share one number (k57).
  */
 #ifndef CANLIN_ASSISTANT_LIMITS_H
 #define CANLIN_ASSISTANT_LIMITS_H
 
+#include "canlin/llm_limits.h"
 #include "canlin/ui_limits.h"
 
 /* JSON values (containers, keys excluded, scalars) in one set_view argument. A value
@@ -22,8 +24,9 @@
 /* Widget and graph-element ids: [a-z0-9_-]{1,CANLIN_AV_ID_MAX} (UI spec §7:
  * "[a-z0-9_-]{1,32}", unique within the view). */
 #define CANLIN_AV_ID_MAX            32u
-/* Tool-call id bytes (provider-assigned, opaque). */
-#define CANLIN_AV_CALL_ID_MAX       128u
+/* Tool-call id bytes (provider-assigned, opaque): the provider dialects' bound
+ * (CANLIN_LLM_TOOL_ID_MAX), so one number rules both sides (k57). */
+#define CANLIN_AV_CALL_ID_MAX       CANLIN_LLM_TOOL_ID_MAX
 /* Recorded tool-call results per turn scope (UI spec §7: "Recorded results per turn: at
  * most 16; a repeated call id returns the recorded result, the same id with different
  * arguments is invalid"). A turn with more calls is refused with "full"; results are
