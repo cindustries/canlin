@@ -1,0 +1,48 @@
+---
+claimed_at: 2026-11-15T18:18:47Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-15T18:18:47Z
+created: 2026-11-15T00:00:33Z
+id: 145
+priority: high
+started: 2026-11-15T17:47:17Z
+status: done
+tags:
+- test
+- net
+- i686
+title: 'Test: the http suite''s close-inside-callback case waits a fixed 300 ms'
+updated: 2026-11-15T18:18:47Z
+---
+
+First finding of the new i686 gate. Under qemu-i386 -cpu pentium2 the suite t/net/http_test fails 5 of 1152 checks; on the host it is green. The failing block is "from inside callbacks: status, header, body" (t/net/http_test.c:819-834): it drives the loop for a fixed spin(h, 300) - 300 ms of wall clock - and then expects the status callback to have fired. Under the emulated P2 it has not: "close at 1: 0 calls". The leftover stream then poisons the next round ("close at 2: 112 calls", "streams left 1"). The neighbouring case already does it right: the body case waits for the condition with a 5 s budget (while (r.blen < 10 && real_ms() - t0 < 5000)). The suspicion is the wall-clock budget, not the product: the TLS handshake with the test server needs more than 300 ms when the whole process runs emulated. Prove it - the fix is to wait for the condition (the callback fired) instead of for a fixed time, and the suite must be green under qemu-i386 -cpu pentium2 as well as on the host. A fixed time budget makes the suite a function of the machine's speed, which is exactly what a target gate must not be.
+
+2026-11-15 (dispatcher): die Vermutung ist bewiesen, nicht behauptet. Im Wegwerf-Worktree /tmp/canlin-verify-k120 wurde an genau dieser Stelle spin(h, 300) auf spin(h, 5000) geaendert, sonst nichts, und der Test neu fuer i686 gebaut und unter qemu-i386 -cpu pentium2 gelaufen: "http_test: 1753 checks passed", exit 0. Mit dem 300-ms-Budget sind es 5 von 1152 Failures (der Abbruch beim Fehlschlag erklaert die kleinere Zahl). Das Budget ist also die Ursache, nicht das Produkt. Der Fix gehoert in die Test-Spur: auf die Bedingung warten (der Callback ist gefeuert) statt auf eine feste Zeit - das Muster steht zwei Zeilen weiter oben im Body-Fall.
+
+Umbau der Test-Spur (t/net/http_test.c): alle 16 spin()-Aufrufe und die beiden inline-Warte-Schleifen sind weg. Die Suite wartet jetzt auf die Bedingung, die sie断言 - wait_closed (der Callback hat gefeuert und der Stream ist zu), wait_phase (CONNECT/TLS/DNS erreicht), wait_body (n Body-Bytes da), wait_blocked (der Resolver-Worker laeuft im blockierenden Test-Resolver), wait_no_dns_job (der Worker hat den Job freigegeben). Das Zeitbudget (WAIT_MS 10 s) ist nur noch der Schutz gegen Haenger, nicht die Bedingung; die negativen Checks (kein Callback nach dem close) bekommen eine feste Zahl von Transport-Schritten (GUARD_STEPS 5) statt Millisekunden. Zwei Rennen sind dabei mit weggefallen: (a) die DNS-Phase wurde per spin(100) geprueft, bevor der Worker den Job wirklich gestartet hatte - net_dns_cancel gibt einen noch queued Job frei statt ihn zu orphanen, der Test prueft jetzt auf block_entered; (b) das Fenster 'der Redirect darf nicht folgen' (tsrv_wait 300 ms) war unter der Emulation zu kurz fuer einen Round Trip (~500 ms), jetzt NO_FOLLOW_MS 3000. Der Befund der Karte (close inside callback, spin(h,300)) ist damit erledigt und das Muster ueber die ganze Datei.
+
+Korrektur zum vorigen Eintrag: 'die sie断言' heisst 'die sie prueft' - zwei CJK-Zeichen sind versehentlich mitgelaufen, der Rest des Eintrags stimmt.
+
+Fertig: die Karte ist im Code erledigt, der Baum ist commit-bereit (nur t/net/http_test.c geaendert, nichts committet).
+
+Was geaendert ist (t/net/http_test.c):
+- spin() ist weg: alle 16 Aufrufe und die beiden inline-Schleifen (while (r.blen < 10 && real_ms() - t0 < 5000)).
+- Neu und Bedingung statt Zeit: wait_closed (der Callback hat gefeuert und der Stream ist zu), wait_phase (CONNECT/TLS/DNS erreicht), wait_body (n Body-Bytes), wait_blocked (der Resolver-Worker laeuft im blockierenden Test-Resolver), wait_no_dns_job (der Worker hat den Job freigegeben) und steps(h,n) fuer die negativen Checks (kein Callback nach dem close) - dort zaehlt eine feste Zahl von Transport-Schritten statt Millisekunden.
+- WAIT_MS (10 s) ist nur noch der Schutz gegen Haenger, nicht die Bedingung; ein Budget, das auslaeuft, macht den Check rot.
+- Zwei Rennen sind mit weggefallen: die DNS-Phase wurde per spin(100) geprueft, bevor der Worker den Job wirklich gestartet hatte (net_dns_cancel gibt einen queued Job frei, statt ihn zu orphanen); und das Fenster, in dem der Redirect nicht folgen darf (tsrv_wait 300 ms), war unter der Emulation kuerzer als ein Round Trip (~500 ms), jetzt NO_FOLLOW_MS 3000.
+- Der Dateikopf benennt die Disziplin jetzt: jede Wartezeit ist eine Bedingung, ein Zeitbudget ist der Schutz.
+
+Beweis (Gate und Runner benannt):
+- Host: make BUILD=build/llm7 test -> http_test: 905 checks passed; alle Suiten des Gates gruen ausser den zwei fremden neuen (siehe Drift).
+- i686 user-mode: timeout 600 qemu-i386 -cpu pentium2 ./build/i686-llm7/t/net/http_test -> http_test: 1127 checks passed, exit 0; 6 Laeufe in Serie gruen (1126/1127/1146/1185 checks). Vorher an dieser Stelle: 5 von 1171 Failures.
+- Die ganze i686-Suite ohne die zwei fremden Suiten: ALL PASSED (23 Suiten, gate i686 user-mode).
+- Negativkontrolle: WAIT_MS temporaer auf 1 ms gesetzt -> 79 Failures. Die Checks haben Zaehne, ein zu kleines Budget laesst keinen Fall durch.
+
+Drift (fremde Spuren, nicht angefasst - bitte als Karte auf dem canlin-Board erfassen):
+- t/backend/test_backend (neu, untracked: src/backend/, mk/backend.mk, t/backend/): 4 Failures auf Host und i686 - canlin_fb_format_make(16,11,5,5,6,0,5,&f) == 0 schlaegt fehl (t/backend/test_backend.c:49, 52, 58, 197). Das i686-Gate bricht dort ab, bevor die Net-Suite laeuft.
+- t/store/test_store (neu, untracked: src/store/, mk/store.mk, t/store/): 1 Failure auf dem Host - t/store/test_store.c:522 strcmp(ls.first, "f.bin") == 0.
+
+Vorgeschlagener Commit-Subject: Wait for the condition instead of the clock in the http suite (k145)
+
+2026-11-15 (dispatcher): reviewed and committed. The diff is what the card asked for - the condition waits replace the wall-clock budgets, the wall clock is only the hang guard, and the negative checks count transport steps instead of milliseconds. The two races the agent found on the way (the DNS phase checked before the worker took the job, the redirect window shorter than one emulated round trip) are fixed the same way. My own gate runs: host 910 checks passed, i686 user-mode (qemu-i386 -cpu pentium2) 1137 checks passed, exit 0. Commit d5d8cf2.
