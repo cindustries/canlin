@@ -1,0 +1,37 @@
+---
+claimed_at: 2026-11-15T05:14:35Z
+claimed_by: canlin-test-writer
+class: standard
+completed: 2026-11-15T05:14:35Z
+created: 2026-11-14T20:22:14Z
+id: 117
+priority: low
+started: 2026-11-14T23:35:39Z
+status: done
+tags:
+- test
+- ui
+- limits
+title: 'Test: the test fixtures set the UI scale 100 as a literal'
+updated: 2026-11-15T05:14:35Z
+---
+
+t/ui/test_ui.c, t/ui/test_graph.c, t/shell/test_shell.c, t/ui/test_kbd.c, t/loop/test_loop_native.c:539, t/assistant/test_binding.c and t/assistant/test_view.c set d.scale = 100 as a literal in their fixtures, while include/canlin/ui_limits.h names the step as CANLIN_UI_SCALE_STEP_100. The fixtures should read the constant, so a change of the steps does not leave the tests asserting a stale number. Found by the 2026-11-14 work on k110.
+
+Sweep angewandt (2026-11-15): die Fixture liest jetzt die Konstanten statt der Zahlen. Geaendert: t/ui/test_ui.c (d.scale, set_scale, polish_scales/scales, 16.0f*s/100.0f -> CANLIN_UI_SCALE_BASE_PERCENT, 2.5f em -> CANLIN_UI_MIN_TOUCH_EM, 2.0f unit -> CANLIN_UI_GAP_UNITS, t.radius > 0.0f -> CANLIN_THEME_RADIUS_MIN), t/ui/test_graph.c (d.scale, MIN_TOUCH_EM, nodes < 256 -> CANLIN_UI_GRAPH_MAX_NODES, scales, BASE_PERCENT, 2.0f em -> CANLIN_UI_GRAPH_TITLE_EM), t/ui/test_kbd.c (d.scale, 2.5f/1.5f em -> CANLIN_UI_KBD_KEY_EM / _MIN_EM), t/shell/test_shell.c (18 h_init-Scale-Argumente + 3 set_scale), t/loop/test_loop_native.c (od.scale), t/assistant/test_view.c (2x d.scale), t/assistant/test_binding.c (d.scale, lim.max_number = 32 -> CANLIN_AV_MAX_NUMBER). Werte unveraendert, keine neuen Assertions, kein Verhaltenswechsel. Unangetastet: Pin-Zeilen (CHECK(CONST == Wert)), absichtlich ungueltige Werte (110, 250, 50, 0, -100, 7500, dpi 0.25f/8.0f) und die in Lua-Quelltexten/Log-Nadeln eingebetteten Zahlen (Befund, siehe Uebergabe).
+
+Fertig. 7 Fixture-Dateien, nur Literal -> benannte Konstante, Werte unveraendert, keine neuen Assertions, kein Verhaltenswechsel.
+
+Geaendert: t/ui/test_ui.c (d.scale, set_scale x8, polish_scales/scales-Arrays, 16.0f*s/100.0f -> CANLIN_UI_SCALE_BASE_PERCENT x3, 2.5f em -> CANLIN_UI_MIN_TOUCH_EM x4, 2.0f unit -> CANLIN_UI_GAP_UNITS x2, t.radius > 0.0f -> CANLIN_THEME_RADIUS_MIN), t/ui/test_graph.c (d.scale, MIN_TOUCH_EM, nodes < 256 -> CANLIN_UI_GRAPH_MAX_NODES, scales, BASE_PERCENT, 2.0f em -> CANLIN_UI_GRAPH_TITLE_EM), t/ui/test_kbd.c (d.scale, 2.5f/1.5f em -> CANLIN_UI_KBD_KEY_EM / CANLIN_UI_KBD_KEY_MIN_EM), t/shell/test_shell.c (18 h_init-Scale-Argumente, 3 set_scale), t/loop/test_loop_native.c (od.scale), t/assistant/test_view.c (2x d.scale), t/assistant/test_binding.c (d.scale, lim.max_number = 32 -> CANLIN_AV_MAX_NUMBER).
+
+Unangetastet wie beauftragt: Pin-Zeilen (CHECK(CONST == Wert)), absichtlich ungueltige Werte (110, 250, 50, 0, -100, 7500, dpi 0.25f/8.0f, Lua 'ui.scale = 2') und Puffergroessen, die nur zufaellig einer Grenze entsprechen.
+
+Gates: Host 'make BUILD=build/test3 test' -> ALL TESTS PASSED (20 Suiten, exit 0). i686 'make TARGET=i686 BUILD=build/i686-tw' gebaut, die 7 Suiten unter 'qemu-i386 -cpu pentium2' -> alle gruen (ui 12719, graph 13363, kbd 8515, shell 4562, loop_native 93, assistant view 1932, assistant binding 130 Checks). Kein WASM-Lauf, kein Geraet.
+
+Befunde ausserhalb der Karte (nicht gefixt, Datei:Zeile im Bericht): die in Lua-Quelltexten und Log-Nadeln eingebetteten Grenzzahlen (t/ui/test_ui.c:755-767,1330-1341; t/ui/test_graph.c:730-753,799-806) brauchen snprintf in der Fixture -> eigene Karte, Test-Spur; die Nadeln stehen in C (Test-Spur), die erzeugenden Meldungen in src (Runtime-Spur, src/ui/ui.c:1640,1652,1935,2282; src/ui/graph.c:146,269,288,293,307,395); der eingebaute Theme-Font 16 hat keine Header-Konstante, obwohl die Fixtures '16.0f * scale / base' rechnen; die Graph-Geometrie (CANLIN_UI_GRAPH_NODE_W_EM, _HEIGHT_EM, _BODY_EM, _SLOP_EM, _EDGE_HIT_EM, CANLIN_UI_LINE_EM, CANLIN_UI_HEADING1/2_SCALE, CANLIN_THEME_HOVER_MIX_PERCENT, CANLIN_UI_GRAPH_CURVE_SEGMENTS) hat in den Fixtures keine Entsprechung (dort Pixelwerte); die Tastatur-Geometrie (KB_COLS 11, KB_ROWS 4, KB_KEYS 36, Space 5.5 Spalten) liegt als privates enum in src/ui/ui.c:780 und ist in t/ui/test_kbd.c:450,469,476,486 hart kodiert; die Magic-Number 'em / 8.0f' (Trennlinie) steckt in src/ui/graph.c:917,1173 und t/ui/test_graph.c:944 ohne Header-Eigner.
+
+Kein Commit. Vorschlag: 'Let the test fixtures read the limit constants (k117)
+
+2026-11-15 review (main): gelesen und committet als 21b3246. Sieben Dateien, mechanisch: ein Literal wurde seine benannte Konstante, der Wert ist byteweise derselbe, keine Assertion kam dazu, nichts aendert sich. Bewusst unangetastet: die Pin-Zeilen (CHECK(KONSTANTE == Wert) - sie nageln die Spec-Zahl fest) und die absichtlich ungueltigen Werte (110, 250, 50, 0, -100, 7500). Ein Umstellungsfall wurde gemeldet und ist geprueft: CHECK(t.radius > 0.0f) wurde zu CHECK(t.radius > CANLIN_THEME_RADIUS_MIN) - die Aussage ist heute dieselbe (RADIUS_MIN ist 0.0f), und folgt der Grenze statt ihr zu widersprechen; der Wert ist im Test gepinnt.
+Die Dateien ueberschneiden sich mit zwei anderen Spuren (t/ui/test_ui.c mit der UI-Spur, t/shell/test_shell.c mit der UI-Spur) - der Dispatcher hat die Hunks getrennt und beide Commits einzeln committet, damit keine Karte die Arbeit der anderen traegt.
+Die fuenf Befunde des Workers sind als Karten erfasst: k162 (Grenzen im Lua-Quelltext der Fixtures), k163 (Meldung und Nadel in zwei Spuren), k164 (die Theme-Schriftgroesse 16 ohne Fundort im Header), k166 (die Tastatur-Geometrie im privaten Enum), und der Hinweis auf die Graph-Geometrie in den Fixtures.
