@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-15T00:52:55Z
+id: 152
+priority: low
+status: backlog
+tags:
+- docs
+- house
+title: 'Docs: the code comments write the card ids as canlin#N, the specs will write
+  kN'
+updated: 2026-11-15T18:25:09Z
+---
+
+Der Rest des Vorkommens: 117 Erwaehnungen von canlin#N in Code-Kommentaren (include/, src/, t/) und 2 in vendorten Manifesten (third_party/fonts/inter/VERSION, third_party/nuklear/VERSION) - nach der Umstellung der Specs (k135) schreiben die Specs kN und der Code canlin#N. Die Hausregel (.claude/rules/.local.board-karr.md) nennt "commits, notes and docs" - Code-Kommentare sind nicht ausdruecklich genannt, und die Specs sind die Stelle, an der ein Leser eine Karte nachschlaegt. Die Frage ist damit eine Konsistenzfrage, keine Regelverletzung: entweder der Code zieht nach (eine Sperre ueber die vier Spuren: runtime, netllm, ui, platform - je eine Karte, oder eine bewusste Karte je Spur), oder die Regel bekommt einen Zusatz, der den Code ausnimmt. Bewusst nicht jetzt: eine Sperre ueber 117 Stellen in vier Spuren ist ein Sperr-Diff, der die echten Aenderungen zudeckt - sie gehoert an einen ruhigen Moment, nicht zwischen die laufende Arbeit. Neue Kommentare in laufender Arbeit bitte einheitlich schreiben (die bestehenden Stellen bleiben unangetastet, bis die Karte bearbeitet wird).
+
+2026-11-15 (dispatcher): die Frage der Karte ist entschieden - der Code zieht nach, eine Schreibweise fuer die Karte. Kein Zusatz zur Hausregel: die Regel nennt 'commits, notes and docs', aber ein Kommentar im Code mit der alten Schreibweise ist genau die Falle, in der spaeter jemand die falsche Karte nachschlaegt. Die 117 Stellen sind eine mechanische Ersetzung (canlin#N zu kN) ohne Verhaltensaenderung, aber sie beruehren alle vier Spuren (runtime, netllm, ui, platform) und wuerden sich mitten in die laufende Arbeit legen - das ist genau der Grund, den die Karte selbst nennt. Der Sweep kommt, wenn der Baum ruhig ist: eine Karte je Spur, jede ein reiner Kommentar-Diff. Ab jetzt schreiben neue Kommentare kN.
