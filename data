@@ -1,0 +1,56 @@
+---
+claimed_at: 2026-11-15T00:36:03Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-15T00:36:03Z
+created: 2026-11-14T23:53:05Z
+id: 141
+priority: low
+started: 2026-11-15T00:01:15Z
+status: done
+tags:
+- ui
+- theme
+title: 'UI: the hover colour''s mix percentage is a literal at the call site'
+updated: 2026-11-15T00:36:03Z
+---
+
+src/ui/theme.c:347 builds the hover colour with mix(surface, accent, 25) - the 25 is a literal, and the base it is a percentage of is now CANLIN_THEME_MIX_BASE_PERCENT (k121). The share is a theme decision, so it belongs beside the other theme numbers in include/canlin/ui_limits.h (CANLIN_THEME_HOVER_MIX_PERCENT). The value is pinned by the test of k121, so this is a naming job, not a behaviour change. Found by the 2026-11-15 review of k121.
+
+Gelesen: mix() in src/ui/theme.c:329 nimmt den Anteil als int; die Aufrufstelle theme.c:347 literal 25. Der Wert steckt in keiner Spec (UI spec §6.1/§6.2 nennt keine Hover-Farbe) - es ist eine Theme-Entscheidung, gehoert also neben die Theme-Zahlen in ui_limits.h. Test zuerst: der Test aus k121 (test_mix_base) soll CANLIN_THEME_HOVER_MIX_PERCENT benutzen, statt des eigenen pct-Literals 25; damit wird die Kopplung sichtbar. Reihenfolge: Test rot (Name existiert noch nicht) -> Header + theme.c -> gruen.
+
+Rot: der Test aus k121 (test_mix_base) benutzt jetzt CANLIN_THEME_HOVER_MIX_PERCENT - der Name existierte nicht, der Build brach ab ('CANLIN_THEME_HOVER_MIX_PERCENT undeclared'). Danach: die Konstante (25) in include/canlin/ui_limits.h neben CANLIN_THEME_MIX_BASE_PERCENT, src/ui/theme.c:347 mixt mit ihr statt mit dem Literal 25. Der Test pinnt den Wert (== 25) und baut die erwartete Hover-Farbe aus der Konstante, die Kopplung ist sichtbar. Gegenprobe: Aufrufstelle auf 30 -> 3 Fehlschlaege (hover red/green/blue); Header auf 26 -> 'the hover share is a quarter' schlaegt fehl. Host-Gate: make BUILD=build/ui6 test - ALL TESTS PASSED (theme: all passed, ui: 12719 checks, shell: 3893, graph: 13363, kbd: 8515). i686-Gate laeuft noch.
+
+i686-Gate: make TARGET=i686 BUILD=build/i686 baut (exit 0), die Header-Aenderung war vor dem Build der Objekte (Header 01:13:46, theme.o 01:14:39; ein zweiter make: 'Nothing to be done'). Unter qemu-i386 -cpu pentium2: t/ui/test_theme - theme: all passed (rc=0). Die uebrigen Suiten laufen noch.
+
+Der Hover-Anteil hat einen Namen: CANLIN_THEME_HOVER_MIX_PERCENT (25) in include/canlin/ui_limits.h, neben CANLIN_THEME_MIX_BASE_PERCENT; src/ui/theme.c:347 mixt mit ihr statt mit dem Literal 25. Keine Verhaltensaenderung - der Wert bleibt 25.
+
+Test zuerst (rot): der Test aus k121 (t/ui/test_theme.c test_mix_base) benutzt jetzt CANLIN_THEME_HOVER_MIX_PERCENT statt des eigenen pct-Literals; der Name existierte noch nicht, der Build brach ab ('CANLIN_THEME_HOVER_MIX_PERCENT undeclared'). Der Test pinnt den Wert (== 25) und baut die erwartete Hover-Farbe aus der Konstante, die Kopplung zwischen Aufrufstelle und Header bleibt sichtbar.
+
+Gegenproben (die Kopplung beißt): Aufrufstelle auf 30 -> 3 Fehlschlaege (hover red/green/blue); Header auf 26 -> 'the hover share is a quarter' schlaegt fehl. Beide Aenderungen zurueckgenommen.
+
+Gates: Host - make BUILD=build/ui6 test: ALL TESTS PASSED (theme: all passed, ui: 12719 checks, shell: 3893, graph: 13363, kbd: 8515, render: all passed). i686 - make TARGET=i686 BUILD=build/i686 baut (exit 0; ein zweiter make: 'Nothing to be done', die Header-Aenderung lag vor den Objekten). Unter qemu-i386 -cpu pentium2 alle sechs Suiten gruen: test_theme (theme: all passed), test_ui (12719 checks), test_graph (13363 checks, 0 failures), test_kbd (8515 checks), test_render (all passed), test_shell (3893 checks), je rc=0. Kein Zeitbudget-Fehlschlag; die Suiten brauchen unter der Emulation mehrere Minuten (test_ui ca. 4 min), das 300s-Budget pro Suite hat gehalten.
+
+Nicht angefasst (Plattform-Spur arbeitet dort): src/shell/, src/assistant/, src/app/, t/ui/test_ui.c, include/canlin/ui.h. Kein Commit - der Main-Agent committet.
+
+Proposed Subject: Name the hover colour's mix percentage (k141)
+
+Korrektur nach dem Hinweis des Koordinators (er hat meinen eigenen Befund bestaetigt): die Verweise '§6.2: the colour mix' (include/canlin/ui_limits.h, aus k121) und 'The colour mix (§6.2)' (t/ui/test_theme.c, test_mix_base) zeigten auf eine Spec-Stelle, die es nicht gibt. Nachgeprueft: 'mix', 'blend' und 'hover' kommen in KEINER Spec-Datei vor; UI spec §6.2 ist 'Loading'. Beide Kommentare jetzt ohne falschen Verweis: der Mix ist eine Entscheidung des Themes, §6.1 legt die Farbrollen fest und leitet die Graph-Farben ab, der Mix ist nicht dabei. Die uebrigen §6.1/§6.2-Verweise in meiner Spur (graph.c Strecken, theme.h Style-Mapping, ui_limits.h Kontrast) sind korrekt und unveraendert.
+
+Rot/Gruen nach der Korrektur erneut geprueft: Konstante aus dem Header entfernt -> Build bricht ab (CANLIN_THEME_HOVER_MIX_PERCENT undeclared), wiederhergestellt -> theme: all passed (exit 0). Gegenprobe Aufrufstelle auf 30 -> weiterhin 3 Fehlschlaege (hover red/green/blue), zurueckgenommen. Die Kopplung zwischen Aufrufstelle und Header ist also nicht stillschweigend weggefallen. Volle Gates laufen erneut (Host und i686).
+
+Host-Gate nach der Korrektur: 'make BUILD=build/ui6 test' laeuft die Suiten, 22 sind gruen (android 140, app 78, app_assistant 286, ev all passed, llm 250514, llm_http 1633, loop 314, loop_native 93, module 2766, sse/json/http_wire/http, render all passed, sandbox 316, shell 3893, theme all passed, ui 12719, graph 13363, kbd 8515) und bricht dann in t/assistant/test_view.c ab (3 von 1932 checks): das ist die Fremdspur - der neue Test test_call_id_bound (Zeilen 655/656/663) des netllm-Agenten zu k57, dessen Implementierung in src/assistant/view.c noch fehlt. Die beiden danach nicht mehr gelaufenen Suiten habe ich einzeln nachgezogen: test_response (3582 checks, 0 failures), test_binding (130 checks passed). Der Fehlschlag ist nicht meiner: meine Aenderung aendert keine Zahl (25 bleibt 25), nur deren Quelle, und beruehrt keinen Assistant-Code. Frueher im Lauf war zusaetzlich t/llm/test_llm.c rot (unbenutzte Variable, -Werror) - auch Fremdspur, inzwischen behoben. i686-Gate laeuft (theme gruen, ui laeuft).
+
+Falsche Spec-Verweise korrigiert (Nachsatz des Koordinators, beide Stellen lagen in meinem Commit).
+
+Nachgeprueft, nicht nur geglaubt: 'mix', 'blend' und 'hover' kommen in KEINER Datei unter docs/superpowers/specs/ vor; UI spec §6.2 ist 'Loading'. Der Verweis '§6.2: the colour mix' (include/canlin/ui_limits.h, aus k121) und 'The colour mix (§6.2)' (t/ui/test_theme.c, test_mix_base) zeigten auf nichts und sind weg. Beide Kommentare sagen jetzt: der Mix ist eine Entscheidung des Themes; §6.1 legt die Farbrollen fest und leitet die Graph-Farben ab, der Mix ist nicht dabei. Keine erfundene Stelle. Die uebrigen §6.1/§6.2-Verweise in meiner Spur (graph.c Strecken, theme.h Style-Mapping, ui_limits.h Kontrast) sind geprueft und korrekt.
+
+Die Korrektur aendert nur Kommentare, keine Zahl: 25 bleibt 25. Rot/Gruen nach der Korrektur erneut geprueft - Konstante aus dem Header entfernt -> Build bricht ab (CANLIN_THEME_HOVER_MIX_PERCENT undeclared), wiederhergestellt -> theme: all passed (exit 0); Gegenprobe Aufrufstelle auf 30 -> weiterhin 3 Fehlschlaege (hover red/green/blue), zurueckgenommen. Die Kopplung zwischen Aufrufstelle und Header ist nicht stillschweigend weggefallen.
+
+Gates nach der Korrektur: Host - 'make BUILD=build/ui6 test' laeuft 22 Suiten gruen (android 140, app 78, app_assistant 286, ev all passed, llm 250514, llm_http 1633, loop 314, loop_native 93, module 2766, sse/json/http_wire/http, render all passed, sandbox 316, shell 3893, theme all passed, ui 12719, graph 13363, kbd 8515) und bricht dann in t/assistant/test_view.c ab (3 von 1932 checks): Fremdspur, der neue Test test_call_id_bound (Zeilen 655/656/663) des netllm-Agenten zu k57 ohne seine Implementierung in src/assistant/view.c. Die zwei danach nicht gelaufenen Suiten einzeln nachgezogen: test_response (3582 checks, 0 failures), test_binding (130 checks passed). Nicht mein Fehlschlag: keine Zahl geaendert, kein Assistant-Code beruehrt. i686 - make TARGET=i686 BUILD=build/i686 baut (echter make-Exit 0), alle sechs Suiten unter qemu-i386 -cpu pentium2 gruen: test_theme (theme: all passed), test_ui (12719 checks), test_graph (13363 checks, 0 failures), test_kbd (8515), test_render (all passed), test_shell (3893), je rc=0. Kein Zeitbudget-Fehlschlag (test_ui ca. 3 min unter Emulation).
+
+Aenderung: CANLIN_THEME_HOVER_MIX_PERCENT (25) in include/canlin/ui_limits.h neben CANLIN_THEME_MIX_BASE_PERCENT; src/ui/theme.c:347 mixt mit ihr statt mit dem Literal 25; t/ui/test_theme.c test_mix_base benutzt den neuen Namen und pinnt den Wert. Nicht angefasst: src/shell/, src/assistant/, src/app/, t/ui/test_ui.c, include/canlin/ui.h. Kein Commit - der Main-Agent committet.
+
+Proposed Subject: Name the hover colour's mix percentage (k141)
+
+2026-11-15 review (main): gelesen und akzeptiert. Die Zahl bleibt 25, die Kopplung zwischen Aufrufstelle und Header ist sichtbar (der Test nimmt den Anteil aus dem Header und pinnt ihn auf 25), und der Drift-Probe des Workers biss weiter. Die Richtigstellung zum Spec-Verweis ist drin: die Spec kennt keinen Mix (§6.2 ist "Loading"), der Kommentar sagt jetzt, der Mix sei eine Theme-Entscheidung. Committet als 927fece. Zur Beobachtung des Workers, die Host-Suite verliere drei Checks in t/assistant/test_view.c: das war ein Rennen zwischen zwei Agenten im selben Baum (der k57-Test wurde vor dem passenden Header-Stand gebaut), nicht ein Fehler - nach dem Nachbauen laeuft die Suite mit 1932 Checks gruen durch. Unter i686 sind alle sechs Suiten unter qemu-i386 -cpu pentium2 gruen.
