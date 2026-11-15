@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T18:33:02Z
+id: 174
+priority: low
+status: backlog
+tags:
+- shell
+- ui
+- docs
+title: 'Shell: the limits header and the spec table name different rows'
+updated: 2026-11-15T18:33:02Z
+---
+
+Die Haelfte von k93, die in die UI-Spur gehoert: include/canlin/shell_limits.h. Der Header hat zwei Bloecke mit Kommentar, die der Spec-Tabelle in docs/superpowers/specs/2026-09-23-canlin-shell-design.md §6 widersprechen. Der erste Block ("§6 table, the last five rows: chosen during canlin#35 and provisional") nennt DIVIDER_HIT, OUTPUTS_MAX, MODULES_MAX, SWITCHER_WIDTH und SWIPE - die stehen alle in der Tabelle der Spec, sie sind aber nicht die "letzten fuenf" der Tabelle, weil die Tabelle laenger ist und PANES_MIN, ROW_HEIGHT, RESTART_WIDTH, SWITCH_BUTTON und MODEL_LABEL nicht enthaelt. Der zweite Block ("Not in the §6 table: chosen here (provisional)") fuehrt ROW_HEIGHT, RESTART_WIDTH, SWITCH_BUTTON und MODEL_LABEL - von denen stehen vier in keiner Tabelle (RESTART_WIDTH kam nach der Karte k93 dazu, die nennt nur drei). Die Entscheidung des Dispatchers: die Zahlen stehen im Header, die Tabelle der Spec dokumentiert sie - das ist das Muster der UI-Spec §8 ("Initial values, in include/canlin/ui_limits.h:") und der HTTP-Transport-Spec. Beide Seiten muessen dasselbe sagen: der Header braucht eine Blockeinteilung, die zur Tabelle passt, und die Spec braucht die fehlenden Zeilen (diese Haelfte macht die Doc-Spur, Karte k93). Der Satz der Spec "The last five were chosen during k35 and are provisional" muss die Zeilen treffen, die in der Tat vorlaeufig sind - alle Werte, die nicht an der Hardware des P2 geprueft sind, sind es. Die Karte aendert keine Zahl: sie macht die Kommentare und die Tabelle wahr.
