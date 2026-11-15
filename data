@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-11-15T05:13:04Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-15T05:13:04Z
+created: 2026-11-14T22:28:28Z
+id: 129
+priority: high
+started: 2026-11-14T23:28:55Z
+status: done
+tags:
+- platform
+- app
+- assistant
+title: 'Platform: the app creates the model''s view and hands it to the shell'
+updated: 2026-11-15T05:13:04Z
+---
+
+Step 2 of 3 of the owner's decision on canlin#112 and #114 (the model view gets its own canlin_ui_view). The app owns the assistant session (src/app/assistant.c). It creates the model's own ui view, attaches the assistant view to it - the seam exists: canlin_assistant_view_attach (src/assistant/view.c:1584-1588) takes a view - and hands that view to the shell, which can hold a second view in the pane (canlin#128). The app also drives the model's frame, so the model's widgets land in a view of their own. The shell's model flag stays with the app's call canlin_shell_set_model_view (src/app/app.c:267). Depends on: the shell's second view (canlin#128); the binding that draws into the model's view (canlin#130) follows.
+
+Done in the platform lane. The app creates the model's own view (canlin_ui_view_new, src/app/app.c:265), attaches the assistant view to it (canlin_app_assistant_model_view -> canlin_assistant_view_attach, src/app/assistant.c:433) and hands it to the shell (canlin_shell_attach_model_view, src/app/app.c:281). The app owns the view and frees it after the shell (src/app/app.c:314); the shell never frees it. The shell's model flag stays (canlin_shell_set_model_view). New public accessors for the test: canlin_app_model_view, canlin_app_shell (include/canlin/app.h:94,99). Test: t/app/test_assistant.c test_model_view (line 454) - proved red without the handover (4 checks failed). The model's widgets still land in the module's own view until k130: the binding is untouched (src/assistant/ is the netllm lane). FINDING for k130, pinned in the test (t/app/test_assistant.c:561): a set_view drops the queued input of the model's own view, but the module's own view - where the model's widgets still are - keeps it, so a queued click there can act on the new model's widget until the binding draws the model into its own view.
+
+Done: the app creates the model's own view (src/app/app.c:265) and hands it to the shell (src/app/app.c:281), the assistant view is attached to it (src/app/assistant.c:433), the app owns the view and frees it after the shell (src/app/app.c:314); the shell never frees it. The shell's model flag stays (canlin_shell_set_model_view). New public accessors for the test: canlin_app_model_view, canlin_app_shell (include/canlin/app.h). Test: t/app/test_assistant.c test_model_view - the pane shows the model's own view in the frame above the module's own view, and a click in the model's block reaches the model's view; proved red without the handover (4 checks failed). Verified: the app, assistant, module, ev and loop suites green on the host (make BUILD=build/app2) and the app and assistant suites green under qemu-i386 -cpu pentium2 for TARGET=i686. The model's widgets still land in the module's own view until k130 - the binding is untouched (src/assistant/ is the netllm lane).
+
+2026-11-15 review (main): gelesen, gegengeprueft und committet als 6eab9f1 (k129, k133, k137).
+- k129: die App erzeugt die Modell-View, haengt den Assistant-View an sie und gibt sie dem Shell; die App besitzt sie und gibt sie frei, der Shell haelt sie und gibt sie nie frei. Die Freigabe-Reihenfolge in canlin_app_free stimmt: der Shell wird vor der Modell-View freigegeben (src/app/app.c:309-314).
+- k133: die App fordert das Neuzeichnen an, wenn das Modell ersetzt wurde oder die Modell-View wartende Eingabe hat (src/app/assistant.c:447-456). Die Karte nannte die Konstante CANLIN_UI_P_MODEL_VIEW - der echte Name ist CANLIN_SHELL_P_MODEL_VIEW; die Karte ist nachgezogen.
+- k137: der jstr/jval-Block ist raus, turn(sub) sendet die Bytes. Der Schritt gehoert zur Karte k115 (der Assistant-Seite), die mit 0ba2432 schon committet ist.
+Der Punkt, den der Worker selbst als sensibel markiert hat, ist im Test festgenagelt und nicht stillschweigend behoben: solange das Legacy-Binding das Modell in die Modul-View zeichnet, ueberlebt ein queued Klick in der Modul-View die Modell-Ersetzung und kann auf das neue Modell-Widget wirken (t/app/test_assistant.c:561 - der Check schlaegt fehl, wenn die Luecke sich schliesst). Das ist die Aufgabe von k130 und steht dort jetzt als Notiz.
