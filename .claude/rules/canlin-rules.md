@@ -10,7 +10,8 @@
 | code under `src/net/`, `src/llm/`, `src/assistant/` | `canlin-worker-netllm` |
 | code under `src/ui/`, `src/render/`, `src/shell/` | `canlin-worker-ui` |
 | code under `src/loop/`, `src/android/`, `src/app/` | `canlin-worker-platform` |
-| tests, the build spine (the top-level `Makefile`) | `canlin-test-writer` |
+| the build spine (the top-level `Makefile`) and the shared test tools | `canlin-test-writer` |
+| the test file of a part (`t/<part>/`) | the worker that owns `src/<part>/` |
 | `mk/<part>.mk` for its part | the worker that owns `src/<part>/` |
 | third-party code under `third_party/`, `libs/` | `canlin-vendor` |
 | specs under `docs/superpowers/specs/` | `canlin-doc-writer` |
