@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-11-15T17:51:18Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T17:51:18Z
+created: 2026-11-15T17:46:10Z
+id: 171
+priority: low
+started: 2026-11-15T17:49:17Z
+status: done
+tags:
+- docs
+- spec
+title: 'Docs: the system design still says the i686 suites have no runner'
+updated: 2026-11-15T17:51:18Z
+---
+
+Aus k143 (2026-11-15): die System-Design-Spec §12 sagt noch: "The i686 suites have no runner hook yet - the user-mode gate is started by hand." Das ist seit dem 15.11. veraltet - das Makefile hat jetzt einen RUNNER (qemu-i386 -cpu pentium2 im Target), einen GATE-Namen je Lauf und ein zielabhaengiges Timeout (120 s auf dem Host, 600 s im Target). §2 (die Gate-Tabelle) ist bereits richtig. §12 soll den Hook benennen, das Timeout nennen und sagen, dass der Android-Geraeteweg (tools/android-test.sh) den Hook nicht benutzt und kein Gate nennt - das ist der eine Weg, auf dem ein Ergebnis ohne benanntes Gate entstehen koennte.
+
+2026-11-15 canlin-doc-writer: §12 der System-Design-Spec korrigiert, der veraltete Satz 'The i686 suites have no runner hook yet - the user-mode gate is started by hand' ist weg. Neu und mit Belegen aus dem Makefile (k143) und der Karte k143: der i686-Lauf ist ein Kommando (make TARGET=i686 test startet die Suiten unter qemu-i386 -cpu pentium2, ohne Handeingriff, fehlender Runner ist ein lauter Fehler statt eines stillen Falls auf den Host-CPU); das Timeout folgt dem Ziel (120 s Host, 600 s Target, weil die Emulation langsamer laeuft als der Host - die groesste Suite braucht rund 253 s unter dem Emulator; der Grund fuer die Emulation steht in §2 und wird dorthin verwiesen statt wiederholt); das Ergebnis nennt das gelaufene Gate (host / host + sanitizer (asan) / i686 user-mode), und User-Mode- und Vollsystem-Gate werden nie als ein 'QEMU'-Ergebnis berichtet (§2); der Android-Geraeteweg (make TARGET=android-armv7 test-device, tools/android-test.sh) benutzt den Hook nicht und nennt kein Gate - das ist der eine Weg, auf dem ein Ergebnis ohne benanntes Gate entstehen kann, und §12 sagt es jetzt; das Vollsystem-Gate (canlin-os, qemu-system-i386) bleibt offen und wird nicht mit dem User-Mode-Gate verrechnet. Die Status-Zeile traegt einen Amendment-Eintrag fuer §12, wie es §2 hat. §2 selbst ist unveraendert. Nur Doku: keine C-Datei, kein Makefile, docs/adr/ nicht beruehrt. Kein Build/kein Testlauf - die Aenderung betrifft nur einen Fliesstext in einer Spec-Datei.
+
+§12 der System-Design-Spec (docs/superpowers/specs/2026-09-22-canlin-system-design.md) ist auf den Stand vom 2026-11-15 gebracht: der i686-Lauf ist ein Kommando (make TARGET=i686 test), das Timeout folgt dem Ziel (120 s Host, 600 s Target, die groesste Suite braucht rund 253 s unter der Emulation), das Ergebnis nennt das gelaufene Gate (host / host + sanitizer (asan) / i686 user-mode), der Android-Geraeteweg benutzt den Hook nicht und nennt kein Gate, und das Vollsystem-Gate bleibt offen und unverrechnet. Der veraltete Satz zum fehlenden Runner-Hook ist entfernt, die Status-Zeile hat einen Amendment-Eintrag fuer §12. §2 wurde nicht angefasst.
+
+Diff: eine Datei, docs/superpowers/specs/2026-09-22-canlin-system-design.md (+19/-4).
+
+Geprueft: die Fakten stammen aus dem Makefile (RUNNER/GATE/TEST_TIMEOUT, k143) und der Karte k143; kein Build und kein Testlauf, weil kein Code geaendert wurde - die Aenderung ist Fliesstext in einer Spec-Datei. docs/adr/ unberuehrt.
+
+Hinweis fuer die Wartung: tools/android-test.sh gibt selbst keinen Gate-Namen aus; die Spec verlangt jetzt, dass ein Bericht von diesem Weg den Geraeteweg nennt. Ob das Skript den Namen selbst drucken soll, ist eine Entscheidung der Build-Spur (kann-test-writer), nicht hier entschieden.
+
+Proposed Subject: Bring the testing section up to the runner hook (k171)
+
+2026-11-15 review (main): gelesen und committet. Der Absatz nennt das Kommando (make TARGET=i686 test), den Runner (qemu-i386 -cpu pentium2), den Grund fuer die Emulation (Verweis auf §2 statt Wiederholung), das zielabhaengige Timeout mit der Zahl, die es begruendet (120 s Host, 600 s Target, die groesste Suite rund 253 s), die drei Gate-Namen und die Regel, dass User-Mode und Vollsystem nie als ein QEMU-Ergebnis berichtet werden. Der Android-Weg ist eigens benannt, weil er den Hook nicht benutzt und kein Gate nennt - er zaehlt als keines der drei Gates und benennt sich als Geraeteweg. Der Status-Kopf traegt die Amendment-Zeile wie §2. Committet.
