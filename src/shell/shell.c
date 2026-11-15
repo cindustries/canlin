@@ -983,6 +983,17 @@ static int focused_mod(canlin_shell *sh)
     return so->slot[so->cur];
 }
 
+/* The model's own view holds the keyboard focus (canlin#131). Then the keys and the text
+ * belong to it and not to the module: the model's view is the area in which the model
+ * speaks (ADR 0001), and a module that took the keys there could put words in the
+ * model's mouth. The module's own view can hold a focus at the same time - the model's
+ * view has the precedence, so the boundary stays provable. */
+static int model_has_focus(canlin_shell *sh, int k)
+{
+    return k >= 0 && sh->mods[k].mview != NULL &&
+           canlin_ui_view_has_focus(sh->mods[k].mview);
+}
+
 static int key_input(canlin_shell *sh, const canlin_ui_input *in)
 {
     shell_out *fo = &sh->out[sh->focus_out];
@@ -1023,6 +1034,8 @@ static int key_input(canlin_shell *sh, const canlin_ui_input *in)
             canlin_shell_restart(sh, sh->mods[k].m);
         return CANLIN_SHELL_R_CHROME;
     }
+    if (model_has_focus(sh, k))
+        return post_to(sh, k, 1, in); /* the model's own view has the focus */
     return post(sh, k, in);
 }
 
@@ -1207,11 +1220,14 @@ int canlin_shell_input(canlin_shell *sh, canlin_ui_output *o, const canlin_ui_in
         return key_input(sh, in);
     case CANLIN_UI_IN_TEXT: {
         shell_out *fo = &sh->out[sh->focus_out];
+        int k = focused_mod(sh);
         if (!canlin_ui_input_valid(in))
             return CANLIN_SHELL_EINVAL;
         if (fo->sw_open)
             return CANLIN_SHELL_R_CHROME;
-        return post(sh, focused_mod(sh), in);
+        if (model_has_focus(sh, k))
+            return post_to(sh, k, 1, in); /* the model's own view has the focus */
+        return post(sh, k, in);
     }
     case CANLIN_UI_IN_MOTION:
     case CANLIN_UI_IN_BUTTON:

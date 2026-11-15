@@ -641,6 +641,14 @@ const canlin_render_font *canlin_ui_view_font(const canlin_ui_view *v)
     return &v->fe->font;
 }
 
+/* The view holds the keyboard focus while one of its widgets has it. The focus is the
+ * per-view one (canlin#26): the field the user tapped into, or the widget the Tab order
+ * reached. A view that never had a focus has none (canlin#131). */
+int canlin_ui_view_has_focus(const canlin_ui_view *v)
+{
+    return v != NULL && v->focus != 0;
+}
+
 void canlin_ui_view_set_rect(canlin_ui_view *v, int x, int y, int w, int h)
 {
     if (v == NULL || w <= 0 || h <= 0 || v->in_frame)

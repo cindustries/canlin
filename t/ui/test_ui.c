@@ -2510,3 +2510,94 @@ int main(void)
     printf("ui: %d checks passed\n", checks);
     return 0;
 }
+/* The focus query (canlin#131): the view holds the focus while one of its widgets has
+ * it. A view that never had a focus has none, and the focus is the per-view one: two
+ * views can hold one at the same time (the shell asks both). */
+static void test_view_has_focus(void)
+{
+    harness h;
+    const canlin_ui_rect *r;
+    canlin_ui_view *other;
+
+    h_init(&h, NULL, 1.0f, focus_src, 400, 800);
+    h_drain(&h);
+    CHECK(!canlin_ui_view_has_focus(canlin_module_view(h.m)));
+    r = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 1); /* B */
+    CHECK(r != NULL);
+    if (r) {
+        click(&h, r);
+        h_drain(&h);
+        CHECK(canlin_ui_view_has_focus(canlin_module_view(h.m)));
+    }
+    /* A view of its own has a focus of its own: none. */
+    other = canlin_ui_view_new(h.ui, h.out, NULL);
+    CHECK(other != NULL);
+    CHECK(!canlin_ui_view_has_focus(other));
+    canlin_ui_view_free(other);
+    h_done(&h);
+}
+
+/* A click that was queued against the old content must not act on the content that
+ * comes next: the view that holds the new content drops its queued input (the model
+ * view's set_view does it, canlin#131 - the reset must reach the view that holds the
+ * model, or a click made against the old model acts on the new one). */
+static void test_input_reset(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    int x, y;
+
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (b) {
+        x = b->x + b->w / 2;
+        y = b->y + b->h / 2;
+        /* The press waits in the view's queue: it was delivered, the frame that would
+         * apply it has not come yet. */
+        {
+            canlin_ui_input in;
+            memset(&in, 0, sizeof in);
+            in.type = CANLIN_UI_IN_BUTTON;
+            in.x = x;
+            in.y = y;
+            in.down = 1;
+            CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
+        }
+        CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) > 0);
+        input(&h, CANLIN_UI_IN_MOTION, x, y, 0); /* the module draws again */
+        h_drain(&h);
+        CHECK(count(&h, "clicked") == 1); /* the queued press landed on the button */
+    }
+    h_done(&h);
+
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (b) {
+        x = b->x + b->w / 2;
+        y = b->y + b->h / 2;
+        /* The same press, but the content is replaced before the frame that would apply
+         * it: the queued input is dropped and the press does not land. */
+        {
+            canlin_ui_input in;
+            memset(&in, 0, sizeof in);
+            in.type = CANLIN_UI_IN_BUTTON;
+            in.x = x;
+            in.y = y;
+            in.down = 1;
+            CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
+        }
+        CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) > 0);
+        canlin_ui_view_input_reset(canlin_module_view(h.m));
+        input(&h, CANLIN_UI_IN_MOTION, x, y, 0); /* the module draws again */
+        h_drain(&h);
+        CHECK(count(&h, "clicked") == 0);
+    }
+    h_done(&h);
+}
+
+    test_view_has_focus();
+    test_input_reset();

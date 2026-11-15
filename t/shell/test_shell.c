@@ -1029,3 +1029,154 @@ int main(void)
     printf("shell: %d checks passed\n", checks);
     return 0;
 }
+/* ---- §4 the keys and the text reach the model's own view (canlin#131) ---- */
+
+/* The module's own view draws a field, so it can hold a focus of its own. */
+static const char *FIELD_SRC =
+    "local M = {}\n"
+    "local v = ''\n"
+    "function M.draw(ui)\n"
+    "  v = ui:field('Own', v)\n"
+    "  print('own=' .. v)\n"
+    "end\n"
+    "return M\n";
+
+/* The model's own view is driven by its own Lua (the assistant drives it that way); the
+ * test drives it with a plain Lua state: a field the user taps into, and the text that
+ * lands in it. The value is kept here and drawn again, the way the assistant keeps it. */
+static lua_State *mvL;
+static char mvval[64];
+
+static void mv_draw(canlin_ui_view *v)
+{
+    if (canlin_ui_view_frame_begin(v) != CANLIN_UI_OK)
+        return;
+    canlin_ui_push(mvL, v);   /* the per-draw ui object */
+    lua_getfield(mvL, -1, "field");
+    lua_pushvalue(mvL, -2);   /* the ui object again: the call is ui:field(...) */
+    lua_pushstring(mvL, "Ask");
+    lua_pushstring(mvL, mvval);
+    if (lua_pcall(mvL, 3, 1, 0) == LUA_OK) {
+        const char *s = lua_tostring(mvL, -1);
+        if (s)
+            snprintf(mvval, sizeof mvval, "%s", s);
+    } else {
+        fprintf(stderr, "model field: %s\n", lua_tostring(mvL, -1));
+    }
+    lua_settop(mvL, 0);
+    canlin_ui_view_frame_end(v);
+}
+
+/* The field of a view, from its layout record. */
+static canlin_ui_rect field_of(canlin_ui_view *v)
+{
+    size_t n, k;
+    canlin_ui_rect none;
+    const canlin_ui_rect *rec = canlin_ui_view_record(v, &n, NULL);
+    memset(&none, 0, sizeof none);
+    for (k = 0; k < n; k++)
+        if (rec[k].kind == CANLIN_UI_W_FIELD && rec[k].part == CANLIN_UI_P_BOX)
+            return rec[k];
+    CHECK(!"no field");
+    return none;
+}
+
+/* The value of the module's own field, from the log the module prints. */
+static const char *own_value(void)
+{
+    const char *p = H.log[0], *last = "";
+    while ((p = strstr(p, "own=")) != NULL) {
+        last = p + 4;
+        p = last;
+    }
+    return last;
+}
+
+static void send_text(unsigned cp)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_TEXT;
+    in.cp = cp;
+    CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+    drain();
+}
+
+/* A model pane holds two views (canlin#128): the model's own and the module's own. The
+ * keys and the text belong to the view that holds the focus - and the model's own view
+ * has the precedence, because it is the area in which the model speaks (ADR 0001): a
+ * module that took the keys there could put words in the model's mouth. */
+static void test_model_view_keys(void)
+{
+    canlin_ui_view *mv, *own;
+    canlin_ui_rect mf, of;
+    unsigned k0, t0;
+
+    src_main = FIELD_SRC;
+    h_init(1000, 800, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_POINTER);
+    mvL = luaL_newstate();
+    mv = canlin_ui_view_new(H.ui, H.out, NULL);
+    CHECK(mv != NULL);
+    CHECK(canlin_shell_attach_model_view(H.sh, H.m[0], mv) == CANLIN_SHELL_OK);
+    settle();
+    mv_draw(mv);
+    settle();
+
+    own = canlin_module_view(H.m[0]);
+    mf = field_of(mv);
+    of = field_of(own);
+    CHECK(mf.w > 0 && of.w > 0);
+    CHECK(!canlin_ui_view_has_focus(mv));
+    CHECK(!canlin_ui_view_has_focus(own));
+
+    /* The module's own field: its view holds the focus, the model's view has none. */
+    CHECK(tap(of.x + 2, of.y + 2) == CANLIN_SHELL_R_VIEW);
+    settle();
+    CHECK(canlin_ui_view_has_focus(own));
+    CHECK(!canlin_ui_view_has_focus(mv));
+    /* Then the text goes to the module, as before. */
+    k0 = H.keys[0];
+    t0 = H.texts[0];
+    send_text('m');
+    CHECK(H.texts[0] == t0 + 1);
+    CHECK(H.keys[0] == k0);
+    CHECK(own_value()[0] == 'm' && own_value()[1] == '\n');
+
+    /* The model's own field: its view holds the focus too - both views hold one. */
+    CHECK(tap(mf.x + 2, mf.y + 2) == CANLIN_SHELL_R_VIEW);
+    mv_draw(mv); /* the click is applied in the model's view's next frame */
+    settle();
+    CHECK(canlin_ui_view_has_focus(mv));
+    CHECK(canlin_ui_view_has_focus(own));
+
+    /* The text goes to the model's view: the module neither gets it nor keeps it. */
+    k0 = H.keys[0];
+    t0 = H.texts[0];
+    send_text('x');
+    CHECK(H.texts[0] == t0);
+    CHECK(H.keys[0] == k0);
+    mv_draw(mv);
+    mv_draw(mv); /* one edge group per frame: the text is the second */
+    CHECK(mvval[0] == 'x' && mvval[1] == '\0');
+    CHECK(own_value()[0] == 'm' && own_value()[1] == '\n');
+
+    /* The keys go there as well: a backspace in the model's field, not in the module's. */
+    {
+        canlin_ui_input in = key(CANLIN_UI_KEY_BACKSPACE, 1);
+        k0 = H.keys[0];
+        CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_VIEW);
+        drain();
+        CHECK(H.keys[0] == k0); /* the module did not get the key */
+    }
+    mv_draw(mv);
+    mv_draw(mv); /* one edge group per frame: the key is the second */
+    CHECK(mvval[0] == '\0'); /* the backspace took the character back */
+    CHECK(own_value()[0] == 'm' && own_value()[1] == '\n');
+
+    canlin_ui_view_free(mv);
+    lua_close(mvL);
+    mvL = NULL;
+    h_done();
+}
+
+    test_model_view_keys();

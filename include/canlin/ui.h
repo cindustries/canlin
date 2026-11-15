@@ -273,6 +273,10 @@ int canlin_ui_view_dirty(const canlin_ui_view *v);
 float canlin_ui_view_em(const canlin_ui_view *v);
 /* The atlas of the view's current font (canlin_ui_view_render sets it itself). */
 const canlin_render_font *canlin_ui_view_font(const canlin_ui_view *v);
+/* 1 if the view holds the keyboard focus: one of its widgets has it (canlin#26). The
+ * question is per view - two views can hold a focus at the same time (canlin#131), and
+ * the view that holds it is the one that wants the keys and the text. */
+int canlin_ui_view_has_focus(const canlin_ui_view *v);
 /* Forget all widget state, queued input and scroll (new module generation). */
 void canlin_ui_view_reset(canlin_ui_view *v);
 
