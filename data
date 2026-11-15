@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-15T18:31:20Z
+claimed_by: canlin-test-writer
+class: standard
+created: 2026-11-14T06:34:55Z
+id: 89
+priority: low
+started: 2026-11-15T00:29:43Z
+status: review
+tags:
+- test
+- toolchain
+title: 'Mutation testing: the cards claim killed mutants, the repo has no tooling'
+updated: 2026-11-15T18:31:20Z
+---
+
+k5 claims '18/18 mutants killed', k19 '6 mutants caught', k27 '3 mutants caught'. There is no mutation-testing tooling in the tree - tools/ holds only android-test.sh and mkfont.py - so none of these claims can be re-run or checked by a reviewer. Decide: add the tooling under tools/ so the claims become reproducible, or restate them as the manual checks they actually were. Found by the 2026-11-14 review.
+
+2026-11-14 21:59 2026-11-14: a second instance, and the sharpest yet. canlin#124 was filed with the claim 'the llm to module op-completion path has no test at all' - and the worker showed the opposite: removing the producer's stamp already killed 8 checks in t/app/test_assistant.c and 151 in t/llm/test_llm.c. The path was covered; what was missing was a test that names the contract in one place. A claim of the form 'mutant X is killed by suite Y' has to be checked before it is written down, and the claims on this board about killed mutants (canlin#5, #19, #27) are of that form. The tooling this card asks for is what would make the check cheap.
+
+2026-11-15 Entscheidung des Maintainers: ein Haus-Skript. Kein externes Werkzeug (LLVM/KLEE, cosmic-ray) - die Behauptung "dieser Mutant wurde getoetet" soll wiederholbar pruefbar sein, ohne eine grosse neue Abhaengigkeit. Das Skript faehrt genau die Mutationen, die die Karten behaupten (Vergleich umdrehen, Konstante aendern, Bedingung negieren), baut das betroffene Ziel neu und laesst die Suite dagegen laufen; toetet die Suite den Mutanten nicht, ist die Behauptung der Karte widerlegt. Das Skript gehoert zum Test-Werkzeug (tools/ neben dem Makefile) und ist fuer die Test-Spur. Es soll die Behauptungen der betroffenen Karten nachtragen, nicht neue erfinden - eine Liste von Karten und Mutationen, die je laufen.
+
+2026-11-15 canlin-test-writer: Haus-Skript gebaut, kein externes Werkzeug. Neu: tools/mutation-check.sh (der Laeufer) und tools/mutants.tsv (die Tabelle: Karte, Datei, exakte alte Zeile, neue Zeile, Testbinary, erwartetes Ergebnis). Je Mutant: Datei sichern, Zeile ersetzen, das betroffene Testbinary in einem eigenen BUILD-Ordner bauen, unter einem Timeout je Mutant laufen lassen, Datei in jedem Fall zuruecklegen; am Ende prueft das Skript die Pruefsummen der mutierten Dateien - der Baum ist danach byteweise derselbe. Jeder Mutant bekommt eine Ergebniszeile; 'nicht anwendbar' und 'baut nicht' sind Ergebnisse, keine stillen Uebersprünge. Das Skript verlangt, dass die Tabelle pro Karte so viele Mutanten haelt wie die Karte behauptet (k5 18, k19 6, k24 7, k27 3, k12 2), sonst laeuft es nicht.
+
+Haus-Skript fertig, kein externes Werkzeug. Neu: tools/mutation-check.sh (Laeufer) und tools/mutants.tsv (Tabelle: Karte, Datei, exakte alte Zeile, neue Zeile, Testbinary, erwartetes Ergebnis, Notiz). Je Mutant: Datei sichern, Zeile ersetzen, das benannte Testbinary in einem eigenen BUILD-Ordner bauen, unter einem Timeout je Mutant laufen lassen, Datei in jedem Fall zuruecklegen; am Ende prueft das Skript die Pruefsummen der mutierten Dateien - der Baum ist danach byteweise derselbe. Jeder Mutant bekommt eine Ergebniszeile; 'nicht anwendbar' (die Zeile ist nicht da) und 'baut nicht' sind Ergebnisse, keine stillen Uebersprünge. Das Skript verlangt pro Karte genau so viele Mutanten, wie die Karte behauptet (k5 18, k19 6, k24 7, k27 3, k12 2), sonst laeuft es nicht.
+
+Lauf (Host, Timeout 120 s je Mutant): 36 Mutanten - 32 getoetet, 2 ueberlebt, 2 haengen, 0 nicht anwendbar, 0 baufehler. Je Karte: k19 6/6 getoetet (Behauptung haelt), k24 7/7 (haelt), k27 3/3 (haelt), k12 2/2 haengen mit Exit 124 (haelt: ein haengender Mutant wird als 'haengt' gemeldet, nicht als getoetet), k5 16/18 getoetet - die Behauptung '18/18 mutants killed' ist so nicht nachstellbar.
+
+Befund (Befund fuer die Karte, keine stille Korrektur): die zwei Ueberlebenden sind Luecken in t/net/json_test.c. (1) k5-15: die Grenze der Steuerzeichen in einem String (src/net/json.c, if (c < 0x20)) - der Mutant, der sie auf 0x10 senkt, lebt, weil die Suite nur \x01, \n und \t kennt (alle unter 0x10). (2) k5-16: die obere Grenze des low surrogate (p->ucp > 0xDFFF) - der Mutant, der sie streicht, lebt, weil kein Vektor eine hohe Surrogat mit einem Escape ueber U+DFFF paart. Beide Luecken sind in einer Kopie des Baums geprueft: die zwei Vektoren E("a\x1F", STRING) und E("\ud800\ue000", ESCAPE) schliessen sie, dann sterben beide Mutanten. Karte fuer die Net-Spur (t/net/json_test.c) vorgeschlagen; danach ist k5s Zahl nachstellbar und kann als '18/18 mit tools/mutation-check.sh' neu formuliert werden.
+
+Gate: make BUILD=build/tw8 test gruen (Host, ALL TESTS PASSED). Der Lauf des Skripts selbst ist gruen bis auf die zwei Befunde (Exit 1, weil zwei Behauptungen nicht halten). i686-Tor separat berichtet. Das Makefile blieb unberuehrt: ein anderer Agent schreibt dort gerade; das Skript steht als neues Werkzeug unter tools/.
