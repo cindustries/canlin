@@ -1,0 +1,49 @@
+---
+claimed_at: 2026-11-15T17:43:51Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-15T17:43:51Z
+created: 2026-11-14T22:28:36Z
+id: 130
+priority: high
+started: 2026-11-15T00:59:37Z
+status: done
+tags:
+- assistant
+- llm
+- ui
+title: 'Net/LLM: the binding draws the model into the model''s own view'
+updated: 2026-11-15T17:43:51Z
+---
+
+Step 3 of 3 of the owner's decision on canlin#112 and #114 (the model view gets its own canlin_ui_view). Today canlin.view.draw() pushes the MODULE's view and draws the model into it (src/assistant/binding.c:43-49), so the model's widgets and the module's own share one identity space, one focus and one slot table. The binding must instead push the model's own view and drive its frame, so the model's widgets land in a view of their own. The assistant view knows the view it is attached to; the binding reaches it through the assistant view. Note the existing C-driven frame path canlin_assistant_view_frame (src/assistant/view.c:2465-2497) drives a frame on the attached view from a private Lua state and so far has no production caller - it may be the mechanism here. Depends on: the app that creates the model's view (canlin#129).
+
+2026-11-15 (dispatcher), aus dem Bericht der Plattform-Spur (k129/k133/k137): die App haengt den Assistant-View jetzt an die Modell-View (canlin_app_assistant_model_view -> canlin_assistant_view_attach, src/app/assistant.c:433), und av->view ist damit die Modell-View. Damit kann das Binding die Modell-View ueber den Assistant-View erreichen, ohne einen eigenen Zeiger zu bekommen - der Assistant-View weiss sie. Der Rahmen: der Pfad dafuer ist canlin_assistant_view_frame(av) (der C-getriebene Pfad mit dem privaten Lua-Zustand av->L) - das Binding muss den Rahmen der Modell-View INNERHALB des draw des Moduls treiben, weil die App die Neuzeichnung ueber die Invalidierung der Modul-Generation anfordert (src/app/assistant.c:447-456).
+Der sicherheitsrelevante Punkt, jetzt festgenagelt: solange das Legacy-Binding das Modell in die Modul-View zeichnet (src/assistant/binding.c:43-49), behaelt die Modul-View ihren queued input - ein queued Klick in der Modul-View ueberlebt die Modell-Ersetzung und kann auf das neue Modell-Widget wirken. Der Test, der das zeigt, steht in t/app/test_assistant.c:561 (er schlaegt fehl, wenn die Luecke sich schliesst). Die Karte muss diese Luecke schliessen: der Reset des queued input muss die View treffen, in der der Klick landet - die Modell-View.
+
+Bindung zeichnet das Modell in die Modell-View (ADR 0001). canlin.view.draw() ruft jetzt canlin_assistant_view_frame() auf dem View, an dem der Assistant-View haengt (die Modell-View, src/app/assistant.c:433); der Legacy-Pfad (Push der Modul-View, Modell hineinzeichnen, src/assistant/binding.c:43-49) ist weg, und der Modul-Upvalue im Binding ist weg: die Bindung erreicht nur noch den Assistant-View und damit die Modell-View. Der Rahmen der Modell-View entsteht im draw des Moduls (die App invalidiert die Modul-Generation, src/app/assistant.c:447-456; die Shell zeichnet den neuen Rahmen, model_new_frame). Der C-Pfad canlin_assistant_view_draw ist jetzt die eine Zeichenfunktion (der Rahmenpfad benutzt sie), damit die oeffentliche API keinen toten Zweig hat.
+queued input: der Reset des queued input (canlin_assistant_view_set_view -> canlin_ui_view_input_reset(av->view)) trifft die Modell-View, in der der Klick jetzt landet - die Modell-View haelt die Modell-Widgets, die Modul-View nicht mehr. Der Finding-Check in t/app/test_assistant.c:565 schlaegt jetzt fehl: die Luecke ist zu (der queued Klick in der Modul-View kann kein Modell-Widget mehr treffen).
+Die App-Spur hat t/app/test_assistant.c (ihre Datei) an die neue Lage angepasst: ein find_model()-Helfer liest den Record der Modell-View, die Modell-Erwartungen zeigen dorthin, der Submit-Knopf der Modell-View wird dort gedrueckt (der Klick laeuft ueber canlin_app_input -> Shell -> die View unter dem Punkt -> die Modell-View). End-to-End belegt: der Request-Body traegt die Submission {"revision":1,"action":"ok","values":{"item":"Milch"}}.
+Tests: t/assistant/test_binding.c (155 Checks; neu test_model_view - die Modell-Widgets liegen in der Modell-View und in keiner anderen, der Rahmen der Modell-View entsteht im draw des Moduls, der queued Klick in der Modell-View faellt beim Wechsel des Modells weg, der Modul-View bleibt ihr eigener Input). Gate: make BUILD=build/llm6 test - ALL TESTS PASSED (Host). i686 (User-Mode, qemu-i386 -cpu pentium2, ohne SSE): assistant binding/view/response und app assistant/app gruen.
+
+Bindung zeichnet das Modell in die Modell-View (ADR 0001); der Legacy-Pfad ist weg.
+
+src/assistant/binding.c: canlin.view.draw() treibt jetzt canlin_assistant_view_frame() auf dem View, an dem der Assistant-View haengt (die Modell-View, src/app/assistant.c:433). Der Push der Modul-View und das Zeichnen des Modells in sie sind weg, und der Modul-Upvalue im Binding ist weg - die Bindung erreicht nur noch den Assistant-View und damit die Modell-View. Der Rahmen der Modell-View entsteht im draw des Moduls: die App invalidiert die Modul-Generation (src/app/assistant.c:447-456), die Shell zeichnet den neuen Rahmen (model_new_frame). Fehler: nil, 'unavailable', <Meldung des Assistant-View>.
+src/assistant/view.c: der C-getriebene Rahmenpfad benutzt jetzt canlin_assistant_view_draw als die eine Zeichenfunktion (kein toter Zweig in der oeffentlichen API); der Busy-Fall des Rahmens folgt jetzt dem Header (EARG heisst 'kein View', ein Rahmen, der nicht starten konnte, ist EINVALID).
+include/canlin/assistant_binding.h, include/canlin/assistant_view.h: die Doku der Trennung.
+t/assistant/test_binding.c: der Harness hat eine Modell-View, die Modell-Widgets werden dort gesucht; neu test_model_view (155 Checks): die Modell-Widgets liegen in der Modell-View und in keiner anderen, der Rahmen der Modell-View entsteht im draw des Moduls, der queued Klick in der Modell-View faellt beim Wechsel des Modells weg, die Modul-View behaelt ihren eigenen Input.
+t/app/test_assistant.c: die App-Spur (Eigentum der Plattform-Spur) hat ihre vier Erwartungen an die neue Lage angepasst (find_model-Helfer auf der Modell-View; der Finding-Check von == 1 auf == 0). End-to-End belegt: der Submit-Knopf der Modell-View liefert die Submission {"revision":1,"action":"ok","values":{"item":"Milch"}} an den Provider.
+
+queued input: der Reset (canlin_assistant_view_set_view -> canlin_ui_view_input_reset(av->view)) trifft die Modell-View, in der der Klick jetzt landet - die Modell-View haelt die Modell-Widgets, die Modul-View nicht mehr. Der Finding-Check in t/app/test_assistant.c:565 schlaegt jetzt fehl: die Luecke ist zu.
+
+Gates: Host 'make BUILD=build/llm6 test' -> ALL TESTS PASSED. Host+ASan 'make SAN=asan BUILD=build/llm6 test' -> ALL SANITIZER TESTS PASSED. i686 user-mode (qemu-i386 -cpu pentium2, ohne SSE): alle Suiten gruen bis auf t/net/http_test - dort schlaegt der bekannte close-inside-callback-Fall fehl (k145, die feste 300-ms-Warte), die Suite enthaelt keinen assistant-Code (nm: 0 Treffer) und ist auf dem Host gruen; die danach liegenden Suiten einzeln unter dem Runner nachgefahren (render, sandbox, shell, ui theme/test_ui/test_kbd/test_graph, loop, loop_native, android: alle gruen). Kein WASM/backend-Lauf, kein Geraetelauf.
+
+Zwei Beobachtungen fuer andere Spuren (nicht Teil dieser Karte, bitte weitergeben): (1) Shell-Spur: aendert sich nur das Rechteck der Modell-View und nicht das der Modul-View (etwa eine Skalierung ohne Groessenaenderung), fragt niemand das Modul nach einem Neuzeichnen an - der Bereich des Modells bleibt dann leer, bis das Modul wieder zeichnet; (2) Test-Spur: k139 ist offen, der Check 'Milch' in t/app/test_assistant.c erfuellt weiterhin die Tool-Call-Argumente und nicht die Submission.
+
+Proposed commit subject: Draw the model into the model's own view (k130)
+
+2026-11-15 review (main): gelesen und committet als 2ef638a. Das Binding zeichnet jetzt in die View des Modells: canlin.view.draw() treibt den Rahmen der View, an die der Assistant-View gehaengt ist (src/app/assistant.c:433), der Legacy-Pfad (die Modul-View pushen) ist weg, und mit ihm der Modul-Upvalue in den Closures - das Binding erreicht jetzt nur noch den Assistant-View, also nur die Modell-View. Der Rahmen entsteht im draw des Moduls, wo die Neuzeichnungsanfrage der App ihn erwartet.
+Der sicherheitsrelevante Punkt ist geschlossen: der Reset des queued input trifft jetzt die View, in der der Klick landet (die Modell-View). Die Pruefung, die die Luecke festgenagelt hatte, schlaegt jetzt fehl (== 1 -> == 0), genau wie die Karte es vorhersagte.
+t/app/test_assistant.c ist die Datei der Plattform-Spur und wurde mit dieser Karte geaendert, weil sie das alte Verhalten an vier Stellen festgehalten hat - der netllm-Agent hat das ueber einen Plattform-Agenten gemacht, also spurengerecht.
+Gates des Workers: Host gruen, Sanitizer gruen (ALL SANITIZER TESTS PASSED), i686 user-mode alle Suiten gruen ausser dem bekannten k145 (feste 300-ms-Wartezeit in t/net/http_test - die Suite linkt keinen Assistant-Code und ist auf dem Host gruen).
+Befund fuer die Shell-Spur: aendert sich nur das Rechteck der Modell-View (etwa eine Skalenaenderung ohne Groessenaenderung) und nicht das der Modul-View, fragt niemand das Modul nach einem Neuzeichnen - der Modellbereich bleibt dann leer, bis das Modul wieder zeichnet. Das ist eine Karte fuer die UI-Spur.
