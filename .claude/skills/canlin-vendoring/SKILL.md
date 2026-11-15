@@ -88,8 +88,10 @@ switched off by configuration.
 Then run every gate that exists and name each one that does not:
 
 1. host: `make` and `make test`
-2. i686: `make TARGET=i686` (static musl); then the canlin-os harness under
-   `qemu-system-i386 -cpu pentium2 -m 1024` if present
+2. i686: `make TARGET=i686` (static musl, `i686-linux-musl-gcc` on PATH); then the suites
+   under `qemu-i386 -cpu pentium2` — the user-mode gate, which catches an illegal
+   instruction — and the canlin-os harness under `qemu-system-i386 -cpu pentium2 -m 1024`
+   if present. Name which gate ran; they are not the same evidence.
 3. WASM / mobile builds, once they exist
 
 `make`/`make test` only compile what something links. A lib without a consumer yet is

@@ -62,8 +62,10 @@ wired to the AI, the user brings single entries in as cards.
 - **Evidence per platform.** Separate host, P2-QEMU, WASM/backend and real-device evidence — a
   skipped gate is named, not implied green. No host run proves target instructions or browser
   durability.
-- **The host runs SSE, the target does not.** Only `qemu-system-i386 -cpu pentium2` catches an
-  illegal instruction; a green host test is not a green i686 test.
+- **The host runs SSE, the target does not.** `qemu-i386 -cpu pentium2` catches an illegal
+  instruction in the built binary; the canlin-os harness under
+  `qemu-system-i386 -cpu pentium2 -m 1024` proves the system. A green host test is not a
+  green i686 test, and a result names the gate that ran.
 - **Vendored code is read-only.** `third_party/` (Nuklear, Lua, cmp, stb, mbedtls, libbee) is
   never edited in place — patch file plus ticket, or a ticket on `libbee`.
 - **The sandbox is the security boundary.** Modules arrive from a server; any new `canlin.*`
