@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-15T17:45:49Z
+id: 170
+priority: medium
+status: backlog
+tags:
+- ui
+- shell
+title: 'Shell: a change of the model''s rectangle alone leaves the model''s area empty'
+updated: 2026-11-15T17:45:49Z
+---
+
+Aus k130 (2026-11-15, Befund der Netz-Spur): aendert sich nur das Rechteck der Modell-View - etwa eine Skalenaenderung ohne Groessenaenderung - und nicht das der Modul-View, fragt niemand das Modul nach einem Neuzeichnen. Der Modellbereich bleibt dann leer, bis das Modul wieder zeichnet. Die App fordert das Neuzeichnen an, indem sie die Generation des Assistant-Moduls invalidiert (src/app/assistant.c:447-456) - das passiert bei einem Modellwechsel und bei wartender Eingabe, aber nicht bei einer reinen Rechteckaenderung. Die Karte gehoert in die UI-Spur (src/shell/, src/ui/): entweder der Shell meldet die Rechteckaenderung dem Modul, oder die App invalidiert die Generation auch dann, oder die Modell-View wird bei jeder Groessenaenderung neu gezeichnet.
