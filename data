@@ -1,0 +1,75 @@
+---
+claimed_at: 2026-11-15T18:08:31Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T18:08:31Z
+created: 2026-11-15T18:01:59Z
+id: 173
+priority: medium
+started: 2026-11-15T18:02:04Z
+status: done
+tags:
+- docs
+- spec
+- browser
+title: 'Docs: the browser spec''s seam note and line references drifted, and the gate
+  has no size'
+updated: 2026-11-15T18:08:31Z
+---
+
+Aus k172 (2026-11-15): die Browser-Adapter-Spec traegt zwei Stellen, die nach der Aenderung der System-Design-Spec nicht mehr stimmen.
+1. Der Seam-Hinweis (2026-11-15-canlin-browser-adapter-design.md:55-62) behauptet, die beiden Texte widerspruechen sich heute (die System-Design-Spec nennt SDL2 fuer den Browser, die Browser-Spec nicht). Nach k172 stimmt das nicht mehr - die System-Design-Spec nennt das Canvas ueber den present-Hook. Der Hinweis muss sagen, dass die Entscheidung in ADR 0003 steht und beide Texte sie jetzt tragen.
+2. Die Zeilenangaben in der Browser-Spec sind um 3 bis 8 Zeilen gewandert (die System-Design-Spec waechst durch die Amendment-Zeilen): :62 -> :65, :118 -> :125, :129-130 -> :136-137, :133-134 -> :139-143, :261-262 -> :269-270, :405-406 -> :413-414, :453-455 -> :461-463. Die Verweise muessen wieder stimmen.
+Dazu die Entscheidung des Dispatchers: das Groessen-Budget von 1 MiB komprimiert (ADR 0003, §7 der Browser-Spec) gehoert in den WASM-Gate-Abschnitt der System-Design-Spec (§12) - ein Gate ohne eine Zahl, gegen die es prueft, ist kein Gate. Die System-Design-Spec gehoert der Doc-Spur, also: die Karte fasst beides an.
+
+2026-11-15 canlin-doc-writer: beide Specs nachgezogen; ein Seam beim Groessen-Budget.
+
+§2 Seam-Vermerk der Browser-Adapter-Spec (jetzt Zeilen 58-64): der Vermerk behauptete, die beiden Texte widerspraechten sich heute. Er ist geschlossen: die System-Design-Spec traegt die Entscheidung seit dem 15.11. (k172) - §2 nennt den Browser als 'Emscripten, Canvas over the present hook' (system-design:65), §4 render sagt, dass der Browser kein SDL2 hat und den Frame ueber den present-Hook in den Canvas zeigt (system-design:139-143). Der Vermerk nennt jetzt ADR 0003 §1 als die Quelle der Entscheidung und sagt, dass beide Texte sie tragen und sich nicht mehr widersprechen.
+
+Zeilenangaben: jede einzeln geprueft und korrigiert - :62 -> :65 (Browser-Zeile der Zielfabelle), :118 -> :125-126 (der Absatz 'A browser transport uses the browser's HTTP, WebSocket and TLS facilities...' laeuft nach der Aenderung ueber zwei Zeilen, darum die Spanne), :129-130 -> :136-137, :261-262 -> :269-270, :405-406 -> :413-414, :453-455 -> :461-463. Der Verweis :133-134 ist weg: die zitierte Zeile ('sdl2 uploads the buffer as a texture, including through Emscripten in the browser') gibt es nicht mehr, §4 render traegt jetzt :139-143.
+
+§12 der System-Design-Spec: der WASM-Gate-Abschnitt traegt die Groessen-Obergrenze jetzt als eigene Gate-Zeile - die transferierten, komprimierten Bytes der .wasm-Datei duerfen die von ADR 0003 §3 gesetzte Grenze von 524,288 Bytes (512 KiB) nicht ueberschreiten, das Gate faellt, wenn das Modul groesser ist; die Grenze gilt fuer das Modul, Loader und Glue bekommen ihr Budget spaeter. Der Status-Kopf traegt den Amendment-Eintrag dafuer (§12 amended 2026-11-15: ... the WASM gate has a size budget), ohne die Zeilenzahl des Kopfs zu aendern - dadurch landen die Zeilenangaben der Browser-Spec genau auf den Stellen, die in der Karte stehen (:65, :125-126, :136-137, :269-270, :413-414, :461-463).
+
+WICHTIG - Seam, nicht hier entschieden: die Karte nennt 1 MiB (1,048,576 Bytes) als Budget 'aus ADR 0003'. ADR 0003 sagt 512 KiB: '§3 The size budget: at most 512 KiB compressed', 'must not exceed 524,288 bytes (512 KiB)', 'the budget is the line the build must not cross', und die Alternative (a) 'A hard upper bound on the compressed module: 512 KiB. Chosen.'. Die Browser-Adapter-Spec §7 (und ihr Status-Kopf) sagt dagegen 1,048,576 Bytes (1 MiB) - eine Zahl, die der angenommene ADR nicht traegt; ihre Herleitung ist eine Proxy-Messung von vor dem Browser-Build, und ihre Schaetzung (0,45-0,65 MB komprimiert) passt nicht unter die ADR-Grenze. Ich habe die Zahl des ADR in die Gate-Zeile geschrieben - eine Gate-Zeile, die 1 MiB prueft, liesse ein Modul durch, das der angenommene ADR verbietet - und den Seam an beiden Stellen markiert: §12 der System-Design-Spec und §7 der Browser-Adapter-Spec (dort zusaetzlich der Hinweis auf die Schaetzung, die unter der ADR-Grenze nicht passt). Die Entscheidung, ob die Browser-Spec auf 512 KiB nachgezogen oder die ADR-Grenze auf 1 MiB gehoben wird, liegt beim Maintainer.
+
+Nur Doku: zwei Dateien, docs/superpowers/specs/2026-09-22-canlin-system-design.md (+10/-1) und docs/superpowers/specs/2026-11-15-canlin-browser-adapter-design.md (+27/-15). Kein Code, kein Makefile, kein Build und kein Testlauf - die Aenderung ist Fliesstext in zwei Spec-Dateien, und das Makefile hat kein Docs-Target. docs/adr/ unberuehrt, keine andere Spec angefasst, fremde Arbeit im Baum (Makefile, include/canlin/, src/, t/, docs/adr/0003) unberuehrt.
+
+Fertig fuer den Review. Proposed Subject: Repair the browser spec's seam note and line references, and give the WASM gate its size budget (k173)
+
+Fertig fuer den Review. Zwei Dateien, nur Doku: docs/superpowers/specs/2026-09-22-canlin-system-design.md (+10/-1) und docs/superpowers/specs/2026-11-15-canlin-browser-adapter-design.md (+27/-15).
+
+Erledigt: (1) der Seam-Vermerk der Browser-Spec §2 ist geschlossen - er sagt jetzt, dass ADR 0003 §1 die Entscheidung traegt und dass die System-Design-Spec sie seit k172 mittraegt (system-design:65, :139-143), statt zu behaupten, die beiden Texte widerspraechten sich heute. (2) alle Zeilenangaben der Browser-Spec in die System-Design-Spec sind einzeln geprueft und korrigiert: :62 -> :65, :118 -> :125-126, :129-130 -> :136-137, :261-262 -> :269-270, :405-406 -> :413-414, :453-455 -> :461-463; der Verweis :133-134 entfaellt, weil die zitierte Zeile nach k172 nicht mehr existiert (§4 render traegt jetzt :139-143). (3) §12 der System-Design-Spec traegt das Groessen-Budget als eigene Gate-Zeile: die transferierten, komprimierten Bytes der .wasm-Datei duerfen die von ADR 0003 §3 gesetzte Grenze nicht ueberschreiten, das Gate faellt, wenn das Modul groesser ist. Der Status-Kopf traegt den Amendment-Eintrag, ohne die Zeilenzahl des Kopfs zu aendern - die Zeilenangaben der Browser-Spec bleiben dadurch auf den in der Karte genannten Stellen.
+
+Zu pruefen fuer den Reviewer, zwei Punkte: (a) die Groessen-Zahl weicht von der Karte ab: die Karte nennt 1 MiB 'aus ADR 0003', ADR 0003 §3 setzt aber 524,288 Bytes (512 KiB) und nennt 512 KiB auch in der Alternative als gewaehlt. Die Browser-Spec §7 (und ihr Status-Kopf) traegt die aeltere Zahl 1,048,576 Bytes mit einer Proxy-Messung von vor dem Browser-Build, deren Schaetzung (0,45-0,65 MB komprimiert) nicht unter die ADR-Grenze passt. Ich habe die ADR-Zahl in die Gate-Zeile genommen - eine Gate-Zeile auf 1 MiB liesse ein Modul durch, das der ADR verbietet - und den Seam an beiden Stellen markiert (§12 System-Design, §7 Browser-Spec). Ob die Browser-Spec auf 512 KiB nachgezogen oder die ADR-Grenze auf 1 MiB gehoben wird, entscheidet der Maintainer. (b) der Verweis :125-126 statt :125: der Absatz 'A browser transport uses the browser's HTTP, WebSocket and TLS facilities...' laeuft nach k172 ueber zwei Zeilen, darum die Spanne; die uebrigen Verweise sind Zeilenbereiche wie in der Karte.
+
+Kein Code, kein Build und kein Testlauf (Fliesstext in zwei Spec-Dateien, das Makefile hat kein Docs-Target). docs/adr/ unberuehrt, keine andere Spec angefasst, fremde Arbeit im Baum unberuehrt. Proposed Subject: Repair the browser spec's seam note and line references, and give the WASM gate its size budget (k173)
+
+2026-11-15 canlin-doc-writer: Entscheidung des Koordinators umgesetzt - die ADR-Zahl gilt, 512 KiB (524.288 Bytes). Die Browser-Spec ist nachgezogen, die Widerspruchsmarkierung an beiden Stellen ist in eine klare Aussage umgewandelt.
+
+§7 der Browser-Adapter-Spec: die Entscheidung lautet jetzt 'at most 524,288 bytes (512 KiB) compressed'. Der Status-Kopf nennt dieselbe Zahl ('one size budget (at most 512 KiB compressed)'). Die Herkunft der Zahl ist die Messung aus ADR 0003 §3, nicht mehr die alte Proxy-Abschaetzung: das Runtime-Wasm-Modul, 604.772 Bytes, 286.727 mit gzip -9, 254.293 mit zstd -19; gemessen wird mit gzip, der konservativeren der beiden Kodierungen, die ein Server waehlen kann; die Variante bei -O2 (632.275 / 280.469) und die ohne den nativen Socket-Stack (587.791 / 278.291) zeigen, dass die komprimierte Groesse um die 280 KB bleibt, was die Flags und der Transport auch tun; die Grenze liegt rund 1,8-fach ueber dem gemessenen Modul. Der Satz, wie die Messung zu wiederholen ist, steht jetzt dabei (emcc -Os mit den Include-Pfaden, der Link mit --export=<symbol> fuer die 1.233 Symbole der Objekte, damit nichts eingesammelt wird).
+
+Die Tabelle 'Where the weight is' (Nuklear 271.696, CanLins eigenes C 262.947, Lua 5.4 172.250, die eingebettete Schrift 23.972, Summe 732.738) bleibt, aber ausdruecklich als Gewichtsverteilung: 'The table is where the weight sits - the bound comes from the measurement above, not from this sum.' Damit kann niemand die alte 1-MiB-Zahl aus der Tabelle neu herleiten. Die veralteten Zahlen (gzip -9 der Teilsumme: 333.319 Bytes / 45,5 %, die Schaetzung 1,0-1,3 MB unkomprimiert und 0,45-0,65 MB komprimiert) sind raus; die Schluusssaetze zu mbedtls (nicht in der Tabelle, nicht im Modul, system-design:125-126) und zum Loader (eigener Download, 144.342 Bytes unkomprimiert) stehen jetzt im selben Absatz.
+
+§8 Punkt 2 (SQLite im Browser) nennt jetzt die 512-KiB-Grenze statt der 1-MiB-Grenze, mit demselben Verweis auf ADR 0003, rationale.
+
+§12 der System-Design-Spec: die Gate-Zeile bleibt mit der ADR-Zahl und traegt jetzt keine Markierung mehr, sondern einen Verweis: die transferierten, komprimierten Bytes der .wasm-Datei duerfen 524.288 Bytes (512 KiB) nicht ueberschreiten (ADR 0003 §3), das Gate faellt, wenn das Modul groesser ist, die Grenze gilt fuer das Modul, und die Browser-Adapter-Spec §7 traegt dieselbe Grenze und die Messung, aus der sie kommt.
+
+§12 der Browser-Adapter-Spec: der Decision-Satz nennt jetzt ausdruecklich, dass die Grenze die aus ADR 0003 §3 ist und die System-Design-Spec §12 dieselbe Zahl fuer das Browser-Gate traegt. Der Amendment-Eintrag im Status-Kopf sagt entsprechend: 'the seam notes are closed ... and §7 carries the size budget of ADR 0003 §3'.
+
+Unveraendert geblieben: die Zeilenangaben der Browser-Spec in die System-Design-Spec (:65, :125-126, :136-137, :139-143, :269-270, :413-414, :461-463) - alle einzeln nachgeprueft, alle treffen den zitierten Text; die Zeilenzahl des Status-Kopfes der System-Design-Spec bleibt, damit die Zeilenangaben der Browser-Spec auf den in der Karte genannten Stellen bleiben.
+
+Nur Doku: zwei Dateien, docs/superpowers/specs/2026-09-22-canlin-system-design.md (+7/-1, jetzt 495 Zeilen) und docs/superpowers/specs/2026-11-15-canlin-browser-adapter-design.md (+49/-30, jetzt 350 Zeilen). Kein Code, kein Makefile, kein Build und kein Testlauf (Fliesstext in zwei Spec-Dateien, das Makefile hat kein Docs-Target). docs/adr/ unberuehrt, keine andere Spec angefasst, fremde Arbeit im Baum unberuehrt.
+
+Fertig fuer den Review. Proposed Subject: Repair the browser spec's seam note and line references, and give the WASM gate its size budget (k173)
+
+Fertig fuer den Review, nach der Entscheidung des Koordinators (ADR-Zahl gilt: 512 KiB / 524.288 Bytes).
+
+Endenummern der angefassten Dateien: docs/superpowers/specs/2026-11-15-canlin-browser-adapter-design.md jetzt 350 Zeilen (vorher 331, +49/-30); docs/superpowers/specs/2026-09-22-canlin-system-design.md jetzt 495 Zeilen (vorher 489, +7/-1). Nur diese zwei Dateien, kein Code, kein Makefile, kein Build und kein Testlauf (Fliesstext in zwei Spec-Dateien, das Makefile hat kein Docs-Target); docs/adr/ unberuehrt, keine andere Spec angefasst, fremde Arbeit im Baum unberuehrt.
+
+Erledigt: (1) §7 der Browser-Spec und ihr Status-Kopf tragen jetzt 524.288 Bytes (512 KiB), mit der Herkunft aus der Messung von ADR 0003 §3 (604.772 Bytes Wasm, 286.727 mit gzip -9, 254.293 mit zstd -19; die Variante -O2 und die ohne den nativen Socket-Stack bleiben um die 280 KB komprimiert; die Grenze liegt rund 1,8-fach ueber dem gemessenen Modul) statt der alten Proxy-Abschaetzung; die veralteten Zahlen (333.319 Bytes / 45,5 %, die Schaetzung 0,45-0,65 MB komprimiert) sind entfernt, die Gewichts-Tabelle bleibt ausdruecklich als Gewichtsverteilung und nicht als Herleitung der Grenze, §8 Punkt 2 (SQLite) nennt die 512-KiB-Grenze. (2) die Widerspruchsmarkierung ist an beiden Stellen weg: die Gate-Zeile in §12 der System-Design-Spec und §7 der Browser-Spec sagen beide, dass sie dieselbe Grenze aus ADR 0003 §3 tragen. (3) die Gate-Zeile in §12 der System-Design-Spec bleibt mit der ADR-Zahl. (4) die Zeilenangaben der Browser-Spec in die System-Design-Spec sind einzeln nachgeprueft und treffen den zitierten Text: :65, :125-126, :136-137, :139-143, :269-270, :413-414, :461-463; die Zeilenzahl des Status-Kopfes der System-Design-Spec wurde bewusst nicht veraendert, damit die Verweise auf den in der Karte genannten Stellen bleiben.
+
+Hinweis fuer den Reviewer: der Verweis :125-126 statt :125 ist eine Spanne, weil der Absatz 'A browser transport uses the browser's HTTP, WebSocket and TLS facilities...' nach k172 ueber zwei Zeilen laeuft; die uebrigen Verweise sind Zeilenbereiche wie in der Karte.
+
+Proposed Subject: Repair the browser spec's seam note and line references, and give the WASM gate its size budget (k173)
+
+2026-11-15 review (main): gelesen und committet. Der Widerspruch, den der Worker gemeldet hat, ist aufgeloest - und zwar zugunsten der ADR-Zahl (512 KiB / 524.288 Bytes), nicht der 1 MiB aus meinem Auftrag: die 1-MiB-Zahl stammte aus einer Proxy-Abschaetzung von vor dem Browser-Build, die gemessene Wirklichkeit liegt bei 286.727 Bytes gzip. Beide Stellen tragen jetzt dieselbe Grenze mit der Herkunft der Zahl, und die Gate-Zeile der System-Design-Spec misst sie (das Gate schlaegt fehl, wenn das Modul groesser ist). Die Gewichts-Tabelle bleibt, ist aber als Verteilung des Gewichts ausgewiesen - die Grenze kommt aus der Messung, nicht aus der Summe. Die Zeilenangaben sind einzeln geprueft, die Spanne :125-126 ist eine Spanne, weil der Absatz nach k172 ueber zwei Zeilen laeuft. Committet.
