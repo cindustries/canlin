@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-11-15T18:19:58Z
+claimed_by: canlin-worker-netllm
+class: standard
+created: 2026-11-14T06:35:43Z
+id: 91
+priority: low
+started: 2026-11-15T00:30:00Z
+status: todo
+tags:
+- llm
+title: 'LLM: the two length-stop limits need a live fixture'
+updated: 2026-11-15T18:19:58Z
+---
+
+2026-11-15 Entscheidung des Maintainers: eine aufgezeichnete echte Antwort. Einmal gegen einen echten Provider aufzeichnen, die Antwort als Fixture ins Repo, die Suite laeuft danach offline - so die Hausregel "nie Produktionsdienste in Tests" und kein Key im Testlauf.
+So wird der Key bereitgestellt (die Karte braucht ihn vor der Aufzeichnung, nicht danach): Der Maintainer legt eine Datei an, die der aufzeichnende Agent liest und danach loescht - zum Beispiel ~/.config/canlin/test-provider.env mit drei Zeilen:
+  CANLIN_LLM_TEST_URL=https://<endpoint>
+  CANLIN_LLM_TEST_KEY=<key>
+  CANLIN_LLM_TEST_MODEL=<modell>
+Die Datei wird nur zum Aufzeichnen benutzt und nach dem Aufzeichnen geloescht; sie gehoert nicht ins Repo und nicht in den Commit. Der Agent meldet, wenn die Datei da ist, und traegt die Karte danach wieder an review, mit dem Fixture im Repo und ohne die Datei.
+Wichtig fuer die Aufzeichnung: der Fall muss die Grenze wirklich treffen, sonst beweist das Fixture nichts - es braucht eine Antwort, die an den beiden Laengen-Stopp-Limits abbricht. Und die Aufzeichnung muss die rohe Antwort sein (die SSE-Chunks), nicht eine Zusammenfassung; das Fixture ist der Beweis.
+
+2026-11-15 (dispatcher): die Aufzeichnungsdatei liegt noch nicht da - geprueft: ~/.config/canlin/test-provider.env existiert nicht, ~/.config/canlin/ gibt es noch gar nicht. Die Karte braucht den Key erst zum Aufzeichnen, nicht danach; die Aufzeichnung selbst kann erst laufen, wenn die Datei da ist. Bitte die drei Zeilen (CANLIN_LLM_TEST_URL, CANLIN_LLM_TEST_KEY, CANLIN_LLM_TEST_MODEL) in die Datei legen, sobald es weitergehen soll; die Datei wird nur zum Aufzeichnen gelesen und danach geloescht und gehoert nicht ins Repo. Der Netz-Weg ist derweil mit der Browser-Transport-Karte k159 besetzt (dieselbe Spur), die Aufzeichnung laeuft, sobald eine Spur frei ist oder die Datei da ist.
