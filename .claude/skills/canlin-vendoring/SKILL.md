@@ -40,6 +40,15 @@ in the report; do not write it.
    the lib dir) and the verbatim `LICENSE`. `sha256sum -c SHA256SUMS` must pass.
 6. Add or update the row in `docs/THIRD-PARTY.md`.
 
+### The exception: a git submodule
+
+`third_party/libbee` is a git submodule, not a vendored snapshot. It has no `VERSION` and
+no `SHA256SUMS`, its pin moves with the libbee release, and it is not copied
+byte-identical into this repo. The steps above do not apply to it and a worker applying
+them would look for files that do not exist. For libbee: pin the submodule to a libbee
+commit, record the licence row in `docs/THIRD-PARTY.md`, and put a change in libbee on
+the libbee board — not here. Everything else under `third_party/` follows the steps above.
+
 `VERSION` follows `third_party/mbedtls/VERSION`:
 
 ```
