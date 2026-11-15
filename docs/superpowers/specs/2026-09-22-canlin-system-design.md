@@ -1,6 +1,8 @@
 # CanLin — system design spec
 
 Status: draft for review, incorporating the architecture review and the browser target.
+§2 amended 2026-11-15: the i686 gate is split into the user-mode gate that runs today and
+the full-system gate that waits for the canlin-os image.
 This is the family-level design. Each sub-project gets its own spec and plan; the first
 one is `libbee` (`~/dev/libbee/docs/superpowers/specs/`). The runtime's scheduling and
 platform contract is specified in [the event-runtime design](2026-09-22-canlin-event-runtime-design.md).
@@ -57,9 +59,22 @@ Principles that decide every later question:
 | iPad, iPhone | SDL2 + Xcode | signed app (TestFlight or 7-day dev signing) | CanLin |
 | Browser | Emscripten + SDL2/Canvas, browser I/O adapters | WASM + loader + assets over HTTPS | CanLin |
 
-Compiler flags for every i686 build: `-march=i686 -mno-sse`. The i686 test suite runs
-under `qemu-system-i386 -cpu pentium2 -m 1024` because the host silently executes SSE.
-QEMU checks instruction compatibility and behaviour; real P2 hardware checks performance.
+Compiler flags for every i686 build: `-march=i686 -mno-sse`, statically linked against a
+musl cross toolchain (`i686-linux-musl-gcc`; a prebuilt one from musl.cc is unpacked at
+`~/opt/i686-linux-musl-cross`, and `export PATH="$HOME/opt/i686-linux-musl-cross/bin:$PATH"`
+puts it on PATH). The host silently executes SSE, so a green host run says nothing about
+the target's instructions. i686 has two QEMU gates, and a result names the gate that ran:
+
+| Gate | Command | What it proves |
+|---|---|---|
+| user-mode — the gate that runs today | `qemu-i386 -cpu pentium2 ./build/i686/t/<suite>` | instruction compatibility of the built binary on a Pentium II CPU model. The profile really has no SSE: a program with `movaps` dies there with signal 4, while plain `qemu-i386` runs it |
+| full system (P2-QEMU) — the canlin-os harness | `qemu-system-i386 -cpu pentium2 -m 1024` with a canlin-os image | system operation: kernel, drivers, framebuffer, boot |
+
+The user-mode gate is the interim gate (in use since 2026-11-15). It says what the binary
+does, not how the system runs it; the canlin-os image for the full-system gate does not
+exist yet (the canlin-os board, ticket k2), so until it does the user-mode gate is the
+i686 gate and the full-system gate stays open. The two are never reported as one "QEMU"
+result. Neither emulator substitutes for real P2 hardware, which checks performance.
 
 The browser build is **CanLin compiled to WASM**, including Lua and the portable libraries,
 not a second JavaScript UI and not a PC emulator. It runs the same module format and Lua
@@ -413,9 +428,12 @@ create a speculative server implementation in canlin or make up a remote reposit
   database recreation, storage exhaustion and stale/failed snapshot installation.
 - Security tests cover executable keys in snapshots, local-code-override authority,
   SQLite authorizer/native resource limits and per-module event/handle isolation.
-- Every portable core suite runs on the host and i686 under P2-QEMU. Backend-specific
-  suites run on their backend; the QEMU harness reports a machine-readable result and
-  fails on hangs/illegal instructions. Build a minimal executable gate early.
+- Every portable core suite runs on the host and on i686 under QEMU. The gate that runs
+  today is the user-mode one (system design §2); the full-system P2-QEMU run waits for
+  the canlin-os image. The i686 suites have no runner hook yet — the user-mode gate is
+  started by hand. Backend-specific suites run on their backend; a gate fails on hangs
+  and illegal instructions. The machine-readable result comes with the canlin-os harness.
+  Build a minimal executable gate early.
 - The WASM browser gate exercises the actual compiled runtime with local fixtures:
   yielding, input/render, Fetch streaming/WebSocket, persistence across reload, quota and
   permission denial, CORS failure, single-writer storage ownership and suspension. It cannot substitute for native/P2

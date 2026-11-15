@@ -186,8 +186,10 @@ self-signed). The client trusts only the test CA bundle.
 - The LLM dialect tests run once more through the real transport against the loopback
   server replaying the existing fixtures.
 - **Gates:** host `make test`; `make TARGET=i686` build plus the TLS loopback tests in
-  `qemu-system-i386 -cpu pentium2` (catches SSE/AESNI instructions); handshake time on
-  P2-QEMU recorded as a number, not a pass/fail. A skipped gate is named.
+  the i686 user-mode gate, `qemu-i386 -cpu pentium2` (catches SSE/AESNI instructions;
+  system design §2 names the two i686 gates and what each proves); handshake time on
+  P2-QEMU recorded as a number, not a pass/fail — that number waits for the canlin-os
+  image. A skipped gate is named.
 
 ## 10. Open points
 

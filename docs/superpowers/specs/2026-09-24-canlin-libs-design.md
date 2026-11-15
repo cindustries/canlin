@@ -144,12 +144,13 @@ The first is mechanical, the second is not.
 ## 8. Verification of a lib
 
 - **Lua lib:** its own test suite runs inside the CanLin sandbox (no `os`, `io`,
-  `package`, `debug`, `coroutine`, binary `load`) on host and on i686 under
-  `qemu-system-i386 -cpu pentium2`; the WASM gate once the browser build exists.
+  `package`, `debug`, `coroutine`, binary `load`) on host and on i686 under the
+  user-mode gate, `qemu-i386 -cpu pentium2` (system design §2 names the two i686 gates
+  and what each proves); the WASM gate once the browser build exists.
   A lib that needs a forbidden global is not adapted in place — it is rejected or
   wrapped by a reviewed native lib.
-- **Native lib:** the vendor gates (host, i686 QEMU, WASM, mobile when those builds
-  exist) plus the binding's sandbox tests, including budget exhaustion and hostile
+- **Native lib:** the vendor gates (host, i686 user-mode QEMU, WASM, mobile when those
+  builds exist) plus the binding's sandbox tests, including budget exhaustion and hostile
   inputs.
 - **Resolver:** conflicting constraints, collisions, undeclared `require`, a missing
   native lib on one platform, update rollback and removal refusal each have a test.
