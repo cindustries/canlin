@@ -717,6 +717,69 @@ static void test_limit_ceilings(void)
     CHECK(CANLIN_EV_MOD_MAX_TIMERS <= CANLIN_EV_MOD_MAX_TIMERS_CEILING);
 }
 
+/* ---- the process-wide bounds against the module bounds (core API spec §7, k138) ----
+ *
+ * The header states the relation of each process-wide bound to the per-module ones:
+ * the item bound is half the sum of the module item bounds, the byte bound is the sum
+ * of the module byte bounds - what the slots may hold together, not a cut below it.
+ * The relation is pinned here, so a change to a module bound fails this test and asks
+ * for the comment to be revised with it. */
+
+static void test_process_bounds_against_module_bounds(void)
+{
+    /* Items: half the sum, so the process bound binds before any single module's. */
+    CHECK(CANLIN_EV_PROC_MAX_ITEMS * 2u == CANLIN_EV_MAX_MODULES * CANLIN_EV_MOD_MAX_ITEMS);
+    CHECK(CANLIN_EV_PROC_MAX_ITEMS < CANLIN_EV_MAX_MODULES * CANLIN_EV_MOD_MAX_ITEMS);
+
+    /* Bytes: the sum, so the process bound is what the slots hold together. */
+    CHECK(CANLIN_EV_PROC_MAX_BYTES == CANLIN_EV_MAX_MODULES * CANLIN_EV_MOD_MAX_BYTES);
+}
+
+/* ---- the process-wide byte bound is the sum of the module byte bounds ----
+ *
+ * Every module slot may hold its own byte budget, and the slots together hold exactly
+ * the process-wide byte bound: the last reservation fills it, the next byte is refused.
+ * The item bound is the tighter cut of the two - it binds before a single module's
+ * queue is full (the saturated queue test). */
+
+static void test_process_byte_bound_is_the_module_sum(void)
+{
+    harness h;
+    canlin_ev_gen gs[CANLIN_EV_MAX_MODULES];
+    canlin_ev_handle ops[CANLIN_EV_MAX_MODULES];
+    canlin_ev_handle extra;
+    canlin_ev_stats st;
+    unsigned i;
+
+    h_init(&h);
+    for (i = 0; i < CANLIN_EV_MAX_MODULES; i++)
+        CHECK(canlin_ev_module_start(h.ev, &gs[i]) == CANLIN_EV_OK);
+    /* Each slot reserves its whole byte budget; the last one exactly reaches the
+     * process-wide bound and is admitted. */
+    for (i = 0; i < CANLIN_EV_MAX_MODULES; i++)
+        CHECK(canlin_ev_op_begin(h.ev, gs[i], CANLIN_EV_MOD_MAX_BYTES, NULL, &ops[i]) ==
+              CANLIN_EV_OK);
+    canlin_ev_get_stats(h.ev, -1, &st);
+    CHECK(st.bytes == CANLIN_EV_PROC_MAX_BYTES);
+    /* One byte more is refused: the module budget and the process budget run out
+     * together. */
+    CHECK(canlin_ev_op_begin(h.ev, gs[0], 1, NULL, &extra) == CANLIN_EV_EFULL);
+    /* Releasing the reservations empties the byte accounting again. */
+    for (i = 0; i < CANLIN_EV_MAX_MODULES; i++)
+        CHECK(canlin_ev_op_complete(h.ev, ops[i], CANLIN_EV_SUCCESS, NULL, 0, NULL) ==
+              CANLIN_EV_OK);
+    canlin_ev_get_stats(h.ev, -1, &st);
+    CHECK(st.bytes == 0);
+    {
+        canlin_ev_turn_result r = h_turn(&h);
+        for (i = 0; i < 100 && r.more; i++)
+            r = h_turn(&h);
+        CHECK(!r.more);
+    }
+    check_proc_empty(h.ev);
+    h_done(&h);
+}
+
 /* ---- staged reload: stage / commit / abort (core API §6, canlin#16) ---- */
 
 static void test_stage_commit_abort(void)
@@ -853,6 +916,8 @@ int main(void)
     test_motion_coalescing_preserves_button_edges();
     test_fifo_and_rotation();
     test_limit_ceilings();
+    test_process_bounds_against_module_bounds();
+    test_process_byte_bound_is_the_module_sum();
     if (failures) {
         fprintf(stderr, "test_ev: %d check(s) failed\n", failures);
         return 1;

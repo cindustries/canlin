@@ -21,7 +21,12 @@
  * Ceiling: CANLIN_EV_MOD_MAX_BYTES_CEILING. */
 #define CANLIN_EV_MOD_MAX_BYTES      (256u * 1024u)
 
-/* Process-wide bounds across all modules (smaller than the sum of module bounds).
+/* Process-wide bounds across all modules. Spec §7 rows: CANLIN_EV_PROC_MAX_ITEMS (512,
+ * max 2048) and CANLIN_EV_PROC_MAX_BYTES (4 MiB, max 16 MiB) — the table notes no
+ * relation to the module bounds. The item bound is half the sum of the module item
+ * bounds (512 of 1024), so it binds before any single module's; the byte bound is the
+ * sum of the module byte bounds (16 slots at 256 KiB = 4 MiB) — what the slots may
+ * hold together, not a cut below it.
  * Ceilings: CANLIN_EV_PROC_MAX_ITEMS_CEILING, CANLIN_EV_PROC_MAX_BYTES_CEILING. */
 #define CANLIN_EV_PROC_MAX_ITEMS     512u
 #define CANLIN_EV_PROC_MAX_BYTES     (4u * 1024u * 1024u)
