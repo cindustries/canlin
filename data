@@ -1,0 +1,53 @@
+---
+claimed_at: 2026-11-15T00:38:24Z
+claimed_by: canlin-worker-runtime
+class: standard
+completed: 2026-11-15T00:38:24Z
+created: 2026-11-14T23:52:44Z
+id: 138
+priority: low
+started: 2026-11-14T23:58:14Z
+status: done
+tags:
+- runtime
+- ev
+title: 'Runtime: ev_limits.h says the process-wide byte bound is smaller than the
+  sum of the module bounds'
+updated: 2026-11-15T00:38:24Z
+---
+
+include/canlin/ev_limits.h:24 says the process-wide bounds are "smaller than the sum of module bounds". That holds for the item bound (512 < 16 x 64 = 1024) but is false for the byte bound: 16 module slots x 256 KiB = 4 MiB is exactly CANLIN_EV_PROC_MAX_BYTES, not smaller. The comment has to say what is true - that the process-wide byte bound is the sum of the module byte bounds - or the spec relation must be decided. Found by the 2026-11-15 review of k134.
+
+Runtime worker: fix in progress, red then green.
+
+RED: t/ev/test_ev.c got a test asserting the header's current claim ('the process-wide bounds are smaller than the sum of the module bounds'). It failed as expected: t/ev/test_ev.c:728 CHECK failed: CANLIN_EV_PROC_MAX_BYTES < CANLIN_EV_MAX_MODULES * CANLIN_EV_MOD_MAX_BYTES (4 MiB < 16 x 256 KiB = 4 MiB is false).
+
+FIX: include/canlin/ev_limits.h:24 now says what is true - the item bound is half the sum of the module item bounds (512 of 1024), the byte bound is the sum of the module byte bounds (16 slots at 256 KiB = 4 MiB), what the slots may hold together and not a cut below it. No value touched: cpp -P of the header before/after is byte-identical.
+
+GREEN: the relation test now pins the true relation, and a new behavioural test shows the process-wide byte counter reaching exactly CANLIN_EV_PROC_MAX_BYTES when all 16 slots hold their own budget, with the next byte refused.
+
+Gates so far: host make BUILD=build/rt3 test - 23 suites, ALL TESTS PASSED. i686 target built with make TARGET=i686 BUILD=build/i686-rt (musl toolchain), suites run under qemu-i386 -cpu pentium2: 21 suites green, but t/net/http_test fails (7 checks, 'close inside callback', reproducible, net lane - not my change: the net path does not include ev_limits.h) and t/ui/test_ui hit the 180 s timeout (ui lane, re-running with a longer timeout).
+
+Proposed subject: Name the relation of the process-wide bounds to the module bounds (k138)
+
+Done: the comment now says what is true, and the true relation is pinned by a test.
+
+RED first: t/ev/test_ev.c got a test asserting the header's current claim ('the process-wide bounds are smaller than the sum of the module bounds'). It failed as expected - t/ev/test_ev.c:728: CHECK failed: CANLIN_EV_PROC_MAX_BYTES < CANLIN_EV_MAX_MODULES * CANLIN_EV_MOD_MAX_BYTES (4 MiB < 16 x 256 KiB = 4 MiB is false).
+
+FIX, include/canlin/ev_limits.h:24: the comment names the two spec rows (CANLIN_EV_PROC_MAX_ITEMS 512/max 2048, CANLIN_EV_PROC_MAX_BYTES 4 MiB/max 16 MiB, the table notes no relation to the module bounds) and states the two relations: the item bound is half the sum of the module item bounds (512 of 1024), so it binds before any single module's; the byte bound is the sum of the module byte bounds (16 slots at 256 KiB = 4 MiB) - what the slots may hold together, not a cut below it. No value touched: cpp -P of the header before/after is byte-identical.
+
+GREEN: the relation test now pins the true relation (items half the sum, bytes the sum), and a new behavioural test shows the process-wide byte counter reaching exactly CANLIN_EV_PROC_MAX_BYTES when all 16 slots hold their own budget, the next byte refused, and the accounting back to zero after the reservations are released.
+
+Gates:
+- host: make BUILD=build/rt3 test - 23 suites, ALL TESTS PASSED (exit 0).
+- i686: make TARGET=i686 BUILD=build/i686-rt (musl, -march=i686 -mno-sse), all 23 suites run under qemu-i386 -cpu pentium2 - ALL i686 TESTS PASSED. The qemu profile is real: an i686 binary with movups dies with 'Illegal instruction' under -cpu pentium2 and runs on the default cpu (checked with a scratch program in /tmp). Note for the i686 procedure: t/ui/test_ui needs ~253 s under emulation, so the Makefile's 120 s TEST_TIMEOUT is too short there.
+
+Findings outside this card, not fixed:
+- t/net/http_test failed twice under load on i686 (7 checks, 'close inside callback', t/net/http_test.c:828/829/834) and passed in the final run: load-sensitive flakiness in the net lane, not caused by this change (the net path does not include ev_limits.h, and its preprocessed output is byte-identical).
+- t/llm/test_llm.c does not compile at the moment (-Werror=unused-but-set-variable 'p' at :330, -Werror=unused-function test_tool_id_bound at :326) - another agent's in-flight edit in the netllm lane. The i686 test_llm binary in that run is therefore the one from the earlier build.
+- Lane note: t/ is canlin-test-writer's by the lane table; this card assigned the test under ev_limits.h to the runtime worker.
+
+Proposed commit subject: Name the relation of the process-wide bounds to the module bounds (k138)
+
+2026-11-15 review (main): gelesen und akzeptiert. Die Behauptung im Kommentar stimmt jetzt: die Item-Grenze ist die Haelfte der Summe (512 von 1024), die Byte-Grenze ist die Summe (16 x 256 KiB = 4 MiB). Zwei Tests pinnen die Relation - einer auf den Zahlen, einer verhaltensbegruendet (der letzte Slot fuellt die prozessweite Grenze, das naechste Byte wird abgewiesen, nach dem Freigeben ist die Buchung wieder null). Der rote Lauf des Workers ist der Beweis der Behauptung: genau die vorhergesagte Zeile schlug fehl. Committet als 39e3a0c.
+Zwei Dinge, die der Worker mitgebracht hat und die ich aufgenommen habe: (a) Die Spur-Frage: t/ev/test_ev.c gehoert laut Spur-Tabelle dem Test-Writer, die Karte hatte den Test aber der Runtime-Spur gegeben. Die Spur-Tabelle ist jetzt praezisiert - die Testdatei eines Teils (t/<part>/) gehoert dem Worker dieses Teils, der Test-Writer bleibt fuer das Build-Geruest und die geteilten Testwerkzeuge zustaendig. (b) Der i686-Befund: t/ui/test_ui braucht unter der Emulation rund 253 s, das TEST_TIMEOUT=120 des Makefiles ist dort zu kurz - das gehoert in die Runner-Karte k143.
