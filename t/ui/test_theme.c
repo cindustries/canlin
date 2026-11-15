@@ -466,19 +466,22 @@ static void test_apply_nk(void)
     canlin_render_font_free(&f);
 }
 
-/* The colour mix (§6.2): one role mixed with another, the second one's share in percent
+/* The colour mix: one role mixed with another, the second one's share in percent
  * of the base (ui_limits.h). The hover colour is the surface with a quarter of the
- * accent in it. The base is the header's own; the test builds the expected colour from
- * it, so it fails when the mix divides by a literal of its own. */
+ * accent in it; the share is the header's own (CANLIN_THEME_HOVER_MIX_PERCENT), so the
+ * test fails when the call site mixes with a literal of its own. The base is the header's
+ * own too; the test builds the expected colour from it, so it fails when the mix divides
+ * by a literal of its own. The mix is the theme's decision, not a line of the spec. */
 static void test_mix_base(void)
 {
     canlin_render_font f;
     struct nk_context ctx;
     canlin_theme t;
     struct nk_color c;
-    const int pct = 25;    /* the hover colour: a quarter of the accent */
+    const int pct = CANLIN_THEME_HOVER_MIX_PERCENT;
 
     CHECK(CANLIN_THEME_MIX_BASE_PERCENT == 100, "the mix base is 100 percent");
+    CHECK(CANLIN_THEME_HOVER_MIX_PERCENT == 25, "the hover share is a quarter");
     CHECK(canlin_render_font_default(&f, 16.0f) == 0, "font");
     CHECK(nk_init_default(&ctx, &f.font->handle), "nk_init");
     canlin_theme_builtin(&t);

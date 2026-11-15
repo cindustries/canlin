@@ -55,10 +55,16 @@
 /* §6.1 "decimal string": spacing and radius are read in 1/10000 em, so a value keeps
  * at most 4 fraction digits ("1.5"). */
 #define CANLIN_THEME_FRAC_DIGITS_MAX    4u
-/* §6.2: the colour mix: the second colour's share, in percent of this base (the base
- * alone is the second colour, 0 % the first). Its own base, apart from the scale's
- * (CANLIN_UI_SCALE_BASE_PERCENT): the same digit, a different meaning. */
+/* The colour mix: the second colour's share, in percent of this base (the base alone
+ * is the second colour, 0 % the first). Its own base, apart from the scale's
+ * (CANLIN_UI_SCALE_BASE_PERCENT): the same digit, a different meaning. The mix itself
+ * is the theme's decision: §6.1 fixes the colour roles and derives the graph colours,
+ * the mix is not among them. */
 #define CANLIN_THEME_MIX_BASE_PERCENT   100
+/* The hover colour's share of the accent, in percent of the mix base above: a quarter
+ * of the accent in the surface. The theme's own choice as well: the hover colour is
+ * not among the colours §6.1 derives. */
+#define CANLIN_THEME_HOVER_MIX_PERCENT  25
 
 /* §2: "Interactive elements are at least 2.5 em high" (system design §5); "below 40 em
  * of content width everything is one column". In em. */

@@ -344,7 +344,8 @@ void canlin_theme_apply_nk(const canlin_theme *t, float dpi, struct nk_context *
     struct nk_color bg = nkc(c[CANLIN_THEME_BACKGROUND]), sf = nkc(c[CANLIN_THEME_SURFACE]);
     struct nk_color tx = nkc(c[CANLIN_THEME_TEXT]), mu = nkc(c[CANLIN_THEME_MUTED]);
     struct nk_color ac = nkc(c[CANLIN_THEME_ACCENT]);
-    struct nk_color hv = mix(c[CANLIN_THEME_SURFACE], c[CANLIN_THEME_ACCENT], 25);
+    struct nk_color hv = mix(c[CANLIN_THEME_SURFACE], c[CANLIN_THEME_ACCENT],
+                             CANLIN_THEME_HOVER_MIX_PERCENT);
     struct nk_style *s = &ctx->style;
     float em = canlin_theme_em(t, dpi), rad = t->radius * em;
     struct nk_vec2 unit;
