@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-15T18:34:24Z
+id: 175
+priority: medium
+status: backlog
+tags:
+- assistant
+- app
+- llm
+title: 'Assistant: trim the history before the request instead of failing'
+updated: 2026-11-15T18:34:24Z
+---
+
+Die Umsetzung der Regel aus k113 (llm-ui design §4, "Trimmed conversation history"): das Assistant-Modul muss seine Unterhaltung vor der Anfrage kuerzen. Heute haelt es eine history-Tabelle (src/app/assistant.c, die Lua-Quelle ASSISTANT_SRC: die push-Funktion und der Aufruf von canlin.llm.request) und gibt sie unveraendert weiter - der Kern weist dann eine Anfrage mit mehr als CANLIN_LLM_MESSAGES_MAX (256) Nachrichten zurueck (src/llm/llm.c:1202, Code invalid).
+Die Regel: eine Wendung ist die Nutzernachricht, die Antwort danach und die Werkzeugergebnisse dieser Antwort. Gekuerzt wird nach aelteren vollstaendigen Wendungen, bis die History passt; Systemprompt, laufende Wendung und aktuelle Wendung fallen nie; eine verworfene Wendung kommt in keine spaetere Anfrage; die Kuerzung wird sichtbar gemacht (eine kurze Zeile ueber den vorhandenen note-Kanal).
+Die Karte gehoert in die Plattform-Spur (src/app/), nicht in die Netz-Spur: der Assistent ist ein Lua-Modul im Prozess der App. Was die Karte mitbringen muss: ein Test, der beweist, dass eine lange Unterhaltung nicht mehr ablehnt wird, sondern kuerzt (der Testbogen der Assistant-Suite, t/assistant/), und die Regel, dass die Kuerzung sichtbar ist. Der Byte-Budget bleibt eine Ablehnung (providers spec §2.4) - die Kuerzung laeuft nach der Anzahl der Nachrichten.
