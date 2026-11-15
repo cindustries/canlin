@@ -464,6 +464,53 @@ static void test_native_charges(void)
            CANLIN_SANDBOX_OK, &h);
 }
 
+/* ---- the calibrated charge factors (core API spec §7, canlin#13) ----
+ *
+ * The cost factors of sandbox_limits.h were measured against the emulated P2
+ * (tools/sb_costs under qemu-i386 -cpu pentium2): the charges below are the
+ * measured ones, written out, so a factor changed without a new measurement
+ * fails here.
+ *
+ * Each chunk runs fewer VM instructions than the count hook's stride, so no
+ * instruction is charged before the native charge and the budget boundary is the
+ * charge itself: the budget that admits the work is the charge, one unit less
+ * refuses it. */
+
+static void test_calibrated_charges(void)
+{
+    char src[8192];
+    host h;
+    size_t i, n;
+
+    /* A concat over 100 elements: 100 * 8 units. */
+    n = (size_t)snprintf(src, sizeof src, "table.concat({");
+    for (i = 0; i < 100; i++)
+        n += (size_t)snprintf(src + n, sizeof src - n, "'x',");
+    n += (size_t)snprintf(src + n, sizeof src - n, "})");
+    memset(&h, 0, sizeof h);
+    expect("concat at its charge", MEM, 800u, src, CANLIN_SANDBOX_OK, &h);
+    expect("concat one unit below its charge", MEM, 799u, src, CANLIN_SANDBOX_FAULT_BUDGET, &h);
+
+    /* A string copy of 1000 bytes: 1000 / 2 + 1 units. */
+    n = (size_t)snprintf(src, sizeof src, "local u = ('");
+    for (i = 0; i < 1000; i++)
+        src[n++] = 'x';
+    n += (size_t)snprintf(src + n, sizeof src - n, "'):upper()");
+    memset(&h, 0, sizeof h);
+    expect("string copy at its charge", MEM, 501u, src, CANLIN_SANDBOX_OK, &h);
+    expect("string copy one unit below its charge", MEM, 500u, src, CANLIN_SANDBOX_FAULT_BUDGET,
+           &h);
+
+    /* load() of a 1000 byte source: 1000 * 16 units. */
+    n = (size_t)snprintf(src, sizeof src, "local f = load('");
+    for (i = 0; i < 250; i++)
+        n += (size_t)snprintf(src + n, sizeof src - n, "a=1;");
+    n += (size_t)snprintf(src + n, sizeof src - n, "')");
+    memset(&h, 0, sizeof h);
+    expect("load at its charge", MEM, 16000u, src, CANLIN_SANDBOX_OK, &h);
+    expect("load one unit below its charge", MEM, 15999u, src, CANLIN_SANDBOX_FAULT_BUDGET, &h);
+}
+
 static void test_memory(void)
 {
     static const struct {
@@ -553,6 +600,7 @@ int main(void)
     test_fault_reraise_from_c();
     test_patterns();
     test_native_charges();
+    test_calibrated_charges();
     test_memory();
     test_isolation();
     test_require();

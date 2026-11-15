@@ -3,7 +3,8 @@
 # mk/ui.mk. Fragments sorted after this one are named by path, not by variable (a
 # prerequisite list is expanded when the rule is read).
 MODULE_HDR := include/canlin/module.h include/canlin/module_limits.h \
-	include/canlin/sandbox.h include/canlin/ev.h include/canlin/ev_limits.h \
+	include/canlin/sandbox.h include/canlin/sandbox_limits.h \
+	include/canlin/ev.h include/canlin/ev_limits.h \
 	include/canlin/ui.h include/canlin/ui_limits.h include/canlin/theme.h \
 	include/canlin/render.h include/canlin/render_limits.h include/canlin/nk.h
 MODULE_OBJ := $(BUILD)/src/module/module.o
