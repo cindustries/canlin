@@ -409,6 +409,41 @@ static void test_builtin_font(void)
     }
 }
 
+/* The atlas memory of the built-in subset (canlin#96, UI spec §6.3). The atlas
+ * is the rasterized glyphs of one em size: a size in bytes, so it follows from
+ * the em size and not from the CPU - the host and the emulated target give the
+ * same numbers. Measured with tools/ui_budget; the numbers below are the
+ * measured ones, and they are the SPEC's numbers, not a limit. */
+static void test_atlas_memory(void)
+{
+    static const struct {
+        float em;
+        int w, h;
+    } want[] = {
+        { 16.0f, 512, 128 },  /* one face */
+        { 16.0f, 1024, 256 }, /* the three faces the UI bakes */
+        { 32.0f, 1024, 512 },
+        { 64.0f, 1024, 2048 },
+    };
+    size_t k;
+
+    for (k = 0; k < sizeof want / sizeof want[0]; k++) {
+        canlin_render_font f;
+        float px[3];
+        int n = (k == 0) ? 1 : 3;
+        px[0] = want[k].em;
+        px[1] = want[k].em * CANLIN_UI_HEADING1_SCALE;
+        px[2] = want[k].em * CANLIN_UI_HEADING2_SCALE;
+        if (canlin_render_font_default_sizes(&f, px, n) != 0) {
+            CHECK(0, "bake %.0f px", want[k].em);
+            continue;
+        }
+        CHECK(f.w == want[k].w && f.h == want[k].h, "em %.0f px: atlas %dx%d, measured %dx%d",
+              want[k].em, want[k].w, want[k].h, f.w, f.h);
+        canlin_render_font_free(&f);
+    }
+}
+
 static void test_atlas_image(void)
 {
     struct nk_command_image c;
@@ -525,6 +560,7 @@ int main(void)
     test_alpha();
     test_text();
     test_builtin_font();
+    test_atlas_memory();
     test_atlas_image();
     test_dirty_rows();
     test_nuklear_frame();

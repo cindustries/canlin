@@ -34,6 +34,21 @@ $(GRAPH_TEST): $(BUILD)/t/ui/test_graph.o $(UI_OBJ) $(MODULE_OBJ) $(EV_OBJ) $(SA
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm
 
+# The UI budgets (canlin#96): a tool, not a test - it prints what the font atlas
+# and the graph at its limits cost, and its numbers are read from its output, so
+# it does not belong in TESTS. Run it on the host and under the emulated target:
+# 'make ui-budgets BUILD=build/host' and
+# 'qemu-i386 -cpu pentium2 ./build/i686/tools/ui_budget'.
+UI_BUDGETS := $(BUILD)/tools/ui_budget
+
+ui-budgets: $(UI_BUDGETS)
+
+$(BUILD)/tools/ui_budget.o: override CPPFLAGS += $(NK_CPPFLAGS) -Isrc/render
+$(UI_BUDGETS): $(BUILD)/tools/ui_budget.o $(UI_OBJ) $(MODULE_OBJ) $(EV_OBJ) $(SANDBOX_OBJ) \
+		$(RENDER_OBJ) $(NK_OBJ) $(LUA_OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ -lm
+
 # On-screen keyboard (canlin#45): part of ui.c; its own test.
 KBD_TEST := $(BUILD)/t/ui/test_kbd
 TESTS += $(KBD_TEST)

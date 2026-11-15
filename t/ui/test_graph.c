@@ -829,6 +829,27 @@ static void test_limits(void)
         if (r[i].kind == CANLIN_UI_W_GRAPH && r[i].part == CANLIN_UI_P_NODE)
             nodes++;
     CHECK(nodes > 10 && nodes < CANLIN_UI_GRAPH_MAX_NODES); /* visible ones only */
+    /* The draw budget of the frame at the limits (canlin#96). Measured with
+     * tools/ui_budget on the host and under qemu-i386 -cpu pentium2: 24 visible
+     * nodes, 300 drawn edges (the curves) and 591 commands in the frame. The
+     * counts are exact and the same on the host and on the target; the ceilings
+     * below leave room for a layout change but catch a frame that explodes. */
+    {
+        const struct nk_command *cmd;
+        struct nk_context *ctx = canlin_ui_view_nk(canlin_module_view(h.m));
+        unsigned total = 0, curve = 0;
+        nk_foreach(cmd, ctx)
+        {
+            total++;
+            if (cmd->type == NK_COMMAND_CURVE)
+                curve++;
+        }
+        CHECK(total <= 700);
+        CHECK(curve <= 350);
+        CHECK(curve > 100);
+        if (total > 700 || curve > 350 || curve <= 100)
+            fprintf(stderr, "draw budget at the limits: %u commands, %u edges\n", total, curve);
+    }
     /* input frames keep working at the limit */
     clear_log(&h);
     drag(&h, 216, 188, 116, 88); /* between nodes: pans */
