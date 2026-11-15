@@ -1,0 +1,54 @@
+---
+claimed_at: 2026-11-15T18:32:18Z
+claimed_by: canlin-worker-runtime
+class: standard
+created: 2026-11-15T00:57:14Z
+id: 157
+priority: high
+started: 2026-11-15T17:52:50Z
+status: in-progress
+tags:
+- runtime
+- storage
+- sqlite
+title: 'Storage: the storage layer does not exist for any platform - SQLite, the VFS,
+  the BeePack loader, the settings'
+updated: 2026-11-15T18:32:18Z
+---
+
+Aus der Recherche k151 - und das ist der schwerste Befund: im Repo gibt es kein einziges fopen/mkdir/open/stat in src/ (per grep geprueft), kein SQLite, keinen BeePack-Loader (include/canlin/theme.h:9 sagt "until libbee is consumed"), keinen Settings-Store; die Credentials leben nur session-only im Core-Speicher (include/canlin/llm.h:8-13, :218-222). docs/THIRD-PARTY.md:19-26 listet SQLite, sqlite-vec und monocypher noch unter "Planned". Das ist keine Browser-Karte: die Speicherschicht fehlt fuer jede Plattform, und ohne sie sind drei von neun Browser-Gate-Punkten unerreichbar (persistence across reload, quota, single-writer storage ownership - system-design:437-440). Die Spec hat die Form schon entschieden: local/ + state.bee + module.bee + data.db, SQLite fuer die Menge, der Browser ueber einen Storage-Adapter mit VFS (OPFS oder IndexedDB - die Wahl ist offen, system-design:258-261, :454-455), und der Kern bleibt Core-owned. Diese Karte gehoert in die Runtime-Spur. Die ehrliche Abschneidekante, wenn der Umfang zu gross wird: das Browser-Gate beweist dann zunaechst nur yielding und input/render.
+
+canlin-worker-runtime: Spec-Abgleichung begonnen. Was entschieden ist: Layout (system-design §6: modules/<name>/{module.bee,state.bee,local/,data.db}, theme/theme.bee, system/local/), der Browser als Storage-Adapter mit VFS (§6, §13 offen: OPFS oder IndexedDB), die Install-Regel (§6: temp schreiben, atomar publizieren, Persistenz-Barrier - Datei UND Verzeichnis - dann erst durable success), SQLite pro Modul mit Authorizer und Quoten (§6, §7 outbox-Schema ist fest). Was offen ist und NICHT in diesem Schritt entschieden wird: (a) die Lua-Store-API (core-api §9.3 verweist auf eine eigene Spec, die es nicht gibt), (b) die SQLite-Frage: SQLite ist nicht vendored (kein third_party/sqlite, THIRD-PARTY.md:19-26 listet SQLite/sqlite-vec/monocypher als Planned) und ein Browser-SQLite braucht einen VFS, (c) die Browser-VFS-Wahl, (d) der Datenwurzel-Ort pro Plattform (CANLINDATA-Label, App-Dir, OPFS). libbee ist ebenfalls noch Spec-only (kein C-Code im Submodul) - die BeePack-Seite ist eine eigene Spur. Erster Schritt dieser Karte: die Storage-Seam (die Dateisystemoperationen, die der Kern braucht) mit nativer Implementierung daneben und einem Test, der die Abstraktion als ausreichend belegt.
+
+Schritt 1 dieser Karte ist gebaut: die Storage-Seam (das Medium, durch das der Kern speichert).
+
+Neue Dateien: include/canlin/store.h, include/canlin/store_limits.h, include/canlin/store_posix.h, src/store/store.c, src/store/fs_posix.c, t/store/test_store.c, mk/store.mk.
+
+Die Seam: canlin_store_fs - ein Struct von Funktionszeigern, dasselbe Muster wie canlin_llm_transport (include/canlin/llm.h:122-131). Die Operationen sind genau die, die die Spec-Konsumenten brauchen und keine mehr: open/close/read@offset/write@offset/truncate/sync/size/remove/rename/mkdir/sync_dir/stat/list. Warum read/write bei Offset und nicht stdio: libbee liest positional (libbee-design §3: read an einem Offset, Groesse der Quelle, kein Seek-Zustand), und ein sqlite3_vfs braucht dieselben Byte-Range-Operationen. Die Kernregeln liegen in store.c (portabel, ohne Plattform-Header): canlin_store_publish schreibt ein temporaeres Objekt neben dem Ziel, sync't die Datei, renamed sie ueber das Ziel und sync't das Verzeichnis - die Barrier aus system-design §6 (Zeile 265-269); dazu canlin_store_read, exists, mkdirs, list. fs_posix.c ist die native Implementierung (pread/pwrite, fsync der Datei und des Verzeichnisses, 0600/0700).
+
+Die Pfadregel: Pfade sind wurzelrelativ und portabel - kein fuehrendes '/', kein leeres Segment, kein '.' oder '..', kein Backslash, keine Kontrollzeichen. Die Wurzel selbst ist der leere Pfad. canlin_store_path_valid() ist die eine Stelle; die Backends wenden sie auch an. Ein Modul kann damit keinen Pfad ausserhalb seines Verzeichnisses nennen.
+
+Der Test t/store/test_store.c faehrt EINE Regel-Suite gegen ZWEI Backends: ein In-Memory-Backend, das nichts vom Dateisystem weiss, und das POSIX-Backend. Was beide passieren, ist eine Regel der Seam, nicht eines Mediums - das ist der Beleg, dass die Abstraktion reicht. 151 Checks. Rot zuerst: drei Mutationen (Barrier raus, Rename raus, '..' erlaubt) fallen auf; eine vierte fand ich beim Review (die Barrier pruefte den Store-Wurzel nicht, ein File direkt im Root scheiterte) - der Test deckt sie jetzt ab. Der Sanitizer-Lauf fand zwei Leaks in meinem Code (der POSIX-Kontext, die Test-Puffer), beide behoben.
+
+Was der Kern heute braucht: nichts. Der Kern macht keinen Dateisystemzugriff (per grep geprueft: kein fopen/mkdir/open/stat ausserhalb von src/store/; die neue src/backend/fb.c des Backend-Workers oeffnet Geraete, kein Speicher). Die Sandbox hat kein io/os, canlin.* hat keine Store-API. Die Seam hat also heute keinen Produzenten - ihr erster ist der naechste Schritt.
+
+Gate: make BUILD=build/rt6 test (Host) gruen, ALL TESTS PASSED (gate: host). make TARGET=i686 BUILD=build/i686-rt6 test (i686 user-mode, qemu-i386 -cpu pentium2) gruen. Der Store-Test laeuft in beiden Gates mit. k145 (t/net/http_test) laeuft in beiden Gates gruen mit - der Befund der Karte ist hier nicht mehr zu sehen.
+
+Bewusst nicht entschieden (das sind Deine Entscheidungen):
+1. SQLite. SQLite ist nicht vendored (kein third_party/sqlite; docs/THIRD-PARTY.md:19-26 listet SQLite, sqlite-vec, monocypher als Planned). Die Optionen: (a) die Amalgamation (public domain) fuer alle Targets vendoren und im Browser einen eigenen sqlite3_vfs ueber diese Seam schreiben - eine Runtime, ein SQLite, der native VFS nimmt POSIX-Locks, der Browser-VFS nimmt den Single-Writer-Vertrag; (b) die offizielle sqlite-wasm-Build im Browser - dann laeuft im Browser ein zweites SQLite mit eigenem JS-Glue, das widerspricht "CanLin compiled to WASM" (system-design §2); (c) gar kein SQLite im Browser. Die Seam nimmt die Entscheidung nicht vorweg: ihre Operationen tragen einen VFS, aber nichts in ihr ist SQLite-spezifisch. Zum Vendoring gehoert eine Karte an canlin-vendor (Version, Quelle, mk/sqlite.mk, THIRD-PARTY.md, die Gates).
+2. Die Browser-VFS: OPFS oder IndexedDB (system-design §13 sagt, die Browser-Speicher-Slice waehlt und validiert sie; §6:258-261 nennt beide). Nicht meine Karte.
+3. Die Lua-Store-API (canlin.store, canlin.db): core-api §9.3 verweist auf eine Spec, die es nicht gibt. Auch die Zuordnung der Speicher-Fehlercodes auf die Code-Menge §3.1 (full/invalid/unsupported/denied/unavailable) ist offen - die Seam hat ihre eigenen Codes, die Zuordnung gehoert zur Lua-API.
+4. Die Speicherwurzel pro Plattform: CANLINDATA-Partition auf den Images, App-Datenverzeichnis auf Android, OPFS im Browser. Das ist eine Plattform-Frage (src/app, src/android).
+5. libbee: das Submodul third_party/libbee ist auf e4ad06f gepinnt und enthaelt noch keinen C-Code (nur die Spec) - die BeePack-Seite ist eine eigene Spur und ist auf dem libbee-Board bereits geroutet (dort #1 die oeffentliche API, #6 das POSIX-Backend, alle backlog). Hier kommt die eine Karte dazu: CanLin konsumiert libbee.
+6. Persistente Credentials: heute session-only (include/canlin/llm.h:8-13, 218-222). accounts-design §5 will passphrase-verschluesseltes secrets.bee (monocypher + Argon2id) - monocypher ist auch nicht vendored.
+
+Vorgeschlagene Karten in dieser Reihenfolge:
+A. Store-Schicht ueber der Seam: die Speicherwurzel, das Modul-Layout aus system-design §6 (modules/<name>/{module.bee,state.bee,local/,data.db}, theme/theme.bee, theme/local/, system/local/) und der Settings-Store - plus eine Plattform-Karte fuer die Wurzelsuche. Das ist der erste Produzent der Seam und geht ohne SQLite und ohne BeePack.
+B. Der BeePack-Loader, sobald libbee seine API hat (die libbee-Seite ist auf dem libbee-Board geroutet): hier ein bee_fs/bee_io-Backend ueber der Seam, der Layer-Stack local/ + state.bee + module.bee, das Installieren eines Bundles ueber den Publish mit Signaturpruefung.
+C. SQLite: Deine Entscheidung, dann vendoren, dann die Datenbank pro Modul mit Authorizer, Quoten und dem outbox-Schema aus system-design §7.
+D. Die Lua-Store-API: die Spec zuerst (core-api §9.3), dann die Bindung mit den Sandbox-Regeln und der Fehlercode-Zuordnung.
+E. Das Browser-Backend ueber der Seam (OPFS oder IndexedDB) und die drei Browser-Gate-Punkte: persistence across reload, quota, single-writer storage ownership.
+F. Quoten pro Modul (Datenbank, Paket, Queue, Outbox) und der fluechtige Modus.
+G. Persistente Credentials (monocypher, die KDF-Entscheidung).
+
+Lane-Tabelle: bitte eintragen - src/store/ (neu), t/store/ (neu) und mk/store.mk gehoeren canlin-worker-runtime.
