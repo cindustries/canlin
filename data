@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-15T18:38:39Z
+id: 176
+priority: medium
+status: backlog
+tags:
+- legal
+- packaging
+- licences
+title: 'Licence: the runtime''s own licence is undecided, the images and the APK ship
+  it'
+updated: 2026-11-15T18:38:39Z
+---
+
+Die Lizenz der Runtime selbst ist offen: die System-Design-Spec sagt es ausdruecklich ("Licence for canlin and canlin-os: ... the runtime and images remain undecided"). Das ist eine Entscheidung des Maintainers, keine des Teams - die Karte stellt sie nur fest und schlaegt eine vor. Vorschlag: MIT (wie die Lua- und die cmp-Komponenten, gleiche Lizenz wie das Haus in anderen Repos) oder Apache-2.0 (wie mbedtls).
+Warum das jetzt auffaellt: die Bilder und das APK liefern die Lizenztexte der gelinkten Komponenten mit (canlin k168, canlin-os k6), und ein Paket ohne Lizenz ist ein Paket ohne Lizenz - auch das eigene. Das Buildroot-Paket in canlin-os (Karte k3) traegt deshalb vorerst "Undecided" als Lizenz, bis hier eine steht.
+Was zu der Entscheidung gehoert: eine LICENSE-Datei im canlin-Repo (die Pakete der Buildroot erwarten sie unter CANLIN_OS_LICENSE_FILES), ein Eintrag in docs/THIRD-PARTY.md und die Lizenzangabe in den Paketmetadaten (mk/android.mk und package/canlin-os/canlin-os.mk). Die Lizenztexte der Dritt-Komponenten sind eine eigene Karte und davon unberuehrt.
