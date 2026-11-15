@@ -118,6 +118,23 @@ fails after tool calls arrived, or ends on the length stop with `dropped_tools >
 
 Complete tool calls of a successful length-stopped answer are applied as usual.
 
+**Trimmed conversation history** (decided 2026-11-15, dispatcher, k113): the assistant
+shortens its own conversation before the request, so a long conversation degrades
+instead of breaking. A **turn** is the user message together with the assistant's
+answer that followed it; the tool results of that answer belong to the turn. The bound
+is `CANLIN_LLM_MESSAGES_MAX` (256 messages): the core refuses a request with more
+(`invalid`, "message count out of range"), so without trimming a long conversation
+fails instead of being shortened.
+
+- drops the oldest complete turns first, until the history fits the bound;
+- never drops the system prompt, a turn that is still in flight or the current turn;
+- keeps a dropped turn out of every later request;
+- makes the shortening visible: the assistant says in one short line that the
+  beginning of the conversation was dropped ("Anfang des Gesprächs verworfen").
+
+The other bound stays as it is: a history that no longer fits the byte budget of a
+request is refused, not shortened (providers spec §2.4).
+
 Cancel closes/stops the scoped transport and rejects late delivery; it cannot undo a
 request the provider already received or guarantee absence of billing. Do not blindly
 retry an ambiguous provider POST after disconnect. Explicit retry is a new, visible
