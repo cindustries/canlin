@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-15T18:34:04Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T18:34:04Z
+created: 2026-11-14T19:57:12Z
+id: 113
+priority: medium
+started: 2026-11-15T18:28:28Z
+status: done
+tags:
+- assistant
+- llm
+title: 'Assistant: the conversation history is not trimmed'
+updated: 2026-11-15T18:34:04Z
+---
+
+The built-in assistant module (k109) keeps the whole conversation in its history and sends it with every request. The core refuses more than CANLIN_LLM_MESSAGES_MAX messages, and it refuses visibly - the request fails instead of the conversation being shortened. A long conversation therefore breaks rather than degrades. Decide what a turn drops: the oldest user/assistant pairs, a summary, or a bounded window - and put the rule in the llm-ui design §4 next to the other conversation rules. Found by the 2026-11-14 work on k109.
+
+Rule written into docs/superpowers/specs/2026-09-22-canlin-llm-ui-design.md section 4, lines 121-136 (one paragraph plus its list, right after the 'Dropped and cut-off answers' rule), in the house pattern: bold lead, (decided 2026-11-15, dispatcher, k113), then the rule.
+
+Facts checked in the code: CANLIN_LLM_MESSAGES_MAX = 256u in include/canlin/llm_limits.h:37; enforced in src/llm/llm.c:1202 (l_request, 'message count out of range' with code 'invalid'). The built-in assistant module (src/app/assistant.c, the ASSISTANT_SRC Lua) keeps the whole normalised conversation in one 'history' table and hands it to canlin.llm.request unchanged; it does NOT trim today. The implementation (llm lane, a card that follows) still has to come - the rule is written as the rule.
+
+Two points for the maintainer: (1) the turn definition names the tool results of an answer as part of the turn, because the history holds role='tool' messages too and an orphan tool message would break the provider request - this is my clarification, the dispatcher's decision only named the user message and the assistant's answer. (2) Seam with providers spec 2.4 ('a history that no longer fits is refused, not shortened'): the new rule shortens on the message count, the byte budget stays a refusal; the paragraph says so in the text. The German literal ('Anfang des Gespraechs verworfen') is my wording, matching the module's note lines; the llm lane may adjust it.
+
+Only that one file changed. Tree is commit-ready, no commit made. Proposed subject: 'Decide what a turn drops from the assistant history (k113)'.
+
+Spec rule written (llm-ui design section 4, lines 121-136). Tree commit-ready, no commit. Implementation in the llm lane still follows.
+
+2026-11-15 (dispatcher): reviewed and committed (f748418). Die Regel steht jetzt im llm-ui design §4, im Muster der Nachbarregel: eine Wendung ist die Nutzernachricht, die Antwort danach und die Werkzeugergebnisse dieser Antwort; die aeltesten vollstaendigen Wendungen fallen zuerst, Systemprompt, laufende Wendung und aktuelle Wendung nie, und die Kuerzung wird sichtbar gemacht. Die Grenze ist CANLIN_LLM_MESSAGES_MAX (256) aus include/canlin/llm_limits.h:37, erzwungen in src/llm/llm.c:1202 mit dem Code invalid und der Meldung 'message count out of range'. Das Byte-Budget bleibt eine Ablehnung, die Regel kuerzt nach der Anzahl. Die Umsetzung fehlt noch: das Assistant-Modul (src/app/assistant.c, die Lua-Quelle ASSISTANT_SRC) haelt eine history-Tabelle und gibt sie unveraendert an canlin.llm.request - das ist eine eigene Karte in der Plattform-Spur (k175). Zwei Hinweise des Doc-Writers: die Werkzeugergebnisse gehoeren zur Wendung, damit eine verworfene Wendung keine verwaiste Werkzeugnachricht im Request hinterlaesst; und die Regel kuerzt nach der Anzahl, nicht nach dem Byte-Budget (providers spec §2.4).
