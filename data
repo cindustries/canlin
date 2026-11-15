@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-11-15T01:01:50Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-15T00:42:27Z
+created: 2026-09-23T17:41:13Z
+id: 57
+priority: low
+started: 2026-11-14T23:53:39Z
+status: done
+tags:
+- llm
+- assistant
+title: 'LLM: align tool-call id limit (dialect 256 vs set_view 128)'
+updated: 2026-11-15T01:01:50Z
+---
+
+From #51: ids of 129–256 bytes pass the dialect but get an invalid result from set_view. Pick one limit in llm_limits.h and test both sides.
+
+Root cause: three numbers guarded the tool-call id — the dialect buffers (CANLIN_LLM_TOOL_ID_MAX 256, src/llm/openai_chat.c:394, src/llm/anthropic_messages.c:588), the response gate (src/assistant/response.c:106, already CANLIN_LLM_TOOL_ID_MAX) and the GUI tool schema (CANLIN_AV_CALL_ID_MAX 128, src/assistant/view.c:1516). An id of 129..256 bytes passed dialect + gate and was then refused by set_view with "invalid" — the gap reported in #51.
+
+Decision: one number, 128, owned by include/canlin/llm_limits.h (CANLIN_LLM_TOOL_ID_MAX 256u -> 128u); include/canlin/assistant_limits.h derives CANLIN_AV_CALL_ID_MAX from it, so the GUI tool schema and the provider dialects share one bound. 128 is the GUI schema's own value (UI spec §7 states no byte bound; it was chosen for canlin#20) and it leaves src/assistant/view.c untouched — the error text there, "tool-call id must be 1-128 bytes", stays true. No spec change: the bound is "not in the spec" in both headers, and the card names llm_limits.h as its home.
+
+Tests, red first:
+- t/llm/test_llm.c test_tool_id_bound (openai-chat) and test_am_tool_id_bound (anthropic-messages): an id of exactly CANLIN_LLM_TOOL_ID_MAX bytes is delivered as a tool, one byte more fails the response with "full" ("tool call id exceeds CANLIN_LLM_TOOL_ID_MAX") and no tool is delivered.
+- t/assistant/test_view.c test_call_id_bound: set_view admits an id of CANLIN_LLM_TOOL_ID_MAX bytes and refuses one byte more with EINVALID, revision unchanged. This half was red before the fix (3 checks failed: set_view refused the 256-byte id the dialect admits).
+
+Evidence: make BUILD=build/llm5 test -> ALL TESTS PASSED (host, all suites). i686/P2: SKIPPED, not passed — the i686-linux-musl-gcc cross compiler is not installed on this host.
+
+Note for the reviewer: src/assistant/view.c:1517 hard-codes the text "tool-call id must be 1-128 bytes". It is truthful with today's number, but if the bound ever moves, the message has to move with it. That file was locked for this card, so I left it alone.
+
+Done: the tool-call id bound is one number again — CANLIN_LLM_TOOL_ID_MAX 128u in include/canlin/llm_limits.h (was 256u), CANLIN_AV_CALL_ID_MAX derived from it in include/canlin/assistant_limits.h. Both sides are tested against that one constant: t/llm/test_llm.c test_tool_id_bound / test_am_tool_id_bound (dialect: exactly the bound is delivered as a tool, one byte more fails the response with "full"), t/assistant/test_view.c test_call_id_bound (set_view: exactly the bound is admitted, one byte more is EINVALID). The set_view half was red before the fix and green after. make BUILD=build/llm5 test -> ALL TESTS PASSED on the host; i686/P2 skipped, not passed (no i686-linux-musl-gcc on this host). Files: include/canlin/llm_limits.h, include/canlin/assistant_limits.h, t/llm/test_llm.c, t/assistant/test_view.c. No commit, tree is commit-ready. Open observation: src/assistant/view.c:1517 spells "1-128 bytes" in the error text — true today, but it has to follow the constant if the bound ever moves (file was locked for this card).
+
+2026-11-15 review (main): gelesen und akzeptiert. Eine Zahl statt drei, und die kleinere: 128 ist der Wert des GUI-Schemas, und die Fehlermeldung in src/assistant/view.c ("tool-call id must be 1-128 bytes") bleibt damit wahr, ohne dass eine gesperrte Datei angefasst werden musste. Die Tests pinnen beide Seiten gegen dieselbe Konstante - die Dialect-Seite und die set_view-Seite. Committet als 2393b8f. Die Ticket-Schreibweise in den neuen Kommentaren ist auf k57 umgestellt (die Hausregel sagt kNN). Der Drift-Befund des Workers (die Fehlermeldung nennt die Zahl hart) ist als Notiz auf der Karte vermerkt: wandert die Grenze, wandert die Meldung mit.
+
+Nachbesserung wie gewuenscht: die neuen Kommentare in include/canlin/assistant_limits.h (zwei) und include/canlin/llm_limits.h (einer) schreiben jetzt k57 statt canlin#57. Die Kommentare in t/llm/test_llm.c und t/assistant/test_view.c, die ebenfalls von mir sind, ebenso. Die Specs schreiben ihre Ids weiter als canlin#N - das ist die Karte k135 und bleibt hier unberuehrt.
+
+i686-Gate nachgeholt, es ist auf diesem Host lauffaehig: export PATH="$HOME/opt/i686-linux-musl-cross/bin:$PATH"; make TARGET=i686 BUILD=build/i686-llm, dann die Suiten unter qemu-i386 -cpu pentium2 ./build/i686-llm/t/... - llm/test_llm, llm/test_llm_http, assistant/test_view, assistant/test_response, assistant/test_binding, app/test_assistant: alle gruen (Exit 0). k57 ist damit auf Host und P2 nachgewiesen, nicht nur auf dem Host.
+
+Hinweis fuer den Commit: der Baum traegt inzwischen auch die Arbeit aus k58 (src/llm/, der Block CANLIN_LLM_REASONING_MAX in include/canlin/llm_limits.h, die k58-Tests in t/llm/test_llm.c, der neue Spec-Abschnitt 2.4 in docs/superpowers/specs/2026-09-23-canlin-llm-providers-design.md). k57-eigen sind include/canlin/assistant_limits.h, t/assistant/test_view.c und die k57-Hunks in include/canlin/llm_limits.h und t/llm/test_llm.c. Wenn du die beiden Karten trennen willst: git add -p fuer die zwei geteilten Dateien, der Rest sind ganze Dateien.
