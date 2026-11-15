@@ -2309,10 +2309,10 @@ static void *lalloc(void *ud, void *ptr, size_t osize, size_t nsize)
 static int frame_entry(lua_State *L)
 {
     canlin_assistant_view *av = lua_touserdata(L, 1);
+    /* The model is drawn into the model's own view: the frame that the binding drives
+     * from the module's draw (ADR 0001). */
     canlin_ui_push(L, av->view);
-    av->submit = NULL;
-    if (av->model)
-        draw_list(av, L, lua_gettop(L), av->model->widgets, av->model->nwidgets);
+    canlin_assistant_view_draw(av, L, lua_gettop(L));
     return 0;
 }
 
@@ -2331,7 +2331,8 @@ int canlin_assistant_view_frame(canlin_assistant_view *av)
     rc = canlin_ui_view_frame_begin(av->view);
     if (rc != CANLIN_UI_OK) {
         snprintf(av->errmsg, sizeof av->errmsg, "frame could not start (%d)", rc);
-        return rc == CANLIN_UI_EBUSY ? CANLIN_AV_EARG : CANLIN_AV_ENOMEM;
+        /* EARG is "no view"; a frame that could not start is EINVALID (the header). */
+        return rc == CANLIN_UI_EBUSY ? CANLIN_AV_EINVALID : CANLIN_AV_ENOMEM;
     }
     lua_settop(av->L, 0);
     lua_pushcfunction(av->L, frame_entry);
@@ -2346,7 +2347,6 @@ int canlin_assistant_view_frame(canlin_assistant_view *av)
         return st == LUA_ERRMEM ? CANLIN_AV_ENOMEM : CANLIN_AV_EINVALID;
     }
     lua_settop(av->L, 0);
-    finish_submit(av);
     return CANLIN_AV_OK;
 }
 

@@ -11,15 +11,18 @@
  * canlin.view, the field is absent. A revoked grant makes every function answer
  * nil, "denied", <message> - never a pretend success.
  *
- * The binding reaches nothing but the model view it holds and this module's own view:
- * no other module's view, no credentials, no network, no files. It cannot change the
- * model view either: only the response gate does that, on a turn that ended ok.
+ * The binding reaches nothing but the model view it holds: the model's widgets live in
+ * that view and in no other (ADR 0001), no other module's view, no credentials, no
+ * network, no files. It cannot change the model view either: only the response gate
+ * does that, on a turn that ended ok.
  *
  * Lua surface (canlin.view):
  *   canlin.view.draw()       -> revision
- *         The model view drawn into this module's own view (the ui of M.draw). The
- *         revision drawn (0: no model view yet). nil, "unavailable", <message> when
- *         this module has no view to draw into.
+ *         The model drawn into the model's own view: the model's widgets live in their
+ *         own identity space, with their own focus, slot table and rectangle, and the
+ *         frame of that view arises in the module's draw. The revision drawn (0: no
+ *         model view yet). nil, "unavailable", <message> when the model has no view of
+ *         its own to draw into.
  *   canlin.view.submission() -> "<the submission's JSON>"
  *         The pending submission, taken: it waits for one consumer. The bytes are the
  *         submission's own JSON (UI spec §7: {revision, action, values}), so the

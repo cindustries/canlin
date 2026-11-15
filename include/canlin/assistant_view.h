@@ -226,12 +226,16 @@ struct lua_State;
 /* Draws the current model through the `ui` object at ui_idx of L (the per-draw object of
  * canlin_ui_push, inside its frame), updating local state from the widget results and
  * applying the view's own graph edits. Raises a Lua error only if a ui method raises
- * (not for a validated model within the limits). For a built-in assistant module's draw;
- * no Lua binding exists yet. */
+ * (not for a validated model within the limits).
+ *
+ * The model's own view is driven by canlin_assistant_view_frame: the caller passes the
+ * `ui` object of that view, never the one of a module's view (ADR 0001: the model's
+ * widgets live in the model's own identity space). */
 void canlin_assistant_view_draw(canlin_assistant_view *av, struct lua_State *L, int ui_idx);
 /* One C-driven frame on the attached view: frame_begin, draw on a private Lua state,
- * frame_end. Returns CANLIN_AV_OK, EARG (no view), or ENOMEM/EINVALID when the frame
- * could not start or a ui method raised (message in canlin_assistant_view_errmsg). */
+ * frame_end. The attached view is the model's own view (ADR 0001). Returns CANLIN_AV_OK,
+ * EARG (no view), or ENOMEM/EINVALID when the frame could not start or a ui method raised
+ * (message in canlin_assistant_view_errmsg). */
 int canlin_assistant_view_frame(canlin_assistant_view *av);
 const char *canlin_assistant_view_errmsg(const canlin_assistant_view *av);
 

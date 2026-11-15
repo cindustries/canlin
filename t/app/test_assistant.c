@@ -177,6 +177,17 @@ static const canlin_ui_rect *find(harness *h, int kind, int part, int nth)
     return NULL;
 }
 
+/* The n-th (from 0) record entry of kind/part of the model's own view. */
+static const canlin_ui_rect *find_model(harness *h, int kind, int part, int nth)
+{
+    size_t n, i;
+    const canlin_ui_rect *r = canlin_ui_view_record(canlin_app_model_view(h->a), &n, NULL);
+    for (i = 0; i < n; i++)
+        if (r[i].kind == kind && r[i].part == part && nth-- == 0)
+            return &r[i];
+    return NULL;
+}
+
 /* The on-screen keyboard key of one code point (the field must be focused). */
 static const canlin_ui_rect *key(harness *h, uint32_t cp)
 {
@@ -354,7 +365,7 @@ static void test_conversation(void)
 
     /* the model view is rendered: the model's field and the assistant's own field */
     CHECK(find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) != NULL);
-    CHECK(find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 1) != NULL);
+    CHECK(find_model(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) != NULL);
     CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) != NULL);
 
     /* the provider's tool loop continues with the tool result */
@@ -368,7 +379,7 @@ static void test_conversation(void)
     CHECK(has(&h, "turn ok end"));
 
     /* the user's submission of the model's form reaches the provider */
-    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    b = find_model(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
     CHECK(b != NULL);
     press(&h, b);
     settle(&h);
@@ -558,11 +569,11 @@ static void test_model_redraw(void)
     /* the set_view dropped the queued input of the model's own view: the assistant
      * view is attached to it */
     CHECK(canlin_ui_view_pending(mv) == 0);
-    /* FINDING (k130): the queued click in the module's own view survived the model
-     * replacement. There the model's widgets are until the binding draws them into
-     * the model's own view, and a click meant for the old model would act on the new
-     * one's widget. k130 closes the gap; this check fails then. */
-    CHECK(canlin_ui_view_pending(modv) == 1);
+    /* k130: the model is drawn into the model's own view, so the queued click in the
+     * module's own view cannot act on a model widget any more: the module's own draw
+     * takes it, and the model's own view holds no queued input (the set_view dropped
+     * it). */
+    CHECK(canlin_ui_view_pending(modv) == 0);
 
     /* the app asked for a redraw: the new model is on screen without a new input */
     frames = canlin_ui_view_frames(modv);
@@ -570,7 +581,7 @@ static void test_model_redraw(void)
         CHECK(canlin_loop_iterate(h.l) == CANLIN_LOOP_OK);
     CHECK(canlin_ui_view_frames(modv) > frames);
     /* the model is drawn: its button and the assistant's own */
-    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 1) != NULL);
+    CHECK(find_model(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) != NULL);
 
     h_done(&h);
 }
@@ -759,8 +770,8 @@ static void test_foreign_payload_survives(void)
     CHECK(canlin_llm_fixture_records(h.fx) == 2);
     CHECK(strstr(record_body(&h, 0), "hi") != NULL);
     CHECK(strstr(record_body(&h, 1), "call_A") != NULL);
-    /* the model's form is in the assistant's view: the tool call was acted on */
-    CHECK(find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 1) != NULL);
+    /* the model's form is in the model's own view: the tool call was acted on */
+    CHECK(find_model(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) != NULL);
 
     CHECK(h.errors == 0);
     if (h.errors)

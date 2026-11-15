@@ -1,10 +1,12 @@
 /* Assistant-view binding contract tests (module roles spec §3; UI spec §7; core API
- * §3.1): the privileged Lua surface a module with the assistant-view capability uses.
+ * §3.1; ADR 0001): the privileged Lua surface a module with the assistant-view
+ * capability uses.
  *
  * The module's own Lua code runs in the real sandbox and the real scheduler: it draws
- * the model view into its own view and picks up the submission. A module without the
- * capability never sees canlin.view (it is nil); a revoked grant answers denied, never
- * a pretend success. Exits 0 on success. */
+ * the model into the model's own view and picks up the submission. The model's widgets
+ * live in that view and in no other, and a queued click in it is dropped when the model
+ * is replaced. A module without the capability never sees canlin.view (it is nil); a
+ * revoked grant answers denied, never a pretend success. Exits 0 on success. */
 #include "canlin/assistant_binding.h"
 #include "canlin/json.h"
 #include "canlin/module.h"
@@ -73,6 +75,7 @@ typedef struct harness {
     canlin_ui_output *out;
     canlin_assistant_view *av;
     canlin_assistant_binding bind;
+    canlin_ui_view *mv; /* the model's own view (ADR 0001) */
     int w, h;
 } harness;
 
@@ -101,6 +104,7 @@ static void h_init(harness *h, int w, int hh)
     canlin_ev_callbacks cb;
     canlin_theme t;
     canlin_ui_output_desc d;
+    int err = 0;
     memset(h, 0, sizeof *h);
     h->w = w;
     h->h = hh;
@@ -117,12 +121,17 @@ static void h_init(harness *h, int w, int hh)
     d.scale = CANLIN_UI_SCALE_STEP_100;
     h->out = canlin_ui_output_new(&d, NULL);
     h->av = canlin_assistant_view_new();
+    /* The model has a view of its own: the loader owns it and hands it to the
+     * assistant view (ADR 0001). */
+    h->mv = canlin_ui_view_new(h->ui, h->out, &err);
     h->bind.view = h->av;
     h->bind.granted = 1;
-    if (!h->ev || !h->ui || !h->out || !h->av) {
+    if (!h->ev || !h->ui || !h->out || !h->av || !h->mv) {
         fprintf(stderr, "harness init failed\n");
         exit(1);
     }
+    canlin_ui_view_set_rect(h->mv, 0, 0, w, hh);
+    canlin_assistant_view_attach(h->av, h->mv);
 }
 
 static void h_done(harness *h)
@@ -134,6 +143,7 @@ static void h_done(harness *h)
     CHECK(st.items == 0 && st.bytes == 0 && st.ops == 0 && st.timers == 0);
     CHECK(canlin_ev_free(h->ev) == CANLIN_EV_OK);
     canlin_assistant_view_free(h->av);
+    canlin_ui_view_free(h->mv);
     CHECK(canlin_ui_output_free(h->out) == CANLIN_UI_OK);
     canlin_ui_free(h->ui);
 }
@@ -183,11 +193,37 @@ static void post(harness *h, canlin_ui_input_type type, int x, int y, int down)
     CHECK(canlin_module_post_input(h->m, &in) == CANLIN_MODULE_OK);
 }
 
+/* A click in the model's own view: the shell routes the pointer to the view under the
+ * point, and that is the model's view. The app asks for the redraw the same way it
+ * does in the running app: the module's generation is invalidated. */
+static void post_model(harness *h, canlin_ui_input_type type, int x, int y, int down)
+{
+    canlin_ui_input in;
+    memset(&in, 0, sizeof in);
+    in.type = type;
+    in.x = x;
+    in.y = y;
+    in.down = down;
+    CHECK(canlin_ui_view_input(h->mv, &in) == CANLIN_UI_OK);
+    canlin_ev_invalidate(h->ev, canlin_module_gen(h->m));
+}
+
 /* The n-th (from 0) record entry of kind/part of the module's own view. */
 static const canlin_ui_rect *find(harness *h, int kind, int part, int nth)
 {
     size_t n, i;
     const canlin_ui_rect *r = canlin_ui_view_record(canlin_module_view(h->m), &n, NULL);
+    for (i = 0; i < n; i++)
+        if (r[i].kind == kind && r[i].part == part && nth-- == 0)
+            return &r[i];
+    return NULL;
+}
+
+/* The n-th (from 0) record entry of kind/part of the model's own view. */
+static const canlin_ui_rect *mfind(harness *h, int kind, int part, int nth)
+{
+    size_t n, i;
+    const canlin_ui_rect *r = canlin_ui_view_record(h->mv, &n, NULL);
     for (i = 0; i < n; i++)
         if (r[i].kind == kind && r[i].part == part && nth-- == 0)
             return &r[i];
@@ -243,39 +279,47 @@ static const char FORM[] =
     "\"edges\":[{\"from\":[\"a\",\"out\"],\"to\":[\"b\",\"in\"]}]},"
     "{\"type\":\"button\",\"id\":\"ok\",\"label\":\"Add\",\"action\":\"submit\"}]}";
 
-/* The model view in the assistant view (the C side; the module only sees the result). */
-static void set_form(harness *h)
+/* The model view in the assistant view (the C side; the module only sees the result).
+ * The call id names the call: a second call with another id replaces the model. */
+static void set_form_id(harness *h, const char *id)
 {
     canlin_av_result r;
     canlin_av_call c;
     c.gen = 1;
     c.turn = 1;
-    c.id = "c1";
-    c.id_len = 2;
+    c.id = id;
+    c.id_len = strlen(id);
     canlin_assistant_view_set_scope(h->av, 1, 1);
     CHECK(canlin_assistant_view_set_view(h->av, &c, FORM, strlen(FORM), &r) == CANLIN_AV_OK);
     if (r.status != CANLIN_AV_OK)
         fprintf(stderr, "set_view: %s %s\n", r.err.path, r.err.message);
-    CHECK(r.revision == 1);
+}
+
+static void set_form(harness *h)
+{
+    set_form_id(h, "c1");
+    CHECK(canlin_assistant_view_revision(h->av) == 1);
 }
 
 /* Presses the submit button of the form: the core builds the submission and the
- * module takes it in its draw. */
+ * module takes it in its draw. The click goes into the model's own view - that is
+ * where the model's widgets are - and the module's draw frames that view and so
+ * applies the click. */
 static void press_submit(harness *h)
 {
     const canlin_ui_rect *b;
     int x, y;
-    b = find(h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    b = mfind(h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
     CHECK(b != NULL);
     if (b == NULL)
         return;
     x = b->x + b->w / 2;
     y = b->y + b->h / 2;
     canlin_ev_fake_clock_advance(&h->clock, 1000);
-    post(h, CANLIN_UI_IN_MOTION, x, y, 0);
-    post(h, CANLIN_UI_IN_BUTTON, x, y, 1);
+    post_model(h, CANLIN_UI_IN_MOTION, x, y, 0);
+    post_model(h, CANLIN_UI_IN_BUTTON, x, y, 1);
     h_turns(h, 4);
-    post(h, CANLIN_UI_IN_BUTTON, x, y, 0);
+    post_model(h, CANLIN_UI_IN_BUTTON, x, y, 0);
     h_turns(h, 4);
 }
 
@@ -375,7 +419,7 @@ static void test_absent(void)
     h_done(&h);
 }
 
-/* The capability granted: the model view is drawn into the module's own view and the
+/* The capability granted: the model is drawn into the model's own view and the
  * submission is picked up. */
 static void test_binding(void)
 {
@@ -389,12 +433,12 @@ static void test_binding(void)
     CHECK(has(h.log.buf, "fns\tfunction\tfunction"));
     /* the draw answers the revision it drew */
     CHECK(has(h.log.buf, "draw\t1"));
-    /* the model view is in the module's own view */
-    CHECK(find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) != NULL);
-    CHECK(find(&h, CANLIN_UI_W_TOGGLE, CANLIN_UI_P_BOX, 0) != NULL);
-    CHECK(find(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_BOX, 0) != NULL);
-    CHECK(find(&h, CANLIN_UI_W_GRAPH, CANLIN_UI_P_BOX, 0) != NULL);
-    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    /* the model view is in the model's own view */
+    CHECK(mfind(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) != NULL);
+    CHECK(mfind(&h, CANLIN_UI_W_TOGGLE, CANLIN_UI_P_BOX, 0) != NULL);
+    CHECK(mfind(&h, CANLIN_UI_W_CHOICE, CANLIN_UI_P_BOX, 0) != NULL);
+    CHECK(mfind(&h, CANLIN_UI_W_GRAPH, CANLIN_UI_P_BOX, 0) != NULL);
+    b = mfind(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
     CHECK(b != NULL);
     if (b == NULL) {
         h_done(&h);
@@ -409,6 +453,56 @@ static void test_binding(void)
     CHECK(count(h.log.buf, "sub\t") == 1);
     /* it waits for one consumer only */
     CHECK(count(h.log.buf, "subnone") >= 1);
+    h_done(&h);
+}
+
+/* The model has a view of its own (ADR 0001): the model's widgets live in that view
+ * and in no other, the frame of that view arises in the module's draw, and a queued
+ * click in that view is dropped when the model is replaced - the click was meant for
+ * the old model and must not act on the new one's widget. */
+static void test_model_view(void)
+{
+    harness h;
+    canlin_ui_input in;
+    uint32_t frames;
+
+    h_init(&h, 600, 800);
+    CHECK(h_load(&h, mod_src, 1) == CANLIN_MODULE_OK);
+    set_form(&h);
+    h_turns(&h, 2);
+
+    /* the model's widgets are in the model's own view */
+    CHECK(mfind(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) != NULL);
+    /* and in the module's own view there is none of them */
+    CHECK(find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 0) == NULL);
+    CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) == NULL);
+
+    /* the frame of the model's view arises in the module's draw */
+    CHECK(canlin_ui_view_frames(h.mv) > 0);
+    frames = canlin_ui_view_frames(h.mv);
+    canlin_ev_invalidate(h.ev, canlin_module_gen(h.m));
+    h_turns(&h, 2);
+    CHECK(canlin_ui_view_frames(h.mv) > frames);
+
+    /* a click waits in the model's own view: that is where the model's widgets are */
+    memset(&in, 0, sizeof in);
+    in.type = CANLIN_UI_IN_MOTION;
+    in.x = 10;
+    in.y = 10;
+    CHECK(canlin_ui_view_input(h.mv, &in) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_pending(h.mv) == 1);
+    /* the module's own view keeps its own input */
+    CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
+    CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) == 1);
+
+    /* the model is replaced */
+    set_form_id(&h, "c2");
+    CHECK(canlin_assistant_view_revision(h.av) == 2);
+    /* the reset of the queued input hit the view the click lands in */
+    CHECK(canlin_ui_view_pending(h.mv) == 0);
+    /* the module's own input is the module's own business */
+    CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) == 1);
+
     h_done(&h);
 }
 
@@ -491,6 +585,7 @@ int main(void)
 {
     test_absent();
     test_binding();
+    test_model_view();
     test_submission_json();
     test_revoked();
     if (failures) {

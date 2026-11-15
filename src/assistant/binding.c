@@ -2,14 +2,13 @@
  * assistant-view capability uses. See include/canlin/assistant_binding.h for the
  * contract.
  *
- * Isolation: the closures carry the binding and the module as light-userdata upvalues
- * that Lua cannot read (no debug library). The binding reaches the model view it holds
- * and the module's own view - nothing else. The grant is the loader's: revoked, every
- * answer is nil, "denied", ... and never a pretend success.
+ * Isolation: the closures carry the binding as a light-userdata upvalue that Lua cannot
+ * read (no debug library). The binding reaches the model view through the assistant
+ * view - the model's widgets live in that view and in no other. The grant is the
+ * loader's: revoked, every answer is nil, "denied", ... and never a pretend success.
  */
 #include "canlin/assistant_binding.h"
 #include "canlin/module.h"
-#include "canlin/ui.h"
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -17,11 +16,6 @@
 static canlin_assistant_binding *bind_of(lua_State *L)
 {
     return lua_touserdata(L, lua_upvalueindex(1));
-}
-
-static canlin_module *mod_of(lua_State *L)
-{
-    return lua_touserdata(L, lua_upvalueindex(2));
 }
 
 static int lfail(lua_State *L, const char *code, const char *msg)
@@ -32,24 +26,30 @@ static int lfail(lua_State *L, const char *code, const char *msg)
     return 3;
 }
 
-/* canlin.view.draw(): the model view drawn into this module's own view. */
+/* canlin.view.draw(): the model drawn into the model's own view. */
 static int l_draw(lua_State *L)
 {
     canlin_assistant_binding *b = bind_of(L);
-    canlin_module *m = mod_of(L);
-    canlin_ui_view *v;
+    int rc;
     if (!b->granted)
         return lfail(L, "denied", "the assistant-view capability was revoked");
-    v = canlin_module_view(m);
-    if (v == NULL)
-        return lfail(L, "unavailable", "this module has no view to draw into");
-    /* The module's own view, pushed for this draw: the model view is drawn into the
-     * module's view and into nothing else. */
-    canlin_ui_push(L, v);
-    canlin_assistant_view_draw(b->view, L, lua_gettop(L));
-    lua_pop(L, 1);
-    lua_pushinteger(L, (lua_Integer)canlin_assistant_view_revision(b->view));
-    return 1;
+    /* The model has a view of its own (ADR 0001): its widgets live in their own
+     * identity space, with their own focus, slot table and rectangle, and nothing the
+     * module draws can reach into them. The frame of that view arises here, inside the
+     * module's draw: the app asks for the redraw by invalidating the module's
+     * generation, and the shell draws the model's frame when the frame is done. */
+    rc = canlin_assistant_view_frame(b->view);
+    switch (rc) {
+    case CANLIN_AV_OK:
+        lua_pushinteger(L, (lua_Integer)canlin_assistant_view_revision(b->view));
+        return 1;
+    case CANLIN_AV_EARG:
+        return lfail(L, "unavailable", "the model has no view of its own to draw into");
+    default:
+        /* The frame could not start or a ui method raised: the assistant view's own
+         * message says which. */
+        return lfail(L, "unavailable", canlin_assistant_view_errmsg(b->view));
+    }
 }
 
 /* canlin.view.submission(): the pending submission, taken: its own JSON bytes. */
@@ -79,16 +79,17 @@ static int l_submission(lua_State *L)
 int canlin_assistant_binding_install(lua_State *L, canlin_module *m, void *ud)
 {
     canlin_assistant_binding *b = ud;
+    /* The module is not needed: the model has a view of its own, and the binding
+     * reaches it through the assistant view. */
+    (void)m;
     if (b == NULL || b->view == NULL)
         return 0;
     lua_createtable(L, 0, 2);
     lua_pushlightuserdata(L, b);
-    lua_pushlightuserdata(L, m);
-    lua_pushcclosure(L, l_draw, 2);
+    lua_pushcclosure(L, l_draw, 1);
     lua_setfield(L, -2, "draw");
     lua_pushlightuserdata(L, b);
-    lua_pushlightuserdata(L, m);
-    lua_pushcclosure(L, l_submission, 2);
+    lua_pushcclosure(L, l_submission, 1);
     lua_setfield(L, -2, "submission");
     lua_setfield(L, -2, "view"); /* the `canlin` table is on top of the stack */
     return 0;
