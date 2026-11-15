@@ -11,15 +11,35 @@
 # object on a link line is an error. The runtime binary that consumes LIBOBJ as
 # a whole does not exist yet.
 TARGET ?= host
-TEST_TIMEOUT ?= 120
 CC ?= cc
 CFLAGS ?= -std=c99 -Wall -Wextra -Werror -O2 -g
 CPPFLAGS += -Iinclude
 # bionic has pthread in libc; the NDK ships no libpthread (android-armv7 empties this).
 PTHREAD_LIBS := -lpthread
+
+# The gate the suites run under (k143). RUNNER is the command in front of a
+# suite binary: on the host it is empty and the binary runs directly, on i686 it
+# is the user-mode gate (qemu-i386 -cpu pentium2). The host CPU has SSE and the
+# target must not use it, so an i686 binary run on the host proves nothing.
+# GATE names the gate for the result: the user-mode gate and the canlin-os
+# full-system gate are two different gates and are never reported as one "QEMU"
+# result (system design §2).
+RUNNER ?=
+GATE ?= host
+# The timeout of one suite. It follows the target: the emulation is far slower
+# than the host (t/ui/test_ui needs ~253 s under qemu-i386), so the host's 120 s
+# would kill a run that is fine. A value on the command line wins over both.
+TEST_TIMEOUT ?= 120
+
 ifeq ($(TARGET),i686)
 CC := i686-linux-musl-gcc
 CFLAGS += -march=i686 -mno-sse -static
+# The user-mode gate (system design §2): a Pentium II CPU model, which has no
+# SSE. An instruction the target may not use dies here with signal 4.
+RUNNER := qemu-i386 -cpu pentium2
+GATE := i686 user-mode
+# The emulation runs an order of magnitude slower than the host.
+TEST_TIMEOUT := 600
 endif
 # Android armeabi-v7a, API 19, NDK r25c clang with its default flags (Thumb-2, softfp,
 # NEON, PIE). Dynamic against the device's bionic. Run with 'make TARGET=android-armv7
@@ -63,7 +83,16 @@ $(error unknown SAN='$(SAN)'; use asan or ubsan)
 endif
 override BUILD := $(BUILD)/san-$(SAN)
 override CFLAGS += $(SAN_CFLAGS)
+# The sanitizer runtime runs on the host, so this gate is the host plus the
+# sanitizer -- not the i686 gate, and never one unnamed "QEMU" result.
+GATE := host + sanitizer ($(SAN))
 endif
+
+# The one line that names the gate of a run: the gate, the runner and the
+# timeout per suite. The result repeats the gate, so a report never leaves open
+# which gate ran.
+RUNNER_CMD = $(if $(strip $(RUNNER)),$(strip $(RUNNER)),direct)
+GATE_LINE = gate: $(GATE) | runner: $(RUNNER_CMD) | timeout: $(TEST_TIMEOUT)s per suite
 
 LIBOBJ :=
 TESTS :=
@@ -100,13 +129,22 @@ SAN_REPORT := ERROR: (Address|Leak)Sanitizer|SUMMARY: (Address|Leak|UndefinedBeh
 
 ifeq ($(SAN),)
 # Each test runs under timeout(1) when available, so a hang fails instead of blocking.
+# The suites run under the runner of the gate: on i686 that is the user-mode gate
+# (qemu-i386 -cpu pentium2), so the target binary never runs on the host CPU, which
+# has SSE. The gate is one command -- 'make TARGET=i686 test' -- and the result
+# names the gate that ran.
 test: $(TESTS)
-	@to=; if command -v timeout >/dev/null 2>&1; then to="timeout $(TEST_TIMEOUT)"; fi; \
-	for t in $(TESTS); do echo "== $$t"; rc=0; $$to ./$$t || rc=$$?; \
+	@echo "$(GATE_LINE)"; \
+	if [ -n "$(RUNNER)" ] && ! command -v "$(firstword $(RUNNER))" >/dev/null 2>&1; then \
+	  echo "error: the runner '$(firstword $(RUNNER))' is not on PATH; the gate '$(GATE)' needs it" >&2; exit 1; fi; \
+	to=; if command -v timeout >/dev/null 2>&1; then to="timeout $(TEST_TIMEOUT)"; fi; \
+	for t in $(TESTS); do echo "== $$t"; \
+	  if [ -n "$(RUNNER)" ]; then echo "   run: $$to $(RUNNER) ./$$t"; fi; \
+	  rc=0; $$to $(RUNNER) ./$$t || rc=$$?; \
 	  if [ -n "$$to" ] && [ $$rc -eq 124 ]; then \
-	    echo "TIMEOUT: $$t (exceeded $(TEST_TIMEOUT)s)"; exit 1; fi; \
-	  if [ $$rc -ne 0 ]; then echo "FAIL: $$t (exit $$rc)"; exit 1; fi; \
-	done; echo "ALL TESTS PASSED"
+	    echo "TIMEOUT: $$t (exceeded $(TEST_TIMEOUT)s, gate: $(GATE))"; exit 1; fi; \
+	  if [ $$rc -ne 0 ]; then echo "FAIL: $$t (exit $$rc, gate: $(GATE))"; exit 1; fi; \
+	done; echo "ALL TESTS PASSED (gate: $(GATE))"
 else
 # With a sanitizer build the run goes through the sanitizer runner below: a report
 # has to fail the build, so 'make SAN=asan test' and 'make SAN=asan test-san' are
@@ -121,20 +159,24 @@ else
 test-san: $(TESTS)
 	@if [ -z "$(SAN_NM)" ] || ! command -v "$(SAN_NM)" >/dev/null 2>&1; then \
 	  echo "error: nm not found; cannot prove the suites are instrumented" >&2; exit 1; fi; \
+	echo "$(GATE_LINE)"; \
 	echo "sanitizer build: $(BUILD) (SAN=$(SAN))"; \
+	if [ -n "$(RUNNER)" ] && ! command -v "$(firstword $(RUNNER))" >/dev/null 2>&1; then \
+	  echo "error: the runner '$(firstword $(RUNNER))' is not on PATH; the gate '$(GATE)' needs it" >&2; exit 1; fi; \
 	to=; if command -v timeout >/dev/null 2>&1; then to="timeout $(TEST_TIMEOUT)"; fi; \
 	for t in $(TESTS); do echo "== $$t"; \
+	  if [ -n "$(RUNNER)" ]; then echo "   run: $$to $(RUNNER) ./$$t"; fi; \
 	  if ! { $(SAN_NM) -D "$$t" 2>/dev/null || $(SAN_NM) "$$t" 2>/dev/null; } \
 	     | grep -qE '__asan_init|__ubsan_'; then \
 	    echo "FAIL: $$t is not instrumented (no sanitizer runtime in the binary)"; exit 1; fi; \
-	  log=$$(mktemp); rc=0; $(SAN_ENV) $$to ./$$t >"$$log" 2>&1 || rc=$$?; cat "$$log"; \
+	  log=$$(mktemp); rc=0; $(SAN_ENV) $$to $(RUNNER) ./$$t >"$$log" 2>&1 || rc=$$?; cat "$$log"; \
 	  if grep -qE '$(SAN_REPORT)' "$$log"; then \
 	    echo "FAIL: $$t (sanitizer report)"; rm -f "$$log"; exit 1; fi; \
 	  rm -f "$$log"; \
 	  if [ -n "$$to" ] && [ $$rc -eq 124 ]; then \
-	    echo "TIMEOUT: $$t (exceeded $(TEST_TIMEOUT)s)"; exit 1; fi; \
-	  if [ $$rc -ne 0 ]; then echo "FAIL: $$t (exit $$rc)"; exit 1; fi; \
-	done; echo "ALL SANITIZER TESTS PASSED"
+	    echo "TIMEOUT: $$t (exceeded $(TEST_TIMEOUT)s, gate: $(GATE))"; exit 1; fi; \
+	  if [ $$rc -ne 0 ]; then echo "FAIL: $$t (exit $$rc, gate: $(GATE))"; exit 1; fi; \
+	done; echo "ALL SANITIZER TESTS PASSED (gate: $(GATE))"
 endif
 
 # Push the test binaries to an attached Android device and run them there (same output
