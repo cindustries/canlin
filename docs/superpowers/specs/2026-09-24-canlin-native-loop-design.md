@@ -76,6 +76,13 @@ subset.
 - **Android (NativeActivity):** `ALooper_pollOnce(timeout)` on the owner thread, with the
   loop's descriptors registered via `ALooper_addFd` — see the
   [Android adapter](2026-09-30-canlin-android-adapter-design.md) §3.
+- **Browser (WASM):** no descriptor and no blocking wait. The slice runs the steps of §3
+  from the browser callback: an animation frame (`requestAnimationFrame`) when the
+  runtime is dirty, a `setTimeout` for the nearest deadline, and nothing armed while
+  idle — the next browser event re-enters the iteration. `canlin_loop_run()` does not run
+  in the browser (the wait would return at once and the loop would spin), and the wake
+  pipe does not exist there: no second thread would ever wake it. See the
+  [browser adapter](2026-11-15-canlin-browser-adapter-design.md) §4.
 - **Test:** a wait function that advances the fake clock to the computed timeout and
   reports which scripted descriptors are ready.
 
