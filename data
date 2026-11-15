@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T00:45:32Z
+id: 150
+priority: medium
+status: backlog
+tags:
+- ui
+- shell
+- kbd
+title: 'UI: in a short model pane the on-screen keyboard covers the assistant''s button'
+updated: 2026-11-15T00:45:32Z
+---
+
+Befund der Plattform-Spur am 2026-11-15 (mit Zahlen im Bericht der Karte): die Modell-Pane teilt ihren Bereich in zwei Haelften (src/shell/shell.c:400 - die View des Modells oben, die des Moduls unten), und das Tastatur-Panel liegt UEBER dem Inhalt (src/ui/ui.c:2444). In einem kurzen Pane verdeckt das Panel damit den Button des Assistenten - der Benutzer kann die Frage nicht mehr absenden. Zu klaeren: soll das Panel den Inhalt verdraengen (der Bereich wird fuer das Panel reserviert) oder ueber ihm liegen (dann muss der Button aus dem verdeckten Bereich heraus)? Das ist eine Frage der Anordnung und damit der UI-Spur (src/ui/, src/render/, src/shell/), mit Zahlen und Screenshot-Beschreibung im Bericht der Plattform-Spur als Beleg.
