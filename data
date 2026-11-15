@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T01:01:23Z
+id: 162
+priority: low
+status: backlog
+tags:
+- test
+- ui
+title: 'Test: the limits written into the Lua source of the fixtures are literals
+  again'
+updated: 2026-11-15T01:01:23Z
+---
+
+Aus der Arbeit an k117 (2026-11-15): die C-seitigen Literale in den Fixtures sind jetzt ueber die Header-Konstanten benannt, aber in den Lua-Quelltexten der Fixtures stehen die Grenzen wieder als Zahl: t/ui/test_ui.c:755-767 ("513 do ui:separator", 257, "16 * 1024", 65, "rows = 21", "n(5)"/"n(4)"), t/ui/test_ui.c:1330-1341, t/ui/test_graph.c:730-753 (257, 17, 5, 257, 1025) und t/ui/test_graph.c:799-806 ("for i = 1, 256", "for k = 1, 1024", "%% 256"). Sie lassen sich nicht durch blossen Konstanten-Tausch ersetzen: der Lua-Programmtext und die Nadel im Log brauchen beide eine snprintf-Umstellung, das ist eine Aenderung der Fixture-Struktur und damit eine eigene Karte in der Test-Spur. Der Wert bleibt natuerlich dieselbe - die Karte ist eine Benennungs- und Herleitungsfrage, keine Verhaltensaenderung.
