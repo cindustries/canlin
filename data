@@ -1,0 +1,47 @@
+---
+claimed_at: 2026-11-15T00:28:36Z
+claimed_by: canlin-adr-auditor
+class: standard
+completed: 2026-11-15T00:28:36Z
+created: 2026-11-15T00:03:16Z
+id: 146
+priority: medium
+started: 2026-11-15T00:03:33Z
+status: done
+tags:
+- adr
+- docs
+- architecture
+title: 'ADR: the model''s view and the module''s view are two views, not one'
+updated: 2026-11-15T00:28:36Z
+---
+
+Am 2026-11-14 hat der Maintainer entschieden (Option c): das Modell bekommt eine eigene ui-View, nicht die des Moduls. Die Begruendung, wie sie im Code und in der Karte steht: eine Messung zeigte, dass ein Modul ueber den Legacy-Pfad still alle vier Arten von Zustand des Modell-Views primeieren konnte (Identity, Text, Eingabe, Revision); eine gemeinsame View macht die Grenze zwischen dem, was das Modell sagt, und dem, was das Modul behauptet, nicht mehr beweisbar. Die Entscheidung steht in den Karten k112 (Identitaetsraum), k114 (das eigene Fragefeld), k128 (der Shell haelt die View und rahmt sie), k129 (die App erzeugt sie), k130 (das Binding zeichnet in die Modell-View), k131 (Tasten und Text) und k132 (Zeitstempel). Die Umsetzung ist im Gange, die Spec-Saetze (UI §2/§4, Shell §1/§3) sind noch nicht geschrieben - der ADR soll die Entscheidung und ihre Begruendung festhalten, nicht den Stand der Umsetzung. Der ADR-Auditor bestaetigt die Begruendung aus Code und Git-Historie und schreibt sie unter docs/adr/ (das Verzeichnis existiert noch nicht).
+
+ADR-Auditor laeuft: Card gelesen, Recherche in Code und Git-Historie startet. Ziel: docs/adr/ anlegen, Trennung Modell-View/Modul-View als Entscheidung festhalten.
+
+ADR 0001 geschrieben: docs/adr/0001-model-view-and-module-view-are-two-views.md (neues Verzeichnis docs/adr/, Nummerierung 0001 - es gab keine ADRs im Repo). Hausstil nach den ADRs der Getty-Repos (Status/Date/Tags-Kopf, Context, Decision, Rationale, Consequences, Alternatives). Sprache Englisch, passend zu den Specs dieses Repos.
+
+Die Begruendung am Code geprueft, nicht nur von der Karte uebernommen:
+- Der Legacy-Pfad: canlin.view.draw() pushte die View des Moduls und zeichnete das Modell hinein (src/assistant/binding.c:36-55, v = canlin_module_view(m) :43). Eine canlin_ui_view = eine Zustandshaltung: Slot-Tabelle, Fokus, Fokusreihenfolge, Graph-Zustaende, Framezaehler (src/ui/ui.c:67-141).
+- Die Identitaet: opts.id oder Label+Ordinal (src/ui/ui.c:1672-1697); das Modell traegt r<rev>:<id> (src/assistant/view.c:1831-1840). Revision ist oeffentlich (binding.c:51), die Widget-ids stehen im Submission-Payload (view.c:1670-1700) - ein Modul kann also zielen.
+- Der Traeger des Frame-uebergreifenden Zustands: slots_evict (src/ui/ui.c:1197-1208, aufgerufen :1322) laesst die im Frame benutzten Slots in den naechsten Frame leben, wo identity() sie findet und nicht die Duplikatpruefung ausloest.
+- Die vier primebaren Zustandsarten am Code bestaetigt: Sektion offen (ui.c:2329-2337), Choice expanded (ui.c:2101, :2116), Tastaturfokus (ui.c:1873, :1945, Frame-Ende :1329-1341), Graph-Pan (ui.c:2242-2246 -> graph.c:480-509, Pan :1189-1200, :1217-1218).
+
+BEFUND, Abweichung von der Auftragsbeschreibung: die Auftragsbeschreibung nennt als vier primebare Zustandsarten 'Identity, Text, Eingabe, Revision'. Das stimmt so nicht - die Karte k112 und der Code sagen: der Feld-TEXT wird nicht geerbt, weil er nicht in der Slot-Tabelle liegt, sondern aus dem Wert des Aufrufers beim Zeichnen kommt (ui.c:1943) bzw. im Modell-View aus dem eigenen Zustand des Assistant (view.c:1374-1378, gezeichnet :2158). Primebar sind die vier identitaetsschluesseligen Arten: Sektion offen, Choice expanded, Fokus, Graph-Pan. Der ADR schreibt die gepruefte Fassung.
+
+BEFUND, Luecke in den Specs (nicht angefasst, doc-writer arbeitet an den Specs): die Trennung steht in den Specs noch nicht. UI §2 kennt nur 'View = the module's content area, one vertical scroll region owned by the core' (ui-design.md:30-32), UI §4 setzt die beiden schon als getrennt voraus, sagt aber nicht, dass die Modell-View eine eigene View ist (ui-design.md:130-134), Shell §1 kennt nur 'One view per module instance' (shell-design.md:20-21), Shell §3 sagt nicht, was der Model-View-Frame rahmt (shell-design.md:53-54). Der ADR listet die vier SPEC-Saetze, die die Entscheidung verpflichtet, unter 'The spec sentences this decision obliges'.
+
+BEFUND, offene Frage zur Absicherung: im Baum liegt kein Regressionstest, der schlaegt, wenn die beiden Views wieder zusammengelegt werden. Die Messung vom 2026-11-14 ist nur auf der Karte k112 dokumentiert; t/shell/test_shell.c test_model_view_pane prueft die Shell-Seite (zwei Rechtecke, Eingabe-Routing), aber nicht, dass ein Modul den Zustand der Modell-View nicht mehr primeieren kann. Ein Test, der das festnagelt, ist nicht beauftragt - bleibt offen.
+
+Offen gelassen: der Tastaturfokus der beiden Views (k131) und die Zeitstempel der Ereignisse in der Modell-View (k132) stehen im ADR als Konsequenzen, die zu entscheiden sind.
+
+Der ADR haelt die Entscheidung und ihre Begruendung fest, nicht den Stand der Umsetzung. Kein Commit, Karte nicht auf done.
+
+ADR 0001 liegt unter docs/adr/0001-model-view-and-module-view-are-two-views.md; docs/adr/ war neu und ist angelegt. Enthaelt: Status/Date/Tags, Context (der Legacy-Pfad, die Identitaetsordnung, der Traeger slots_evict, die Messung vom 2026-11-14 mit Datei und Zeile fuer die vier primebaren Zustandsarten), Decision (Option c: die Modell-View bekommt ihre eigene canlin_ui_view - eigene Slot-Tabelle, eigene Identitaetsraeume, eigene Rechtecke), Rationale (die Grenze zwischen 'was das Modell sagt' und 'was das Modul behauptet' muss beweisbar sein; die View-Grenze ist die Grenze, kein neuer Guard in der UI-Schicht), Consequences (inkl. der zwei offenen Fragen k131 Tastaturfokus und k132 Zeitstempel), die vier SPEC-Saetze, die die Entscheidung verpflichtet, und die fuenf verworfenen Alternativen a-e.
+
+Befunde im Bericht an den Main-Agenten: (1) die Auftragsbeschreibung nennt als primebare Zustandsarten 'Identity, Text, Eingabe, Revision' - das trifft nicht zu, der Feld-Text wird nicht geerbt; der ADR traegt die am Code geprueften vier Arten (Sektion offen, Choice expanded, Fokus, Graph-Pan). (2) Die Specs enthalten die Trennung noch nicht (UI §2/:30-32, UI §4/:130-134, Shell §1/:20-21, Shell §3/:53-54) - Luecke fuer den doc-writer, nicht von mir angefasst. (3) Kein Regressionstest im Baum, der ein Zusammenlegen der Views wieder schlagen wuerde.
+
+Nur docs/adr/ angelegt, keine Specs und kein Code angefasst, kein Commit.
+
+2026-11-15 review (main): gelesen und akzeptiert. Der ADR haelt die Entscheidung fest, nicht den Umsetzungsstand, und belegt die Begruendung am Code - die vier primeierbaren Zustandsarten mit Datei und Zeile, der Legacy-Pfad (src/assistant/binding.c:36-55), die Tatsache, dass der Text nicht geerbt wird, sondern aus dem Wert des Aufrufers kommt. Die Korrektur an meinem Auftrag ist uebernommen: die vier primeierbaren Arten sind die identitaetsschluesseligen (Sektion offen, Auswahl expandiert, Fokus, Graph-Pan), nicht Identitaet/Text/Eingabe/Revision. Committet als 66e6bf2. Die drei Befunde sind als Karten erfasst: die Spec-Saetze (k147), ein Regressionstest, der die Trennung festnagelt (k148), und die Tatsache, dass die Trennung vom Anhaenger gehalten wird, nicht von der ui-Schicht (im ADR unter Consequences).
