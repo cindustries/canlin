@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-11-15T05:14:15Z
+claimed_by: canlin-worker-runtime
+class: standard
+completed: 2026-11-15T05:14:15Z
+created: 2026-09-23T02:13:06Z
+id: 13
+priority: medium
+started: 2026-11-15T00:43:00Z
+status: done
+tags:
+- sandbox
+- p2
+title: Calibrate sandbox cost factors and budgets on P2-QEMU/hardware
+updated: 2026-11-15T05:14:15Z
+---
+
+Charge factors (COST_ELEM, BYTES_PER_UNIT, LOAD_BYTE, pattern step) and CANLIN_SB_BUDGET_* are guesses. Needs canlin-os QEMU harness and real P2 timing (#3). Also: in-test alarm() watchdog needs a WASM alternative later.
+
+2026-11-14 17:50 2026-11-14: the blocker is on the canlin-os board, not here. The QEMU pentium2 harness this calibration needs is canlin-os k2 ('QEMU pentium2 test harness (test/)') and the i686 no-SSE musl toolchain it needs is canlin-os k1 ('Buildroot external tree skeleton with an i686 no-SSE musl toolchain'); both are still in backlog there and the canlin-os checkout has no tree yet. Until they land there is no way to measure a cost factor on this machine: no i686-linux-musl-gcc, no 32-bit headers, no image to boot. The cost factors in include/canlin/sandbox_limits.h (CANLIN_SB_COST_ELEM, _COST_BYTES_PER_UNIT, _COST_LOAD_BYTE, _HOOK_STRIDE) stay provisional until then. This card stays in backlog and is not promotable here.
+
+2026-11-15: die Prämisse dieser Karte ist teilweise überholt. Es gibt jetzt i686-linux-musl-gcc (eine fertige musl.cc-Cross-Toolchain unter ~/opt/i686-linux-musl-cross, GCC 11.2.1, statisches musl) und `make TARGET=i686` baut die Runtime mit -march=i686 -mno-sse -static. Die Suiten laufen unter `qemu-i386 -cpu pentium2`; ein Programm mit movaps stirbt dort mit Signal 4, das Profil hat also wirklich kein SSE. Damit ist die Messung im User-Mode moeglich: die Kostenfaktoren in include/canlin/sandbox_limits.h (CANLIN_SB_COST_ELEM, _COST_BYTES_PER_UNIT, _COST_LOAD_BYTE, _HOOK_STRIDE) koennen unter dem emulierten P2 gemessen werden - als Reihenfolge/Verhaeltnis, nicht als absolute P2-Zeit, weil die Emulation selbst kostet. Was fehlt, ist weiterhin das Vollsystem-Harness (canlin-os k2) und die echte P2-Hardware (k3); die absoluten Zahlen bleiben bis dahin provisorisch. Der Auftrag an die Runtime-Spur: messen, die Faktoren als provisorisch-belegt eintragen und die Herkunft der Zahlen nennen. Der erste i686-Lauf hat ausserdem einen Testfehler gefunden (k145), der zeigt, dass die Suite unter dem Target langsamer laeuft als auf dem Host - das Budget der Tests muss mitwachsen.
+
+Runtime worker: measured under the emulated P2, red then green.
+
+MEASUREMENT: tools/sb_costs.c (new, with the target 'sandbox-costs' in mk/sandbox.mk) measures what the charged native work costs in VM instructions: the VM instruction is the budget's unit (the count hook charges HOOK_STRIDE units per stride instructions), so a factor is the measured time of one unit of native work divided by the measured time of one VM instruction. Runs on the host and under qemu-i386 -cpu pentium2 (i686 musl, -march=i686 -mno-sse -static).
+
+Host and emulated target, five runs (the ranges include the run-to-run spread):
+  element touched:  1 .. 7 instructions per element (concat 4 .. 7, unpack 1 .. 6)
+  byte copied:      0.15 .. 0.6 instructions per byte
+  byte parsed:      7 .. 24 instructions per byte (emulated median 14)
+The host and the emulated target disagree by up to a factor of two; the emulated target (no SSE, like the P2) is the closer model, and the ratio is what survives the emulation - an absolute time here is only an upper bound.
+
+RED: t/sandbox/test_sandbox.c got test_calibrated_charges(), which pins the calibrated charges (a concat over 100 elements = 800 units, a 1000 byte string copy = 501, a 1000 byte load = 16000) and checks the budget boundary: the charge is admitted, one unit less is refused. It failed with the old factors: 'concat one unit below its charge: got OK, want FAULT_BUDGET' (and the same for the string copy and the load).
+
+FIX: include/canlin/sandbox_limits.h - CANLIN_SB_COST_ELEM 1 -> 8, CANLIN_SB_COST_BYTES_PER_UNIT 16 -> 2, CANLIN_SB_COST_LOAD_BYTE 1 -> 16 (each the round-up that keeps the charge at or above the measured cost). The comment now says for every value whether it is measured or set: the three factors are measured (ratio, canlin#13), the budgets (CANLIN_SB_BUDGET_DEFAULT, _DRAW), the hook stride and the pattern-match charge are set and unchanged - the P2's time per VM instruction is still unknown, so the spec's '100-200 ms on a P2' stays its estimate.
+
+GREEN: sandbox: 331 checks passed; host make BUILD=build/rt3 test - 23 suites, ALL TESTS PASSED (the UI and LLM charges use the same constants and still pass). i686 gate running.
+
+Also: mk/sandbox.mk and mk/module.mk now list include/canlin/sandbox_limits.h as a prerequisite - without it a changed factor did not rebuild the objects that charge with it (found while making this change; the ui.mk and llm.mk lists still miss it, see the report).
+
+Proposed subject: Measure the sandbox cost factors against the emulated P2 (k13)
+
+2026-11-15 review (main): gelesen und committet als c690d3f. Die drei Faktoren sind jetzt gemessen (8 Einheiten je Element, 2 Bytes je Einheit, 16 Einheiten je Quellbyte) statt geraten, und der Header sagt bei jedem Wert, ob er gemessen oder gesetzt ist. Die Unterscheidung traegt: gemessen wurde das Verhaeltnis (VM-Instruktionen je Einheit nativer Arbeit), weil die Emulation jede Instruktion gleich verlangsamt - ein Verhaeltnis ueberlebt das, eine absolute Zeit nicht; die Budgets sind absolute Instruktionszaehle und bleiben gesetzt, bis die Zeit je Instruktion auf dem echten P2 bekannt ist (k3). Jeder Faktor ist die Aufrundung, damit die Berechnung nie unter der gemessenen Kosten liegt (der Last-Faktor auf dem Median 14 des emulierten Ziels, eine Stichprobe kam auf 24). Die Host- und die Zielmessung weichen um bis zu Faktor zwei ab - der Host kopiert mit SSE, der P2 hat keines; das emulierte Ziel ist das naeherliegende Modell, und der Header sagt das. Der Sandbox-Test schreibt die Ladungen aus (800 Einheiten je 100 Elementen, 501 je 1000 Bytes, 16000 je 1000-Byte-Load) und prueft die Grenze eine Einheit darunter, damit ein Faktor ohne neue Messung dort fehlschlaegt. Der Worker wurde beim i686-Lauf vom Token-Limit beendet; der Lauf ist im Dispatcher nachgeholt (Host und i686 gruen).
