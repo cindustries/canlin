@@ -1,0 +1,61 @@
+---
+claimed_at: 2026-11-15T17:44:11Z
+claimed_by: canlin-test-writer
+class: standard
+completed: 2026-11-15T17:44:11Z
+created: 2026-11-14T23:57:55Z
+id: 143
+priority: high
+started: 2026-11-15T00:30:36Z
+status: done
+tags:
+- build
+- test
+- i686
+title: 'Build: the i686 suites have no runner, so the target gate cannot be repeated'
+updated: 2026-11-15T17:44:11Z
+---
+
+The i686 target builds (i686-linux-musl-gcc with -march=i686 -mno-sse -static), but make TARGET=i686 test would run the i386 binaries on the host, where the CPU has SSE - the very thing the target must not use. The Makefile has no runner hook. It needs one: a RUNNER that is qemu-i386 -cpu pentium2 for TARGET=i686, used by the test and test-san loops, so the gate is one command. The profile is proven to work: a program with movaps dies with signal 4 (Illegal instruction) under qemu-i386 -cpu pentium2 and runs fine under plain qemu-i386 - so the gate catches exactly what it should. Found on 2026-11-15 while making the i686 target buildable for the first time.
+
+2026-11-15 (dispatcher): der erste i686-Lauf ist gelaufen und belegt, wofuer die Karte da ist. `make TARGET=i686` (Toolchain unter ~/opt/i686-linux-musl-cross, -march=i686 -mno-sse -static) baut alle Suiten; unter `qemu-i386 -cpu pentium2` liefen 22 Suiten gruen und eine rot: t/net/http_test mit 5 von 1152 Checks (ein festes 300-ms-Budget in der Suite, nicht der Produktpfad - k145). Sonst kein Fehler, kein Illegal instruction, kein Haenger. Der Runner-Hook soll den Befehl so festhalten, dass ein Lauf wiederholbar ist.
+
+2026-11-15 (dispatcher): zwei Befunde aus dem i686-Lauf kommen hierher, weil beide am Runner haengen.
+1) Das TEST_TIMEOUT des Makefiles ist fuer das Target zu kurz: t/ui/test_ui braucht unter qemu-i386 -cpu pentium2 rund 253 s, das Makefile bricht nach 120 s ab (timeout(1) je Suite). Der Timeout muss zielabhaengig sein - auf dem Host bleibt 120 s richtig, im Target braucht es mehr. Sonst meldet der Target-Lauf einen Timeout, den es nicht gibt.
+2) Der Lauf zeigt, was der Hook leisten muss: `qemu-i386 -cpu pentium2` als RUNNER fuer TARGET=i686, mit eigenem Timeout, und der Name des gelaufenen Gates im Ergebnis. Ein Gate, das man von Hand tippt, wird nicht wiederholt - und genau das ist der Zweck dieser Karte.
+Zum Nachweis, dass das Profil streng ist: ein i386-Binary mit movups stirbt unter -cpu pentium2 mit "Illegal instruction" und laeuft auf dem Standard-CPU durch. Achtung fuer eigene Pruefungen: eine naive SSE-Pruefung kompiliert zu x87 und beweist nichts (der Worker hat genau diesen Fehlschluss zweimal gemacht, bevor er es richtig hatte).
+
+2026-11-15 05:47 Der Runner-Hook steht im top-level Makefile (die einzige Datei meiner Spur). Drei neue Variablen: RUNNER ist der Befehl vor dem Suite-Binary (leer auf dem Host, qemu-i386 -cpu pentium2 fuer TARGET=i686), GATE ist der Name des gelaufenen Gates (host / host + sanitizer (asan) / i686 user-mode), TEST_TIMEOUT folgt dem Ziel (120 s Host, 600 s i686). Beide Schleifen (test und test-san) laufen ueber den Hook; die Timeout- und FAIL-Meldungen nennen das Gate; die Abschlusszeile nennt es mit; ein fehlender Runner ist ein Fehler statt eines stillen Rueckfalls auf den Host. Der Gate-Name enthaelt nie ein blankes QEMU: das User-Mode-Gate und das Vollsystem-Gate des canlin-os-Harness bleiben zwei Namen (System-Design §2).
+
+Belege, alle mit dem neuen Makefile:
+- Host, Arbeitsbaum: make BUILD=build/tw6 test -> ALL TESTS PASSED (gate: host), exit 0.
+- Host, sauberer HEAD-Stand (Snapshot mit dem neuen Makefile): ALL TESTS PASSED (gate: host), exit 0.
+- Sanitizer: make SAN=asan BUILD=build/tw6-asan test -> ALL SANITIZER TESTS PASSED (gate: host + sanitizer (asan)), exit 0.
+- i686 User-Mode an HEAD: make TARGET=i686 BUILD=build/i686-head test -> 12 Suiten gruen, dann t/net/http_test rot (7 von 1271 Checks): das ist die bekannte Suite mit dem festen 300-ms-Budget (k145), nicht der Hook. Die Schleife stoppt dort, wie sie soll.
+- Der Hook ist streng: ein i386-Binary mit einem echten movaps laeuft auf dem Host (exit 0) und stirbt unter dem Runner mit Signal 4 (exit 132). Durch die Makefile-Schleife: FAIL: <suite> (exit 132, gate: i686 user-mode) - Illegal instruction, kein Timeout.
+- Der Timeout braucht den Zielwert: t/ui/test_ui laeuft mit 600 s durch (ui: 13133 checks passed, ALL TESTS PASSED (gate: i686 user-mode)) und bricht mit dem Host-Wert 120 s ab (TIMEOUT: build/i686-head/t/ui/test_ui (exceeded 120s, gate: i686 user-mode)).
+- Fehlender Runner: error: the runner 'qemu-i386-not-here' is not on PATH; the gate 'i686 user-mode' needs it.
+
+Ein Fund, der nicht in meine Spur geht: im Arbeitsbaum (mit der laufenden k130-Arbeit an src/assistant/ und t/app/test_assistant.c) ist t/app/test_assistant unter dem i686-Gate rot (4 von 351 Checks), an HEAD ist dieselbe Suite gruen (351 Checks passed). Der Hook faengt also den Zwischenstand der Nachbarspur; das gehoert an die Nachbarspur, nicht hierher.
+
+2026-11-15 05:48 Fertig. Das Makefile hat den Runner-Hook; das i686-Gate ist ein Kommando und nennt sich selbst.
+
+Die drei Kommandos, die jetzt je ein Gate sind:
+- Host: make BUILD=build/tw6 test -> ALL TESTS PASSED (gate: host), exit 0.
+- Sanitizer: make SAN=asan BUILD=build/tw6-asan test -> ALL SANITIZER TESTS PASSED (gate: host + sanitizer (asan)), exit 0.
+- i686 User-Mode: PATH="$HOME/opt/i686-linux-musl-cross/bin:$PATH" make TARGET=i686 BUILD=build/i686-tw test. Der Runner greift von selbst; die Ausgabe nennt das Gate (i686 user-mode) und das Vollsystem-Gate wird nie mitgemeint. Der Lauf ist an HEAD rot bei t/net/http_test (7 von 1271 Checks) - das ist k145 (festes 300-ms-Budget in der Suite), nicht der Hook; die Schleife stoppt dort. Im Arbeitsbaum stoppt der Lauf frueher bei t/app/test_assistant, weil dort die k130-Arbeit uncommitted liegt (an HEAD ist die Suite gruen).
+
+Was die Karte verlangt hat, ist damit erledigt: der Runner (qemu-i386 -cpu pentium2) in beiden Schleifen, ein zielabhaengiger Timeout (Host 120 s, Ziel 600 s - der gemessene Worst Case ist ~253 s, der Timeout nennt das gelaufene Gate), und der Name des Gates im Ergebnis. Das Ergebnis sagt nie nur QEMU.
+
+Vorschlaege fuer Karten, die der Dispatcher anlegen kann (ich habe sie nicht angelegt, das Board gehoert dem Main-Agent):
+- Docs (canlin-doc-writer): System-Design §12 sagt noch 'The i686 suites have no runner hook yet - the user-mode gate is started by hand'. Das ist jetzt ueberholt; §2 (die Gate-Tabelle) stimmt schon.
+- Test (Nachbarspur Net/LLM oder UI): t/app/test_assistant ist mitten in der k130-Arbeit unter dem i686-Gate rot. Die Spur sollte das Gate vor dem Handoff laufen lassen, jetzt wo es ein Kommando ist.
+- Kleinigkeit, nicht dringend: die Test-Schleife haengt ein ./ vor den Suite-Pfad, ein absoluter TESTS-Pfad aus der Kommandozeile scheitert daran (vorbestehend, vor der Karte schon so).
+
+Nicht angefasst: das Vollsystem-Gate (qemu-system-i386, canlin-os k1/k2) bleibt offen; die Android-Geraetespur (tools/android-test.sh) nutzt den Hook nicht und benennt kein Gate - die Karte nennt nur Host, Sanitizer und i686-User-Mode.
+
+Geaenderte Datei: nur /home/getty/dev/canlin/Makefile. Kein Commit - der Main-Agent committet. Proposed Subject: Give the i686 gate a runner so it is one repeatable command (k143)
+
+2026-11-15 review (main): gelesen und committet als 59d2c58. Der Hook macht aus dem Target-Gate ein wiederholbares Kommando: RUNNER (qemu-i386 -cpu pentium2 im Target), ein GATE-Name je Lauf (host / host + sanitizer (asan) / i686 user-mode) und ein Timeout je Gate (120 s auf dem Host, 600 s im Target, wo die groesste Suite rund 253 s braucht). Ein fehlender Runner auf dem PATH ist ein lauter Fehler, kein stilles Zurueckfallen auf die Host-CPU, und der Gate-Name ist nie ein nacktes "QEMU" - das User-Mode-Gate und das Vollsystem-Gate des canlin-os bleiben zwei Namen (System-Design §2).
+Der Worker hat die Strenge des Profils selbst belegt: ein i386-Binary mit echtem movaps (Assembler, keine naive C-Sonde) laeuft auf dem Host durch und stirbt unter dem Runner mit Signal 4 - der Hook meldet "FAIL (exit 132, gate: i686 user-mode)", also eine illegale Instruktion, keinen Timeout. Und das Timeout: t/ui/test_ui besteht mit 600 s und scheitert mit den alten 120 s ("TIMEOUT ... exceeded 120s, gate: i686 user-mode").
+Zwei Befunde des Workers sind erfasst: die System-Design-Spec §12 sagt noch "The i686 suites have no runner hook yet - the user-mode gate is started by hand" (das ist jetzt veraltet, Karte fuer die Doc-Spur), und die Android-Geraetewerkzeuge (tools/android-test.sh) benutzen den Hook nicht und nennen kein Gate.
