@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-15T01:01:29Z
+id: 163
+priority: low
+status: backlog
+tags:
+- test
+- runtime
+- ui
+title: 'Test and runtime: the limit messages and the needles that match them live
+  in two lanes'
+updated: 2026-11-15T01:01:29Z
+---
+
+Aus der Arbeit an k117 (2026-11-15): die Nadeln, an denen die Tests die Limit-Meldungen erkennen, sind C-Zeichenketten in der Test-Spur, die Meldungen selbst entstehen in der Runtime-Spur: src/ui/ui.c:1640, :1652, :1935, :2282 und src/ui/graph.c:146, :269, :288, :293, :307, :395. Wenn sich eine Grenze aendert, muss die Zahl in beiden Staellen mitgehen - heute ist das Handarbeit ueber zwei Spuren. Die Hausregel fuer die Zahl ist: sie steht genau einmal, in include/canlin/<subsystem>_limits.h (k127). Die Frage ist, wie die Meldung ihre Zahl bezieht: wenn die Runtime die Konstante in die Meldung einsetzt, ist die Nadel der Test aus derselben Konstante gebaut und die Kopplung ist automatisch - das waere die ehrliche Loesung. Zwei Karten, wenn das Haus es so will: eine in der Runtime-Spur (die Meldung nimmt ihre Zahl aus dem Header) und eine in der Test-Spur (die Nadel folgt).
