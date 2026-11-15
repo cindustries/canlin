@@ -8,10 +8,13 @@ tool calls. Inference is remote, while a self-hosted server is optional for gate
 speech or sync. The specs come first, under `docs/superpowers/specs/`; the runtime they
 describe now stands in `src/` with its suites in `t/`.
 
-Build and test: `make`, `make test` (host); `make TARGET=i686` plus the canlin-os harness
-under `qemu-system-i386 -cpu pentium2 -m 1024`; `make TARGET=android-armv7 test-device` on a
-device. WASM/backend checks are additional gates, not substitutes. The host runs SSE, the
-target does not — a green host test is not a green i686 test.
+Build and test: `make`, `make test` (host); `make TARGET=i686` (needs `i686-linux-musl-gcc`
+on PATH — a prebuilt one sits in `~/opt/i686-linux-musl-cross`) and the suites run under
+`qemu-i386 -cpu pentium2`, user-mode; the canlin-os harness under
+`qemu-system-i386 -cpu pentium2 -m 1024` is the full-system gate — name which one ran;
+`make TARGET=android-armv7 test-device` on a device. WASM/backend checks are additional
+gates, not substitutes. The host runs SSE, the target does not — a green host test is not
+a green i686 test.
 
 ## The agent team
 
