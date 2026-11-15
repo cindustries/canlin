@@ -1,0 +1,64 @@
+---
+claimed_at: 2026-11-15T17:59:21Z
+claimed_by: canlin-test-writer
+class: standard
+completed: 2026-11-15T17:59:21Z
+created: 2026-11-15T00:56:56Z
+id: 155
+priority: high
+started: 2026-11-15T17:46:23Z
+status: done
+tags:
+- build
+- browser
+- toolchain
+title: 'Toolchain: the emsdk on this host - version, place, owner'
+updated: 2026-11-15T17:59:21Z
+---
+
+Aus der Recherche k151: es gibt kein emcc, kein emcmake und kein ~/emsdk auf diesem Host, und kein Chromium/Firefox (nur node v24.19.0). Die System-Design-Spec behandelt die Werkzeugkette ausdruecklich als fruehe Abhaengigkeit, nicht als presumed host feature (system-design:459-460, dort fuer den musl-i686-Toolchain). Fuer den emsdk gibt es keinen Owner und keinen Ort. Die Karte gehoert zur Test-Spur: eine gepinnte emsdk-Version an einem festen Ort installieren (nach dem Muster des i686-Toolchains unter ~/opt/i686-linux-musl-cross, ohne root), und `make TARGET=wasm` findet sie ohne Handeingriff. Ohne das ist keine WASM-Karte ausfuehrbar.
+
+2026-11-15 (dispatcher): die Werkzeugkette ist installiert und vom Dispatcher nachgeprueft - emcc 7.0.0 (777e6e5) unter ~/opt/emsdk, emcmake daneben, chrome-headless-shell und chrome-linux64 unter ~/opt/chrome-for-testing. Der headless Browser fuehrt WASM aus (WebAssembly.instantiate auf einem Minimalmodul, der DOM zeigt danach den Text). Die Pfade stehen jetzt im README. Der Worker wurde beendet, bevor er seinen Bericht absetzte - die Karte bleibt offen, bis die Karte k156 (make TARGET=wasm) daraus eine Zeile im Makefile macht und die Gates laufen.
+
+Werkzeugkette installiert (ohne root, unter ~/opt, nichts committet).
+
+emsdk 7.0.0 unter ~/opt/emsdk
+- emsdk-Tag 7.0.0 == emscripten 7.0.0 (emscripten-Commit 6afbd83493d647051772d491124187d4e9a0cda9)
+- emcc --version: emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 7.0.0 (777e6e5db7b4990bcaeb1b9998ed642cc84e6629)
+- emcmake --version druckt nur die eigene Usage (es hat keine Version); emcmake cmake --version: cmake version 3.31.6
+- Node des emsdk: 24.19.0
+- Aktivieren: source ~/opt/emsdk/emsdk_env.sh - oder ohne Shell-Profil ueber den absoluten Pfad ~/opt/emsdk/upstream/emscripten/emcc: emcc und emcmake loesen ihre Konfiguration relativ zu ihrem Verzeichnis auf und laufen auch in einer sauberen Umgebung
+- Install (ohne root, der emsdk installiert sich in sein eigenes Verzeichnis): git clone --depth 1 --branch 7.0.0 https://github.com/emscripten-core/emsdk.git ~/opt/emsdk; ~/opt/emsdk/emsdk install 7.0.0; ~/opt/emsdk/emsdk activate 7.0.0
+
+Headless Chromium: Chrome for Testing 157.0.8103.78 unter ~/opt/chrome-for-testing/157.0.8103.78 (chrome-linux64/chrome und chrome-headless-shell-linux64), Launcher: ~/opt/chrome-for-testing/bin/chrome-headless
+- Der Host hatte alle Bibliotheken schon (nss, nspr, atk, gbm, xkbcommon, asound, pango, cairo, cups, drm): kein install, kein root, nichts ausserhalb von ~/opt
+- Gemessen (CDP): Canvas2D ok, WebGL ok, WebGL2 ok, IndexedDB ok, WebAssembly ok, fetch ok. SharedArrayBuffer fehlt: es braucht eine cross-origin isolated page (COOP same-origin + COEP require-corp) - das ist die Aufgabe des Gate-Servers
+- Eine Seite, die noch about:blank ist, hat eine opake Herkunft und verweigert IndexedDB: das Gate muss erst navigieren
+
+Makefile (Build-Spine, meine Spur): TARGET=wasm findet die Werkzeugkette ohne Handeingriff
+- EMSDK ?= $(HOME)/opt/emsdk, EMSDK_VERSION ?= 7.0.0, EMCC, EMCMAKE, EMSDK_NODE
+- make wasm-toolchain prueft emcc und emcmake und nennt bei Fehl die Installationskommandos
+- Fuer wasm fliegt -g raus: DWARF zwingt binaryen in den limited optimization mode, -Werror macht daraus 'running limited binaryen optimizations because DWARF info requested'
+- Gate: make BUILD=build/tw7 test gruen (gate: host)
+
+Zwei Befunde fuer k156:
+- Der emscripten-Stack ist 64 KB: die ev-Suite laeuft damit in einen Stack-Ueberlauf ('Stack overflow detected'), mit -sSTACK_SIZE=1048576 laeuft sie unter node gruen (test_ev: all checks passed). Der wasm-Link braucht also -sSTACK_SIZE.
+- emcc schreibt den JS-Glue unter dem Ausgabenamen ohne Endung: '-o foo' ergibt foo (Glue) und foo.wasm.
+
+Alle Notizen stehen auch in ~/opt/canlin-toolchain.md.
+
+Fertig: die Werkzeugkette steht gepinnt unter ~/opt, ohne root, nichts davon im Repo.
+
+- emsdk 7.0.0 in ~/opt/emsdk (emsdk-Tag 7.0.0, emscripten 7.0.0 / 6afbd83493d647051772d491124187d4e9a0cda9); emcc --version: 7.0.0 (777e6e5db7b4990bcaeb1b9998ed642cc84e6629); emcmake --version druckt die Usage, emcmake cmake --version: cmake 3.31.6; Node des emsdk 24.19.0
+- Chrome for Testing 157.0.8103.78 in ~/opt/chrome-for-testing/157.0.8103.78, Launcher ~/opt/chrome-for-testing/bin/chrome-headless; Canvas2D, WebGL, WebGL2, IndexedDB, WASM und fetch im Browser gemessen
+- Aktivieren: source ~/opt/emsdk/emsdk_env.sh oder der absolute Pfad ~/opt/emsdk/upstream/emscripten/emcc (laeuft auch ohne Shell-Profil); die Notizen stehen in ~/opt/canlin-toolchain.md
+
+Die Spur im Repo ist der Makefile-Teil: TARGET=wasm setzt den emsdk am Pfad, ohne Handeingriff und ohne gesetzten PATH, mit dem Ziel wasm-toolchain, das bei fehlendem emsdk laut mit den Installationskommandos abbrechen soll. Fuer wasm fliegt -g raus (DWARF vs. binaryen unter -Werror). Der Rest der Datei bleibt unberuehrt, der Gast-Zweig (src/app, src/backend, t/net) gehoert einem anderen Agenten.
+
+Gate: make BUILD=build/tw7 test - ALL TESTS PASSED (gate: host). Nur der Host-Gate, kein i686 und kein Browser.
+
+Fuer k156: der wasm-Link braucht -sSTACK_SIZE (emscripten stapelt 64 KB, die ev-Suite laeuft damit in einen Stack-Ueberlauf; mit 1 MB laeuft sie unter node gruen), und emcc schreibt den JS-Glue unter dem Ausgabenamen ohne Endung. Fuer k161: der Browser-Pfad und der Launcher stehen oben; SharedArrayBuffer braucht eine cross-origin isolated page, und IndexedDB verweigert eine Seite, die noch about:blank ist.
+
+Ich habe das Makefile angefasst, weil gerade kein anderer Agent daran arbeitet (der parallele Agent liegt in src/app, src/backend, include/canlin und t/net). Falls k156 parallel startet: der emsdk-Block und das Ziel wasm-toolchain sind die einzigen Stellen, an denen wir uns treffen koennten.
+
+2026-11-15 review (main): committet (Makefile) und die Werkzeugkette vom Dispatcher nachgeprueft: emcc 7.0.0 (777e6e5) unter ~/opt/emsdk, emcmake daneben, chrome-headless-shell und chrome-linux64 unter ~/opt/chrome-for-testing; der headless Browser fuehrt WASM aus (WebAssembly.instantiate auf einem Minimalmodul, der DOM zeigt danach den Text). Die Pfade stehen im README. Die Makefile-Aenderung nimmt emcc/emcmake ueber den absoluten Pfad (kein gesourctes Skript noetig), pinnt die Version, meldet eine fehlende Werkzeugkette laut mit der Installationsanweisung und filtert die Debug-Info weg - weil emcc ueber binaryen linkt und DWARF binaryen in den eingeschraenkten Optimierungsmodus zwingt, was -Werror zum Buildfehler macht. Der Rest der Karte (die Zeile im Makefile, die TARGET=wasm baut) ist die Karte k156.
