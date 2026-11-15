@@ -1,0 +1,50 @@
+---
+claimed_at: 2026-11-15T05:13:55Z
+claimed_by: canlin-worker-netllm
+class: standard
+completed: 2026-11-15T05:13:55Z
+created: 2026-09-23T17:41:14Z
+id: 58
+priority: medium
+started: 2026-11-14T23:53:44Z
+status: done
+tags:
+- llm
+title: 'LLM: reasoning_content echo for thinking models in tool loops'
+updated: 2026-11-15T05:13:55Z
+---
+
+From #51: openai-chat ignores delta.reasoning_content. Kimi thinking models (maybe DeepSeek, MiniMax) may require it echoed in assistant tool-call messages for multi-turn tool use. Verify against provider docs, then spec + fixture tests.
+
+Doku-Verifikation (Teil der Karte): das Echo ist gefordert, nicht angenommen - alle drei Provider verlangen es fuer openai-chat-kompatible Denkmodelle.
+
+- Moonshot/Kimi (platform.kimi.ai/docs/api/chat): reasoning_content kommt zurueck, wenn thinking aktiv ist; "pass the reasoning_content from previous assistant messages back in messages without changes" und "append the complete assistant message from the response (including reasoning_content and tool_calls) unchanged". Eine assistant-Nachricht mit tool_calls ohne reasoning_content beantwortet die API mit 400.
+- DeepSeek (api-docs.deepseek.com/guides/thinking_mode): "the reasoning_content must be fully passed back to the API in all subsequent requests", auch in Turns ohne Tool-Call; ohne tools nicht noetig; der thinking mode unterstuetzt Tool-Calls.
+- MiniMax (platform.minimax.io/docs/guides/text-m3-function-call): "the model's thinking is returned in the reasoning_content field and must be kept when passing the message back".
+- Anthropic hat ein anderes Verfahren (thinking blocks mit Signatur), nicht anthropic-messages: dafuer aendert sich hier nichts.
+
+Umsetzung in meiner Spur (src/llm/):
+- openai-chat faengt delta.reasoning_content und behält den Text der Runde unveraendert (append_reasoning); er geht als eigenes Event "reasoning" an das Modul (llm_emit_reasoning, in Stuecken von CANLIN_LLM_EVENT_TEXT_MAX wie die Text-Events).
+- canlin.llm.request nimmt ein optionales Feld "reasoning" auf einer assistant-Nachricht an und schreibt es als "reasoning_content" in den Request (oa_build). Auf einer Nicht-assistant-Nachricht: "invalid" (reasoning only on assistant messages); im anthropic-messages-Dialekt: "unsupported" (nicht stillschweigend wegwerfen).
+- Neue Grenze CANLIN_LLM_REASONING_MAX 64 KiB pro Antwort in llm_limits.h: laengeres Denken macht die Antwort mit "full" tot, ein Echo wird nie gekuerzt.
+- Spec: neuer Abschnitt 2.4 "Reasoning content (thinking models)" im LLM-Providers-Spec, das Ereignis in §4, die Grenze in §7.
+
+Tests (rot zuerst, t/llm/test_llm.c): test_tool_reasoning (das Reasoning kommt beim Modul an, der Tool-Call bleibt), test_reasoning_bound (mehr als CANLIN_LLM_REASONING_MAX -> "done fail full reasoning content exceeds CANLIN_LLM_REASONING_MAX", kein Tool geliefert), test_reasoning_echo (goldener Request-Body mit "reasoning_content" auf der assistant-Nachricht; "reasoning" auf einer user-Nachricht -> invalid), test_reasoning_anthropic (anthropic-messages verweigert das Feld). Die rote Phase ist belegt: mit zurueckgesetztem Implementierungsteil schlagen genau diese Checks fehl (6 Fehlschlaege), mit Implementierung gruen.
+
+Gate: make BUILD=build/llm5 test -> ALL TESTS PASSED (Host). i686: make TARGET=i686 BUILD=build/i686-llm, dann die Suiten unter qemu-i386 -cpu pentium2 ./build/i686-llm/t/... - llm/test_llm, llm/test_llm_http, assistant/test_view, assistant/test_response, assistant/test_binding, app/test_assistant: alle Suiten gruen (Exit 0): llm/test_llm 251629 checks, llm/test_llm_http 1612, assistant/test_view 1932, assistant/test_response 3582, assistant/test_binding 130, app/test_assistant 351
+
+Offen fuer die Plattform-Spur (src/app/assistant.c, nicht meine Spur): das eingebaute Assistant-Template muss das Reasoning-Event sammeln und in die assistant-Nachricht der Folge-Anfrage schreiben, sonst bleibt das Echo aus. Fuenf Stellen im Lua-Template in src/app/assistant.c:
+1. neben "local buf = ''" und "local calls = {}" (Zeile 35-36) ein "local rbuf = ''" (der Denktext der laufenden Antwort);
+2. in turn() (Zeile 94-95) das "rbuf = ''" zuruecksetzen;
+3. im Event-Handler (Zeile 157-160) ein Zweig "elseif p.kind == 'reasoning' then rbuf = rbuf .. p.text";
+4. in done() (Zeile 131) an der assistant-Nachricht "if rbuf ~= '' then msg.reasoning = rbuf end";
+5. in done() am Ende (Zeile 146-147) das "rbuf = ''" zuruecksetzen (auch im Fehlerfall, damit kein Denktext in den naechsten Turn rutscht).
+Das ist die einzige Aenderung ausserhalb von src/llm/ und t/llm/, die die Karte noch braucht; ich habe sie nicht angefasst, weil src/app/ der Plattform-Spur gehoert.
+
+Fertig in meiner Spur (src/llm/): der openai-chat-Dialekt faengt delta.reasoning_content und gibt den Denktext der Runde unveraendert als eigenes Event "reasoning" an das Modul; canlin.llm.request nimmt ein optionales Feld "reasoning" auf einer assistant-Nachricht an und der Dialekt schreibt es als "reasoning_content" in den naechsten Request. Die Doku-Verifikation der Karte ist erledigt und im Spec festgehalten (neuer Abschnitt 2.4 "Reasoning content (thinking models)" mit den Woertlichkeiten von Moonshot, DeepSeek und MiniMax; Ereignis in §4, Grenze CANLIN_LLM_REASONING_MAX 64 KiB in §7). Grenzen: laengerer Denktext macht die Antwort mit "full" tot, das Echo wird nie gekuerzt; anthropic-messages verweigert das Feld ("unsupported"), eine Nicht-assistant-Nachricht ebenfalls ("invalid") - nichts wird stillschweigend weggeworfen.
+
+Tests in t/llm/test_llm.c: test_tool_reasoning, test_reasoning_bound, test_reasoning_echo, test_reasoning_anthropic. Die rote Phase ist belegt (mit zurueckgesetztem Implementierungsteil schlagen genau diese Checks fehl). Gate: Host make BUILD=build/llm5 test -> ALL TESTS PASSED; i686 (make TARGET=i686 BUILD=build/i686-llm, dann qemu-i386 -cpu pentium2 ./build/i686-llm/t/...) alle Suiten gruen. Dateien: include/canlin/llm_limits.h, src/llm/llm.c, src/llm/llm_int.h, src/llm/openai_chat.c, t/llm/openai_fixtures.h, t/llm/test_llm.c, docs/superpowers/specs/2026-09-23-canlin-llm-providers-design.md. Kein Commit, der Baum ist commit-faehig.
+
+Noch offen und nicht in meiner Spur: das eingebaute Assistant-Template in src/app/assistant.c muss das Reasoning-Event sammeln und in die assistant-Nachricht der Folge-Anfrage schreiben - die fuenf Stellen dafuer sind in meiner Notiz auf der Karte benannt. Ohne diesen Schritt bleibt das Echo aus und der Provider antwortet mit 400. Bitte als eigene Karte an die Plattform-Spur (src/app/).
+
+2026-11-15 review (main): gelesen und committet als 85a0428. Die Verifikation gegen die Provider-Doku ist im Spec zitiert (DeepSeek, Moonshot, MiniMax - jeweils woertlich), die Spezifikation bekommt einen eigenen Abschnitt §2.4 und eine Zeile in der Limits-Tabelle (CANLIN_LLM_REASONING_MAX, 64 KiB). Das Verhalten ist an drei Stellen klar: der Dialect haelt den Text woertlich, das Modul bekommt ihn als eigenes Ereignis und legt ihn in die assistant-Nachricht der naechsten Anfrage, anthropic-messages verweigert eine Nachricht mit reasoning, statt den Text stillschweigend zu verwerfen. Ein gekuerzter Echo ist ausgeschlossen (full statt Abschneiden), und der Echo zaehlt zum Byte-Budget der naechsten Anfrage - eine Historie, die nicht mehr passt, wird abgewiesen und nicht gekuerzt. Der Worker wurde vor seinem Bericht vom Token-Limit beendet; die Gates selbst sind im Lauf des Dispatchers gruen (Host und i686).
