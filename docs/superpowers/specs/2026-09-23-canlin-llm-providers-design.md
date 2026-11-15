@@ -55,7 +55,7 @@ marked partial by the assistant (LLM/UI §4). Tool calls are delivered only when
 block is complete (`openai-chat`: at `finish_reason = "tool_calls"`; `anthropic-messages`:
 at `content_block_stop`) and their arguments parse as one complete JSON object. A tool
 call is **acted on only after `done` with `ok = true`**; if the stream fails after a tool
-event, the assistant discards that call (decided 2026-09-23, canlin#38).
+event, the assistant discards that call (decided 2026-09-23, k38).
 
 **Length stop with an unfinished tool call** (decided 2026-09-23, owner): when the
 provider ends on its length stop (`openai-chat` `finish_reason = "length"`,
@@ -82,7 +82,7 @@ presets without a release.
 | `default_model` | a model id, or empty = the user must choose |
 | `capabilities` | `tools`, `streaming` as configured facts for this preset; the connection test confirms them, nothing is inferred from model names |
 | `local` | true for localhost presets (Ollama, LM Studio, vLLM, llama.cpp): plain HTTP to loopback allowed, no key required |
-| `stream_usage` | `openai-chat` only: send `stream_options.include_usage`; set only where the provider documents it (v1: openai), never for custom profiles (canlin#51) |
+| `stream_usage` | `openai-chat` only: send `stream_options.include_usage`; set only where the provider documents it (v1: openai), never for custom profiles (k51) |
 
 v1 list: openai, anthropic, groq, mistral, deepseek, openrouter, xai, cerebras, minimax,
 moonshot (both `anthropic-messages`), minimax-openai, moonshot-openai (their
@@ -99,7 +99,7 @@ Langertha version they came from; they are data and can be updated without code.
 
 `canlin.llm` is present only for modules granted the `llm` capability (module roles
 spec §3); for all others it is absent (`nil`), not a stub. Until grants exist, a trusted
-loader flag on the built-in assistant stands in for the grant (canlin#38).
+loader flag on the built-in assistant stands in for the grant (k38).
 
 ```lua
 local profiles = canlin.llm.profiles()        -- { {id=, title=, model=, tools=true}, ... } no URLs, no keys
@@ -178,7 +178,7 @@ The dialects talk to a transport interface: open a streaming POST/GET with heade
 body, receive status, headers and body chunks as scheduler events, close/cancel. Three
 implementations: a **fixture transport** for tests (scripted responses, arbitrary chunk
 splits, faults), the **native** HTTP/1.1 client over nonblocking sockets and mbedtls
-([HTTP transport design](2026-09-23-canlin-http-transport-design.md), canlin#41), and the
+([HTTP transport design](2026-09-23-canlin-http-transport-design.md), k41), and the
 **browser** Fetch/Streams adapter. Dialects are tested completely against the fixture
 transport before any network exists.
 

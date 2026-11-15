@@ -90,7 +90,7 @@ Rules that keep this simple and safe:
 
 | scheme | status | why |
 |---|---|---|
-| `davs://` (WebDAV over HTTPS) | first | reuses the HTTP/TLS transport (canlin#41); Hetzner Storage Boxes and most NAS/cloud offer it |
+| `davs://` (WebDAV over HTTPS) | first | reuses the HTTP/TLS transport (k41); Hetzner Storage Boxes and most NAS/cloud offer it |
 | `ftps://` (FTP with explicit TLS) | second | small protocol on top of the same TLS |
 | `sftp://` | later | needs an SSH implementation — a larger dependency to choose carefully (licence and size) |
 | `ftp://` | **not offered** (decided 2026-09-23) | plain text: the password and all configuration would travel unencrypted |

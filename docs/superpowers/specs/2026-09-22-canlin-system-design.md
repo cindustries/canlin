@@ -454,7 +454,7 @@ create a speculative server implementation in canlin or make up a remote reposit
 - The browser storage slice selects and validates its persistent VFS, flush strategy and
   writer exclusion. Merely compiling SQLite to WASM does not settle those choices.
 - Audio and IoT specs settle framing and required protocol subsets before implementation.
-- The laptops' NIC, sound and graphics chips (canlin#3) decide the first real kernel
+- The laptops' NIC, sound and graphics chips (k3) decide the first real kernel
   fragment; QEMU is not a driver or performance substitute.
 - canlin-os owns the musl i686 toolchain and QEMU harness; the same toolchain serves libbee's
   `test32`. Toolchain availability is an early dependency, not a presumed host feature.

@@ -1,6 +1,6 @@
 # CanLin — native HTTP/1.1 + TLS transport
 
-Status: implemented for canlin#41 (2026-09-23); §3, §5–§8 updated to the
+Status: implemented for k41 (2026-09-23); §3, §5–§8 updated to the
 implementation. It fills the "native" row of the [LLM providers design](2026-09-23-canlin-llm-providers-design.md) §8 and is the transport
 the `davs://` storage of the [accounts design](2026-09-23-canlin-accounts-design.md) §4
 reuses. It obeys the [event runtime design](2026-09-22-canlin-event-runtime-design.md)

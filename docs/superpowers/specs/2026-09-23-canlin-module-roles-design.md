@@ -64,7 +64,7 @@ the module's affected operations like a stop of that capability.
 "Driver" means three different things here:
 
 1. **Kernel drivers** — NIC, sound chip, graphics, touch controller, USB serial. They
-   belong to the kernel and **canlin-os** (hardware inventory canlin#3). No module can
+   belong to the kernel and **canlin-os** (hardware inventory k3). No module can
    add one.
 2. **Platform adapters** — the core's rawfb/evdev/ALSA/SDL/browser adapters. Core C,
    not modules.
@@ -105,9 +105,9 @@ graph editor (UI spec §5) for flow modules.
 ## 6. Consequences for existing specs
 
 - LLM providers §4: `canlin.llm` is granted by the `llm` capability, not reserved to the
-  built-in assistant. (Implementation in canlin#38 keeps a trusted flag for now; it
+  built-in assistant. (Implementation in k38 keeps a trusted flag for now; it
   becomes the grant check once grants exist.)
-- UI spec §7 / canlin#20: the model-view binding is the `assistant-view` capability.
+- UI spec §7 / k20: the model-view binding is the `assistant-view` capability.
 - Shell spec §3: the settings screen is the `settings`-role module; its privileged API
   is the `settings` capability, binary- or operator-signed only.
 

@@ -122,7 +122,7 @@ together with the rotation sensor (§10).
 
 - **Touch:** `AMotionEvent` of the first pointer (pointer id of `ACTION_DOWN`) maps to
   the normalised primary button press/motion/release in output pixels through
-  `canlin_module_post_input`, stamped at post (core API §6, canlin#37 stays open for
+  `canlin_module_post_input`, stamped at post (core API §6, k37 stays open for
   hardware timestamps). Further pointers are ignored in v1; `ACTION_CANCEL` releases the
   held button at its last position. **Open decision:** a real input overflow clears a
   pressed on-screen-keyboard key without typing it, while a release at the last position
@@ -137,7 +137,7 @@ together with the rotation sensor (§10).
   volume control keeps working. A hardware or Bluetooth keyboard delivers keys and text
   like any other key source.
 - **Text input:** the output's input class is touch; a focused field shows CanLin's own
-  on-screen keyboard (canlin#45). The Android IME is never requested.
+  on-screen keyboard (k45). The Android IME is never requested.
 - The decoding of Android events into `(action, pointer, x, y, key)` is a thin
   device-only layer; the mapping from those values to normalised input is a pure
   function tested on the host (§8).
@@ -219,7 +219,7 @@ app's local data. APK signing: v1 (JAR) + v2 + v3, debug keystore generated into
 
 ## 9. Phases and evidence
 
-**Phase 0 — inventory (stock Android 4.4, adb, no root).** One karr card, like canlin#3
+**Phase 0 — inventory (stock Android 4.4, adb, no root).** One karr card, like k3
 for the P2. Record: `getprop` (SDK, model, platform, `ro.sf.lcd_density`), `wm size` /
 `wm density`, `/proc/cpuinfo` features, free RAM with Android idle, `/data` free space,
 `getevent -p` (touch device, ranges, multi-touch protocol), `dumpsys SurfaceFlinger`
@@ -229,7 +229,7 @@ and backlight nodes, whether current roots (e.g. ISRG Root X1) are missing from
 
 **Phase 1 — adapter.** APK build (§2), glue + Android wait (§3), lifecycle (§4),
 present (§5), input (§6.1), own CA bundle. Needs the runtime pieces the desktop needs
-anyway: native loop wiring (canlin#61), the assistant module (canlin#40) and a minimal
+anyway: native loop wiring (k61), the assistant module (k40) and a minimal
 profile/key store. Done when the shell with the assistant runs on the tablet against a
 real provider.
 

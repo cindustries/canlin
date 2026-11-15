@@ -16,7 +16,7 @@ a module gets `draw(ui)` for its view and nothing about where that view sits.
   only arranges several such views side by side. **Free floating windows are not in
   v1** (decision 2026-09-23): no overlap, no stacking order, no partial-occlusion
   redraw. They are a later, opt-in mode for pointer outputs with enough space
-  (canlin#34); nothing in v1 may assume they will never exist, e.g. views already get
+  (k34); nothing in v1 may assume they will never exist, e.g. views already get
   arbitrary rectangles.
 - **One view per module instance.** A module is shown in at most one place at a time.
   Showing it elsewhere moves the view (`canlin_ui_view_bind`), it does not clone it.
@@ -29,7 +29,7 @@ a module gets `draw(ui)` for its view and nothing about where that view sits.
 | tiled | output ≥ 60 em wide | output ≥ 80 em wide | 2 or 3 panes in one row or one column, divided by draggable dividers |
 
 The user can choose full-screen on any output and tiled where available; the choice is
-a device setting per output identity in `system/local/`, like UI scale (canlin#31).
+a device setting per output identity in `system/local/`, like UI scale (k31).
 
 **Tiling rules.** Panes are at least `CANLIN_SHELL_PANE_MIN` (30 em) in the split
 direction; a module in a pane narrower than 40 em simply gets the one-column layout of
@@ -70,7 +70,7 @@ binary — is decided in the settings spec; either way no downloaded module gets
 - Keys reserved for the shell (switcher, focus next pane) are fixed and documented;
   modules cannot bind them. On keyboard-only outputs focus can reach every view and the
   chrome without a pointer.
-- Input is routed through the scheduler to the target view's module (canlin#27); the
+- Input is routed through the scheduler to the target view's module (k27); the
   shell decides the target before posting.
 
 ## 5. Drawing
@@ -98,9 +98,9 @@ In `include/canlin/shell_limits.h`:
 | `CANLIN_SHELL_SWITCHER_WIDTH` | 24 em (at most the output) |
 | `CANLIN_SHELL_SWIPE` | 2.5 em down from the bar opens the switcher |
 
-The last five were chosen during canlin#35 and are provisional.
+The last five were chosen during k35 and are provisional.
 
-**Host drawing protocol (canlin#35):** after its scheduler turns the host calls
+**Host drawing protocol (k35):** after its scheduler turns the host calls
 `canlin_shell_update()`, then for each output whose `canlin_shell_dirty()` is non-zero
 `canlin_render_begin`, `canlin_shell_render`, `canlin_render_end`. Pointer input and all
 rectangles are in output pixels; a view's rectangle is set in its output's coordinates,
@@ -119,6 +119,6 @@ generation; idle shell with a clock redraws only the bar rows once per minute.
 
 ## 8. Follow-ups
 
-- canlin#34 free floating windows (opt-in, pointer outputs only).
-- canlin#25 several outputs: this spec already assigns modes and focus per output.
+- k34 free floating windows (opt-in, pointer outputs only).
+- k25 several outputs: this spec already assigns modes and focus per output.
 - Settings spec: trusted settings screen and its privileges.

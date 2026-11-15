@@ -86,7 +86,7 @@ Native libs are C code compiled into the runtime for each target (`-march=i686
 
 1. **The sandbox is the security boundary.** Native code runs outside it; a signature
    proves where code came from, not what it does. Every native entry point must charge
-   its work to the budget (core API D8, canlin#8), never block and validate every value
+   its work to the budget (core API D8, k8), never block and validate every value
    it hands to Lua — only reviewed core code can promise that.
 2. **Native images are static binaries** (musl); there is no dynamic loader to load a
    library into.

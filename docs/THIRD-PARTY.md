@@ -3,7 +3,7 @@
 Policy: everything linked into the CanLin runtime is under a permissive licence (MIT,
 BSD, Apache-2.0, public domain / CC0, or an equally permissive font licence). No GPL,
 LGPL or AGPL code is linked into the runtime. Each vendored component keeps its original
-licence text next to it, and every build or package ships these texts (canlin#43).
+licence text next to it, and every build or package ships these texts (k43).
 
 ## Linked into the runtime today
 

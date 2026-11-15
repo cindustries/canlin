@@ -1,6 +1,6 @@
 # CanLin — native main loop
 
-Status: implemented for canlin#61 (2026-09-24); §3 updated to the implementation.
+Status: implemented for k61 (2026-09-24); §3 updated to the implementation.
 It implements the rawfb / native POSIX and SDL2 rows of the [event runtime design](2026-09-22-canlin-event-runtime-design.md) §3
 and is where the [HTTP transport](2026-09-23-canlin-http-transport-design.md) §3 drive
 API, `canlin_llm_pump` and shell rendering meet. The browser loop is a separate slice.
@@ -79,7 +79,7 @@ subset.
 - **Test:** a wait function that advances the fake clock to the computed timeout and
   reports which scripted descriptors are ready.
 
-## 5. Scope of canlin#61
+## 5. Scope of k61
 
 1. `src/loop/loop.c`, `include/canlin/loop.h`: sources, wake pipe, iteration, the poll
    wait, quit.

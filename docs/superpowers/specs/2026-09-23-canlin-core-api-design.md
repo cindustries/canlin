@@ -1,7 +1,7 @@
 # CanLin — core API design (v1 slice)
 
-Status: implemented for canlin#4–#16 (2026-11-14); where code and spec disagreed, the
-code was aligned to the spec, not the spec to the code — canlin#14 moved the sandbox
+Status: implemented for k4–k16 (2026-11-14); where code and spec disagreed, the
+code was aligned to the spec, not the spec to the code — k14 moved the sandbox
 constants onto the §7 values. A review on 2026-11-14 checked every §7 constant in the
 `include/canlin/*_limits.h` headers value by value and found them in agreement. Fixes the
 API shapes, numeric budgets and open semantics that the
@@ -10,8 +10,8 @@ API shapes, numeric budgets and open semantics that the
 the first runtime slice (system design §3, step 2). It is written against the code that
 exists on `main` (`src/ev`, `src/net`, `src/sandbox`). It is now the implemented basis;
 the numbers are not final — the `CANLIN_SB_*` budgets stay v1 estimates to be calibrated
-on P2 (canlin#13, blocked on the canlin-os QEMU harness), the other §7 values stay sized
-for the 1 GB P2 floor until they are measured on the hardware (canlin#3), and the cost
+on P2 (k13, blocked on the canlin-os QEMU harness), the other §7 values stay sized
+for the 1 GB P2 floor until they are measured on the hardware (k3), and the cost
 factors in `include/canlin/sandbox_limits.h` stay provisional. Subsystems not needed by
 the slice are listed in §9 with their own follow-ups.
 
@@ -19,7 +19,7 @@ the slice are listed in §9 with their own follow-ups.
 
 In scope: module lifecycle and callbacks, the C seam between scheduler and sandbox,
 error and handle conventions, timers and cancellation, `canlin.sys`, numeric budgets and
-the semantic decisions collected on canlin#10. Out of scope here: the `canlin.ui` widget
+the semantic decisions collected on k10. Out of scope here: the `canlin.ui` widget
 set, the GUI tool schema, storage/SQLite, provider dialects, sync, MQTT, audio and serial.
 Those get their own specs; they must use the conventions of §3 and the budgets of §7.
 
@@ -167,7 +167,7 @@ decided by the loader, not by this seam.
 `canlin_module_deliver` is the only path into Lua, and it runs only from
 `canlin_ev_turn`, so the no-nesting rule of the event runtime holds by construction.
 
-Recorded from the canlin#9 implementation (`include/canlin/module.h`):
+Recorded from the k9 implementation (`include/canlin/module.h`):
 
 - **Payloads** are a core-owned value tree `canlin_value` (nil, bool, integer, byte
   string, table with integer or string keys). An operation result is
@@ -175,7 +175,7 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
   `canlin_module_event {name, value}`. `CANLIN_MARSHAL_*` apply to the result value,
   not to the `{handle, ok, …}` wrapper; `canlin_value_check` lets a producer check
   before completing. A failure with an unknown or missing code arrives as `unavailable`.
-- **The result rides in the producer's blob (canlin#88).** The payload of a completion
+- **The result rides in the producer's blob (k88).** The payload of a completion
   is opaque bytes to the scheduler: it is the producer's own block, whose first bytes
   are the `canlin_module_result`. The struct begins with the type tag
   `CANLIN_MODULE_RESULT_TAG` ("MRES"), and the tag is checked before a single field of
@@ -196,7 +196,7 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
 - **Control latches:** `FAULT` faults and `STOP` stops the module; `CONN_LOST` is
   consumed without effect until the transport specs use it. `INPUT_OVERFLOW` resets the
   view's input (below).
-- **Input (canlin#27):** backends call `canlin_module_post_input(m, in)`; nothing feeds a
+- **Input (k27):** backends call `canlin_module_post_input(m, in)`; nothing feeds a
   view directly. Motion and scroll are latest-state items (scroll as a running total, so
   coalescing keeps the distance); button, key and text are ordered items with source
   `CANLIN_MODULE_SOURCE_INPUT`. Items are stamped with the monotonic time **at post**,
@@ -208,7 +208,7 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
   scheduler refused the item.
 - **Stop from inside the module's own callback** is deferred until that callback
   returns; reload from inside it fails with `CANLIN_MODULE_EBUSY`.
-- **Reload is staged with rollback (canlin#16, decided 2026-09-23):** the new generation
+- **Reload is staged with rollback (k16, decided 2026-09-23):** the new generation
   is started beside the old one — new sandbox, `lua#main`, `init` — while the old one
   stays live but receives no new deliveries. Only when `init` succeeds is the old
   generation retired (§7 order of the event runtime) and the view rebound to the new one.
@@ -221,8 +221,8 @@ Recorded from the canlin#9 implementation (`include/canlin/module.h`):
 
 Initial values for the v1 slice, sized for the 1 GB P2 floor. The `CANLIN_EV_*`,
 `CANLIN_MODULE_*`, `CANLIN_TIMER_*` and `CANLIN_MARSHAL_*` values are re-measured against
-the real hardware of a P2 (canlin#3); the `CANLIN_SB_*` budgets are calibrated on
-P2-QEMU (canlin#13, blocked on the canlin-os QEMU harness), and the cost factors in
+the real hardware of a P2 (k3); the `CANLIN_SB_*` budgets are calibrated on
+P2-QEMU (k13, blocked on the canlin-os QEMU harness), and the cost factors in
 `include/canlin/sandbox_limits.h` stay provisional until that calibration lands. Each has
 a compile-time maximum; configuration can lower, never raise, a value beyond its
 maximum.
@@ -255,7 +255,7 @@ owns the stream; the LLM/UI implementation spec fixes them per dialect. Process-
 memory accounting beyond the Lua heap and the scheduler (transport buffers, SQLite, fonts)
 is a follow-up (§9); until then this table is not the module's whole resource boundary.
 
-## 8. Decisions on the open questions of canlin#4–#6
+## 8. Decisions on the open questions of k4–k6
 
 - **D1 — CANCELLED is never delivered to Lua.** The canceller learns the result from
   `canlin.cancel`'s return value; a stopped generation gets nothing. When the *core*
@@ -278,7 +278,7 @@ is a follow-up (§9); until then this table is not the module's whole resource b
 - **D7 — No coroutines in v1.** `coroutine` stays absent until tests show every
   hooks-off path (thread reset/close, `__close` in dead threads) is bounded.
 - **D8 — Lua patterns are budgeted** through a step counter in a build-time patch of
-  `lstrlib` (canlin#7); proportional C-library work is charged up front (canlin#8).
+  `lstrlib` (k7); proportional C-library work is charged up front (k8).
 
 ## 9. Follow-up specs
 
