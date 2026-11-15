@@ -363,6 +363,57 @@ static void test_tool_id_bound(void)
     free(body);
 }
 
+/* The provider's reasoning content (k58): a thinking model sends it beside the tool call
+ * and wants it back in the assistant message of the next turn. The dialect keeps the
+ * text of the turn whole and hands it to the module as its own event. */
+static void test_tool_reasoning(void)
+{
+    harness h;
+    static const char body[] =
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\","
+        "\"reasoning_content\":\"Ich denke \"}}]}\n\n"
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"nach.\"}}]}\n\n"
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,"
+        "\"id\":\"call_A\",\"type\":\"function\",\"function\":{\"name\":\"set_view\","
+        "\"arguments\":\"{}\"}}]}}]}\n\n"
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+        "data: [DONE]\n\n";
+    run_one(&h, body, 64, 0, req_tools);
+    CHECK(has(&h.log, "reason\tIch denke nach."));
+    CHECK(has(&h.log, "tool\tcall_A\tset_view\t{}"));
+    CHECK(has(&h.log, "done ok\ttool"));
+    h_done(&h);
+}
+
+/* More reasoning than CANLIN_LLM_REASONING_MAX: the response fails, the text is never
+ * truncated (a truncated echo is worse than none, the provider wants it verbatim). */
+static void test_reasoning_bound(void)
+{
+    harness h;
+    size_t n = CANLIN_LLM_REASONING_MAX / 2 + 1;
+    size_t i;
+    char *body = malloc(2 * (n + 256) + 256);
+    char *p = body;
+
+    for (i = 0; i < 2; i++) {
+        size_t k;
+        p += sprintf(p, "data: {\"choices\":[{\"index\":0,\"delta\":{"
+                        "\"reasoning_content\":\"");
+        for (k = 0; k < n; k++)
+            *p++ = 'i';
+        p += sprintf(p, "\"}}]}\n\n");
+    }
+    p += sprintf(p, "data: {\"choices\":[{\"index\":0,\"delta\":{},"
+                    "\"finish_reason\":\"tool_calls\"}]}\n\n"
+                    "data: [DONE]\n\n");
+    run_one(&h, body, 64, 0, req_tools);
+    CHECK(has(&h.log, "done fail\tfull\treasoning content exceeds CANLIN_LLM_REASONING_MAX"));
+    CHECK(!has(&h.log, "reason\t"));
+    CHECK(!has(&h.log, "tool\t"));
+    h_done(&h);
+    free(body);
+}
+
 static void expect_fail(const char *body, const char *setup, const char *line)
 {
     harness h;
@@ -840,6 +891,50 @@ static void test_golden_request(void)
     CHECK(has(&h.log, "type\tfalse"));
     CHECK(has(&h.log, "type2\tfalse"));
     CHECK(canlin_llm_fixture_records(h.fx) == 0); /* nothing was sent */
+    h_done(&h);
+}
+
+/* The reasoning content goes back to the provider in the assistant message of the next
+ * turn (k58): the module passes it as "reasoning", the dialect writes the provider's
+ * "reasoning_content". */
+static void test_reasoning_echo(void)
+{
+    static const char setup[] =
+        "go({messages = {\n"
+        "  {role = 'user', text = 'hi'},\n"
+        "  {role = 'assistant', reasoning = 'Ich denke nach.', tool_calls = "
+        "{{id = 'c1', name = 'set_view', args = '{}'}}},\n"
+        "  {role = 'tool', tool_call_id = 'c1', text = '{}'},\n"
+        "}, tools = {'set_view'}})";
+    static const char golden_head[] =
+        "{\"model\":\"m-1\",\"stream\":true,\"stream_options\":{\"include_usage\":true},"
+        "\"messages\":["
+        "{\"role\":\"user\",\"content\":\"hi\"},"
+        "{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"Ich denke nach.\","
+        "\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\","
+        "\"function\":{\"name\":\"set_view\",\"arguments\":\"{}\"}}]},"
+        "{\"role\":\"tool\",\"tool_call_id\":\"c1\",\"content\":\"{}\"}],"
+        "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"set_view\",\"description\":";
+    static const char golden_tail[] = ",\"required\":[\"widgets\"]}}}]}";
+    harness h;
+    const canlin_llm_fixture_record *rec;
+
+    run_one(&h, text_stream, 0, 0, setup);
+    CHECK(has(&h.log, "done ok\tend"));
+    CHECK(canlin_llm_fixture_records(h.fx) == 1);
+    rec = canlin_llm_fixture_record_at(h.fx, 0);
+    if (rec && strncmp(rec->body, golden_head, strlen(golden_head)) != 0)
+        fprintf(stderr, "body: %s\n", rec->body);
+    CHECK(rec && strncmp(rec->body, golden_head, strlen(golden_head)) == 0);
+    CHECK(rec && json_ok(rec->body, rec->body_len));
+    CHECK(rec && rec->body_len > strlen(golden_tail) &&
+          strcmp(rec->body + rec->body_len - strlen(golden_tail), golden_tail) == 0);
+    h_done(&h);
+
+    /* the field belongs to the assistant message */
+    run_one(&h, text_stream, 0, 0,
+            "go({messages = {{role = 'user', text = 'hi', reasoning = 'x'}}})");
+    CHECK(has(&h.log, "req\tinvalid\treasoning only on assistant messages"));
     h_done(&h);
 }
 
@@ -1432,6 +1527,18 @@ static void test_am_tool_id_bound(void)
     CHECK(!has(&h.log, "tool\t"));
     h_done(&h);
     free(body);
+}
+
+/* Only openai-chat carries the reasoning field (k58): the anthropic-messages dialect
+ * refuses the message instead of dropping the text silently. */
+static void test_reasoning_anthropic(void)
+{
+    harness h;
+    run_one_am(&h, am_text_stream, 0, 0,
+               "go({messages = {{role = 'assistant', text = 'hi', reasoning = 'x'}}})");
+    CHECK(has(&h.log, "req\tunsupported\tonly openai-chat carries a reasoning field"));
+    CHECK(canlin_llm_fixture_records(h.fx) == 0); /* nothing was sent */
+    h_done(&h);
 }
 
 static void test_am_parallel_tools(void)
@@ -2030,11 +2137,14 @@ int main(void)
 {
     test_origin();
     test_golden_request();
+    test_reasoning_echo();
     test_text_every_split();
     test_text_random_large();
     test_tool_many_deltas();
     test_two_parallel_tools();
     test_tool_id_bound();
+    test_tool_reasoning();
+    test_reasoning_bound();
     test_failures();
     test_no_partial_tool();
     test_length_tools();
@@ -2054,6 +2164,7 @@ int main(void)
     test_am_tool_many_deltas();
     test_am_parallel_tools();
     test_am_tool_id_bound();
+    test_reasoning_anthropic();
     test_am_length();
     test_am_length_tools();
     test_am_failures();

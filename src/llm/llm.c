@@ -758,6 +758,34 @@ int llm_emit_text(llm_req *r, const char *s, size_t n)
     return 0;
 }
 
+/* The provider's reasoning content of this assistant turn (k58): delivered as its own
+ * event, in pieces of at most CANLIN_LLM_EVENT_TEXT_MAX, so the module can echo the
+ * text back in the next request (the provider wants it verbatim). */
+int llm_emit_reasoning(llm_req *r, const char *s, size_t n)
+{
+    size_t off = 0;
+    while (off < n) {
+        size_t k = n - off;
+        pev *e;
+        if (k > CANLIN_LLM_EVENT_TEXT_MAX) {
+            k = CANLIN_LLM_EVENT_TEXT_MAX;
+            while (k > 0 && ((unsigned char)s[off + k] & 0xc0) == 0x80)
+                k--;
+        }
+        e = pev_new(r, "reasoning", k);
+        if (e == NULL) {
+            llm_fail(r, "unavailable", "out of memory queueing the reasoning content");
+            return -1;
+        }
+        memcpy(e->data, s + off, k);
+        setkv_str(&e->p[2], "text", e->data, k);
+        e->root.n = 3;
+        q_push(r, e);
+        off += k;
+    }
+    return 0;
+}
+
 int llm_emit_tool(llm_req *r, const char *id, size_t idn, const char *name, size_t namen,
                   const char *args, size_t argsn)
 {
@@ -1196,6 +1224,15 @@ static int l_request(lua_State *L)
             mm->role = LLM_ROLE_ASSISTANT;
         else
             return lfail(L, "invalid", "unknown message role");
+        /* The provider's reasoning content (k58): the module echoes it back in the
+         * assistant message of the next turn, the provider wants it verbatim. */
+        if (str_field(L, 6, "reasoning", &mm->reasoning)) {
+            if (mm->role != LLM_ROLE_ASSISTANT)
+                return lfail(L, "invalid", "reasoning only on assistant messages");
+            if (d->id != CANLIN_LLM_DIALECT_OPENAI_CHAT)
+                return lfail(L, "unsupported", "only openai-chat carries a reasoning field");
+            cost += mm->reasoning.n;
+        }
         if (mm->role == LLM_ROLE_TOOL && !str_field(L, 6, "tool_call_id", &mm->tool_call_id))
             return luaL_error(L, "llm.request: messages[%d].tool_call_id missing", (int)i + 1);
         cost += mm->tool_call_id.n;

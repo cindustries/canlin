@@ -24,6 +24,10 @@
 
 /* Not in the spec: characters of one JSON number token in a stream chunk. */
 #define CANLIN_LLM_JSON_NUMBER_MAX   32u
+/* Not in the spec: bytes of the provider's reasoning content ("reasoning_content") in one
+ * response. The text is echoed back verbatim in the assistant message of the next turn
+ * (k58); a longer one is refused, never truncated. */
+#define CANLIN_LLM_REASONING_MAX     (64u * 1024u)
 /* Not in the spec: tool call id and tool name bytes (a longer one is `full`). The
  * tool-call id is provider-assigned and opaque; this bound is also the GUI tool schema's
  * (set_view), so an id the dialect admits is an id set_view admits (k57). */

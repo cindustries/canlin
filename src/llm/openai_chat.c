@@ -68,6 +68,10 @@ static void oa_build(llm_jw *w, const llm_build *b)
                 llm_jw_str(w, m->text.s, m->text.n);
             else
                 llm_jw_lit(w, "null");
+            if (m->reasoning.n) { /* the provider's reasoning content, echoed (k58) */
+                llm_jw_lit(w, ",\"reasoning_content\":");
+                llm_jw_str(w, m->reasoning.s, m->reasoning.n);
+            }
             if (m->ncalls) {
                 llm_jw_lit(w, ",\"tool_calls\":[");
                 for (k = 0; k < m->ncalls; k++) {
@@ -114,7 +118,8 @@ enum { TG_NONE = 0, TG_ROOT, TG_CHOICES, TG_CHOICE, TG_DELTA, TG_TCALLS, TG_TCAL
        TG_USAGE, TG_ERROR };
 
 enum { K_OTHER = 0, K_CHOICES, K_DELTA, K_CONTENT, K_TOOL_CALLS, K_INDEX, K_ID, K_FUNCTION,
-       K_NAME, K_ARGUMENTS, K_FINISH, K_USAGE, K_PROMPT, K_COMPLETION, K_ERROR, K_MESSAGE };
+       K_NAME, K_ARGUMENTS, K_FINISH, K_USAGE, K_PROMPT, K_COMPLETION, K_ERROR, K_MESSAGE,
+       K_REASONING };
 
 static const struct {
     const char *s;
@@ -126,7 +131,11 @@ static const struct {
             {"arguments", K_ARGUMENTS},    {"finish_reason", K_FINISH},
             {"usage", K_USAGE},            {"prompt_tokens", K_PROMPT},
             {"completion_tokens", K_COMPLETION}, {"error", K_ERROR},
-            {"message", K_MESSAGE},        {NULL, 0}};
+            {"message", K_MESSAGE},        {"reasoning_content", K_REASONING},
+            {NULL, 0}};
+
+/* Why the JSON callback aborted a document (the response fails with "full"). */
+enum { DE_NONE = 0, DE_TOOL_CALLS, DE_REASONING_FULL, DE_REASONING_NOMEM };
 
 /* A string collected from the current document: offset/length into the arena. */
 typedef struct span {
@@ -171,12 +180,14 @@ typedef struct oa {
     int has_usage;
     tdelta td[CANLIN_LLM_TOOL_CALLS_MAX];
     size_t ntd;
-    int doc_err; /* "full" overflow detected in the callback */
+    int doc_err; /* why the callback aborted the document (DE_*) */
 
     /* per response */
     int finished;      /* finish_reason seen */
     int done;          /* [DONE] or terminal */
     unsigned dropped;  /* length stop: unfinished tool call dropped (spec §2.3) */
+    char *rbuf;        /* the reasoning content of this turn (k58) */
+    size_t rlen, rcap;
     tslot slot[CANLIN_LLM_TOOL_CALLS_MAX];
 } oa;
 
@@ -213,6 +224,33 @@ static int parse_long(const char *s, size_t n, long *out)
         v = v * 10 + (s[i] - '0');
     }
     *out = v;
+    return 0;
+}
+
+/* The provider's reasoning content of this turn (k58): kept verbatim, because the
+ * provider wants it back in the assistant message of the next turn. A longer one is
+ * refused, never truncated. */
+static int append_reasoning(oa *o, const char *s, size_t n)
+{
+    if (n > CANLIN_LLM_REASONING_MAX - o->rlen) {
+        o->doc_err = DE_REASONING_FULL;
+        return 1;
+    }
+    if (o->rlen + n > o->rcap) {
+        size_t cap = o->rcap ? o->rcap : 1024;
+        char *nb;
+        while (cap < o->rlen + n)
+            cap *= 2;
+        nb = realloc(o->rbuf, cap);
+        if (nb == NULL) {
+            o->doc_err = DE_REASONING_NOMEM;
+            return 1;
+        }
+        o->rbuf = nb;
+        o->rcap = cap;
+    }
+    memcpy(o->rbuf + o->rlen, s, n);
+    o->rlen += n;
     return 0;
 }
 
@@ -264,7 +302,7 @@ static int on_tok(void *ud, const canlin_json_token *t)
             nt = TG_TCALLS;
         else if (parent == TG_TCALLS && t->type == CANLIN_JSON_OBJ_BEGIN) {
             if (o->ntd >= CANLIN_LLM_TOOL_CALLS_MAX) {
-                o->doc_err = 1;
+                o->doc_err = DE_TOOL_CALLS;
                 return 1;
             }
             nt = TG_TCALL;
@@ -293,6 +331,8 @@ static int on_tok(void *ud, const canlin_json_token *t)
     case TG_DELTA:
         if (k == K_CONTENT && t->type == CANLIN_JSON_STRING)
             return keep(o, &o->text, t->ptr, t->len);
+        if (k == K_REASONING && t->type == CANLIN_JSON_STRING)
+            return append_reasoning(o, t->ptr, t->len);
         break;
     case TG_TCALL: {
         tdelta *td = &o->td[o->ntd];
@@ -482,7 +522,13 @@ static void json_fail(oa *o, int rc)
 {
     char msg[CANLIN_LLM_MSG_MAX];
     if (rc == CANLIN_JSON_E_ABORTED && o->doc_err) {
-        fail_full(o, "more tool calls than CANLIN_LLM_TOOL_CALLS_MAX");
+        if (o->doc_err == DE_REASONING_FULL)
+            fail_full(o, "reasoning content exceeds CANLIN_LLM_REASONING_MAX");
+        else if (o->doc_err == DE_REASONING_NOMEM) {
+            o->done = 1;
+            llm_fail(o->r, "unavailable", "out of memory buffering the reasoning content");
+        } else
+            fail_full(o, "more tool calls than CANLIN_LLM_TOOL_CALLS_MAX");
         return;
     }
     if (rc == CANLIN_JSON_E_STRING_LEN || rc == CANLIN_JSON_E_DEPTH ||
@@ -603,9 +649,14 @@ static int on_event(void *ud, const canlin_sse_event *ev)
         o->done = 1;
         if (!o->finished)
             fail_proto(o, "[DONE] without finish_reason");
-        else
+        else {
+            /* The reasoning content of the turn, whole or nothing (k58): the module
+             * echoes it back in the assistant message of the next request. */
+            if (o->rlen && llm_emit_reasoning(o->r, o->rbuf, o->rlen) != 0)
+                return 1;
             llm_succeed(o->r, o->finished == 2 ? "tool" : o->finished == 3 ? "length" : "end",
                         o->finished == 3 ? o->dropped : 0);
+        }
         return 1;
     }
     on_data(o, ev->data, ev->data_len);
@@ -680,6 +731,7 @@ static void oa_end(void *st)
         return;
     for (i = 0; i < CANLIN_LLM_TOOL_CALLS_MAX; i++)
         free(o->slot[i].args);
+    free(o->rbuf);
     free(o->ssemem);
     free(o->arena);
     free(o);

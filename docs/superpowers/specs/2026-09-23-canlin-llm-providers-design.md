@@ -66,6 +66,30 @@ dropped calls so the assistant can say the answer was cut off. Complete tool cal
 delivered before the length stop are delivered as usual. Anything else incomplete at the
 end (EOF, error, other stop reasons) stays a failure.
 
+### 2.4 Reasoning content (thinking models)
+
+A thinking model sends its thinking beside the answer: `openai-chat` carries it in
+`delta.reasoning_content`. The providers want that text back in the `messages` array of
+the following turns, because the next turn continues the same chain of thought — "the
+`reasoning_content` must be fully passed back to the API in all subsequent requests"
+(DeepSeek, thinking mode with tools), "append the complete assistant message from the
+response (including `reasoning_content` and `tool_calls`) unchanged" (Moonshot), "the
+model's thinking is returned in the `reasoning_content` field and must be kept when
+passing the message back" (MiniMax). An assistant message with tool calls but without
+its `reasoning_content` is answered with a 400 by those providers.
+
+The dialect therefore keeps the reasoning content of a turn verbatim and hands it to the
+module as its own event (`kind = "reasoning"`, §4). The module puts it back into the
+assistant message of the next request as `reasoning`; `openai-chat` writes it as
+`reasoning_content`. `anthropic-messages` has no such field (it carries thinking blocks
+with a signature) and refuses a message with `reasoning` instead of dropping the text
+silently.
+
+The text is never shortened: a turn with more than `CANLIN_LLM_REASONING_MAX` bytes of
+reasoning content fails with `full` rather than sending a truncated echo. The echoed text
+counts towards the byte budget of the next request (`CANLIN_MARSHAL_MAX_BYTES`), like the
+rest of the conversation: a history that no longer fits is refused, not shortened.
+
 ## 3. Presets
 
 Shipped as data in the binary (a C table now; a `providers.bee` pack once the runtime reads
@@ -121,6 +145,7 @@ Events for the request handle (core API §5.2):
 | event | payload |
 |---|---|
 | `"llm"` | `{handle, kind = "text", text}` — a UTF-8 fragment (validated, D5) |
+| `"llm"` | `{handle, kind = "reasoning", text}` — the reasoning content of the turn (§2.4) |
 | `"llm"` | `{handle, kind = "tool", id, name, args}` — one complete tool call, `args` a JSON string |
 | `"llm"` | `{handle, kind = "usage", input, output}` — if the provider reports it |
 | `"done"` | `{handle, ok = true, result = {stop = "end"\|"tool"\|"length", dropped_tools = n}}` (`dropped_tools` only with `length`, §2.3) or `{handle, ok = false, code, message}` (the generic shape of core API §5.2) |
@@ -128,7 +153,10 @@ Events for the request handle (core API §5.2):
 `tools` names core-provided tools; their JSON schemas come from the core (for `set_view`
 the UI spec §7 schema), so a module cannot describe arbitrary tools to the provider in
 v1. The dialect serialises the normalised messages into its own format and keeps any
-provider-specific continuation data it needs (LLM/UI §4) with the request.
+provider-specific continuation data it needs (LLM/UI §4) with the request. The
+`reasoning` field of an assistant message carries the reasoning content of that turn
+(§2.4): the module keeps it in the message history and hands it back with the next
+request.
 
 Error codes follow core API §3.1, refined through `message` only: bad credentials and
 permission → `denied`; unknown model, missing tool support → `unsupported`; network,
@@ -167,6 +195,7 @@ In `include/canlin/llm_limits.h`, initial values:
 | `CANLIN_LLM_TOOL_ARGS_MAX` | 64 KiB (= `CANLIN_UI_TOOL_MAX_BYTES`) |
 | `CANLIN_LLM_TOOL_CALLS_MAX` | 8 per response |
 | `CANLIN_LLM_TEXT_MAX` | 256 KiB per response |
+| `CANLIN_LLM_REASONING_MAX` | 64 KiB per response (§2.4) |
 | `CANLIN_LLM_REQUEST_MAX` | 512 KiB serialised request body |
 | `CANLIN_LLM_INFLIGHT_MAX` | 2 per module |
 | `CANLIN_LLM_TOOL_ROUNDS_MAX` | 4 automatic tool rounds per user turn (assistant) |

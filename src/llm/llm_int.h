@@ -54,6 +54,7 @@ typedef struct llm_msg {
     int has_text;
     llm_str text;
     llm_str tool_call_id;       /* role tool */
+    llm_str reasoning;          /* role assistant: the provider's reasoning text (k58) */
     const llm_call *calls;      /* role assistant */
     size_t ncalls;
 } llm_msg;
@@ -81,6 +82,9 @@ typedef struct llm_req llm_req;
 
 /* Each returns 0, or -1 when the request is already terminal (caller stops parsing). */
 int llm_emit_text(llm_req *r, const char *s, size_t n);
+/* The provider's reasoning content of this assistant turn (k58): its own event, so the
+ * module can echo it back in the next request. Split like the text events. */
+int llm_emit_reasoning(llm_req *r, const char *s, size_t n);
 int llm_emit_tool(llm_req *r, const char *id, size_t idn, const char *name, size_t namen,
                   const char *args, size_t argsn);
 int llm_emit_usage(llm_req *r, int64_t input, int64_t output);

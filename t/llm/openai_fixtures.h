@@ -30,6 +30,7 @@ static const char mod_tpl[] =
     "  if name == 'llm' then\n"
     "    if p.handle ~= H and not MULTI then print('BADHANDLE') end\n"
     "    if p.kind == 'text' then T = T .. p.text print('frag', #p.text)\n"
+    "    elseif p.kind == 'reasoning' then print('reason', p.text)\n"
     "    elseif p.kind == 'tool' then print('tool', p.id, p.name, p.args)\n"
     "    elseif p.kind == 'usage' then print('usage', p.input, p.output)\n"
     "    else print('BADKIND') end\n"
