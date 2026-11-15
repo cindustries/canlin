@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-15T05:13:23Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-15T05:13:23Z
+created: 2026-11-14T23:28:40Z
+id: 133
+priority: medium
+started: 2026-11-14T23:29:02Z
+status: done
+tags:
+- shell
+- ui
+- assistant
+title: 'Shell: nobody requests a redraw of the model''s own view'
+updated: 2026-11-15T05:13:23Z
+---
+
+The module layer requests a redraw of the module's view after feeding it (src/module/module.c:833-834); the shell has no scheduler handle and requests none for the model's own view, so a change in the model view does not make the shell draw again. The view's own API says when it needs a new frame (canlin_ui_view_pending, canlin_ui_view_dirty) and the shell exposes the new rectangle as CANLIN_UI_P_MODEL_VIEW. Decide who asks: the app (which owns the model view and the scheduler) or the shell (which would need a scheduler handle). Found by the 2026-11-14 work on k128.
+
+Done in the platform lane: the app is the layer that asks. canlin_app_assistant_update (src/app/assistant.c:456) asks the assistant module to draw again (canlin_ev_invalidate, ask_frame at src/app/assistant.c:447) when the model was replaced (the assistant view's revision changed) or when the model's own view has queued input that only a frame can apply. The module's draw produces the frame of the model's own view (the binding draws the model into it - k130) and the shell draws that new frame (model_new_frame, src/shell/shell.c). The shell needs no scheduler handle: the app owns the view and the scheduler. The queued input is only read when the view has a frame - a view nobody draws into keeps its queued input for ever and asking again and again would keep the scheduler busy (until k130 draws the model into that view). Test: t/app/test_assistant.c test_model_redraw (line 505) - proved red without the request (2 checks failed: the frame count and the model's button in the record). Side effect: the new model is on screen right after the answer instead of at the next input.
+
+Done: the app is the layer that asks. canlin_app_assistant_update (src/app/assistant.c:456) invalidates the assistant module's generation (ask_frame, src/app/assistant.c:447) when the model was replaced (the assistant view's revision changed) or when the model's own view has queued input that only a frame can apply. The module's draw produces the frame of the model's own view (the binding draws the model into it - k130) and the shell draws that new frame. The shell needs no scheduler handle: the app owns the view and the scheduler. Test: t/app/test_assistant.c test_model_redraw - the new model is on screen right after the answer, without waiting for the next input; proved red without the request (2 checks failed: the frame count and the model's button in the record). Verified: the app, assistant, module, ev and loop suites green on the host and the app and assistant suites green under qemu-i386 -cpu pentium2 for TARGET=i686. The queued input is only read when the model's own view has a frame - a view nobody draws into keeps its queued input for ever (until k130 draws the model into it) and asking again and again would keep the scheduler busy.
+
+2026-11-15 (dispatcher): die Karte nannte die falsche Konstante - CANLIN_UI_P_MODEL_VIEW gibt es nicht, der echte Name ist CANLIN_SHELL_P_MODEL_VIEW (include/canlin/shell.h:213). Und die Karte ist enger als gedacht: k133 ist nicht "der Shell fordert ein Neuzeichnen an", sondern die App fordert es an (sie besitzt die View und den Scheduler; der Shell braucht keinen Scheduler-Handle). Die App invalidiert die Generation des Assistant-Moduls und der Rahmen der Modell-View entsteht im draw des Moduls - das ist der Weg, den k130 (das Binding zeichnet in die Modell-View) noch schliesst. Bitte den Karten-Inhalt entsprechend nachziehen, damit die Karte das beschreibt, was gebaut wurde.
+
+2026-11-15 review (main): committet als 6eab9f1 (mit k129 und k137, dieselbe Datei). Die App fordert das Neuzeichnen der Modell-View an, wenn das Modell ersetzt wurde oder die View wartende Eingabe hat; sie besitzt die View und den Scheduler, der Shell braucht keinen Scheduler-Handle. Die Karte war enger formuliert ("der Shell fordert ein Neuzeichnen an") - der Karten-Text ist nachgezogen, die Arbeit selbst ist die der App.
