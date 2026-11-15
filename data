@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-15T05:13:36Z
+claimed_by: canlin-worker-platform
+class: standard
+completed: 2026-11-15T05:13:36Z
+created: 2026-11-14T23:52:14Z
+id: 137
+priority: high
+started: 2026-11-15T00:51:58Z
+status: done
+tags:
+- app
+- assistant
+- lua
+title: 'App: the assistant module still reads the submission as a table (k115''s other
+  half)'
+updated: 2026-11-15T05:13:36Z
+---
+
+k115 changed canlin.view.submission() to hand the module the submission's own JSON bytes instead of a Lua table. The built-in assistant module in src/app/assistant.c was not changed (it is the platform lane's file): it still does turn('action=' .. tostring(sub.action) .. ' values=' .. jval(sub.values, 1)). Indexing a string in Lua yields nil without an error, so the module now sends action=nil values=null - silently wrong, not loud. The change: delete the whole jstr/jval block (src/app/assistant.c:49-88) and replace the turn() call at :224 with turn(sub), so the submission's own JSON goes to the provider byte for byte. The tool-round bound is untouched by this: turn() still resets rounds = 0 and MAX_ROUNDS is still canlin.session.rounds_max (CANLIN_LLM_TOOL_ROUNDS_MAX). Depends on k115 (the assistant side), which is ready but not committed because this half was missing.
+
+Done in the platform lane (the app half of k115): the jstr/jval block is gone from the built-in assistant module and the submission goes to the provider as its own JSON bytes - turn(sub) (src/app/assistant.c:185). The tool-round bound is untouched: turn() still resets rounds = 0 and MAX_ROUNDS is still canlin.session.rounds_max. The app suite covers it: the third request of the conversation carries the values of the model form (t/app/test_assistant.c test_conversation).
+
+Done (the app half of k115): the built-in assistant module sends the submission to the provider as its own JSON bytes - turn(sub) (src/app/assistant.c:185) - and the jstr/jval block is gone. The tool-round bound is untouched: turn() still resets rounds = 0 and MAX_ROUNDS is still canlin.session.rounds_max (CANLIN_LLM_TOOL_ROUNDS_MAX). Test: t/app/test_assistant.c test_conversation - the third request of the conversation carries the values of the model form (the submission JSON). Verified: the app suite green on the host and under qemu-i386 -cpu pentium2 for TARGET=i686.
+
+2026-11-15 review (main): committet als 6eab9f1 (mit k129 und k133, dieselbe Datei). Das eingebaute Assistant-Modul liest die Submission nicht mehr als Tabelle: der jstr/jval-Block ist weg, turn(sub) sendet die JSON-Bytes, die der Kern gebaut hat. Die Karte war die App-Haelfte von k115; die Assistant-Seite ist mit 0ba2432 committet. Committet, weil beide Seiten zusammen eine runde Sache ergeben: die Bytes, die das Modul nun schickt, sind genau die, die die Bindung ausgibt.
