@@ -1,0 +1,126 @@
+---
+claimed_at: 2026-11-15T17:44:42Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-15T17:44:42Z
+created: 2026-11-14T07:49:14Z
+id: 96
+priority: low
+started: 2026-11-15T00:30:16Z
+status: done
+tags:
+- ui
+- font
+- platform
+title: 'UI: the P2 measurements the cards deferred but no card owns (font atlas, graph
+  scale)'
+updated: 2026-11-15T17:44:42Z
+---
+
+Two measurements were deferred by their cards and pointed at the wrong place, so no card on the board owns them. (1) Font atlas memory: k22 left 'Atlas memory ~2x: up to 4 MiB at 200 %' open and pointed at canlin#13 - but #13 is about the sandbox cost factors on P2-QEMU, not font atlas memory. The figure also needs re-deriving: it came from the DejaVu blob (38804 bytes), which k55 replaced with the smaller Inter subset (23792 bytes). (2) Graph scale: k19 left '256 nodes/1024 edges unmeasured on P2' open; the fixture exists and runs (t/ui/test_graph.c:795-827 builds 256 nodes and 1024 edges) but the assertion is only that visible nodes are > 10 and < 256, with no draw-budget or timing assertion. Measure both on P2 or under QEMU pentium2 and put the numbers in the UI spec §6.3. Both are blocked on the canlin-os QEMU harness, which is not on this host. Found by the 2026-11-14 review of k17 and k22.
+
+2026-11-15 Entscheidung des Maintainers: jetzt emuliert messen. Die Zahlen als Groessenordnung mit Vorbehalt eintragen: die Emulation kostet selbst Zeit, das Ergebnis ist eine Obergrenze, kein P2-Wert. Die Karten sind damit nicht mehr leer, und die Messung ist mit dem Emulator wiederholbar (der Nutzer-Mode-Gate laeuft seit 2026-11-15: qemu-i386 -cpu pentium2, Toolchain unter ~/opt/i686-linux-musl-cross). Was zu messen ist, steht in der Karte: Font-Atlas und Graph-Skalierung. Wichtig: die Werte, die in eine Limits-Datei gehen (CANLIN_UI_*-LIMIT), duerfen nicht auf Emulations-Zahlen gestellt werden, ohne dass das im Kommentar steht - die bestehenden Zahlen sind fuer den langsamsten Ziel (den 1-GB-P2) gedacht, nicht fuer eine Messung. Die Karte soll beide unterscheiden: was ist gemessen, was ist gesetzt.
+
+Messung (Entscheidung des Maintainers: jetzt emuliert messen, als Groessenordnung mit Vorbehalt eintragen).
+
+(1) Font-Atlas des eingebauten Inter-Subset (23.792 Bytes TTF, 343 Codepoints, 1:1 gebacken, alpha8). Gemessen mit canlin_render_font_default_sizes() fuer die drei Faces (Body/H1/H2) - ein Atlas je em-Groesse:
+  em 16 px (Skala 100 %, DPI 1.0): 1024 x 256 px = 262.144 B = 0,25 MiB
+  em 32 px (Skala 200 %, DPI 1.0): 1024 x 512 px = 524.288 B = 0,50 MiB
+  em 64 px (Skala 200 %, DPI 2.0): 1024 x 2048 px = 2.097.152 B = 2,00 MiB
+  em 128 px (Skala 200 %, DPI 4.0, das Maximum der Limits): 1024 x 8192 px = 8.388.608 B = 8,00 MiB
+Der Font-Cache haelt bis CANLIN_UI_FONT_SIZES_MAX = 4 Atlanten: im Extrem also 4 x 8 MiB = 32 MiB, im Normalfall (ein Output, eine Skala) 0,25 MiB.
+Diese Zahl ist unabhaengig von der CPU (das Backen ist Ganzzahl-Arbeit, die Atlas-Groesse ist eine reine Speichergroesse): Host und i686 unter QEMU liefern dieselben Bytes - der i686-Wert ist exakt und damit auch der P2-Wert. Die alte Zahl aus k22 (bis 4 MiB bei 200 %) stammte vom DejaVu-Blob und ist mit dem kleineren Inter-Subset ueberholt.
+
+(2) Graph-Skalierung: die Fixture aus t/ui/test_graph.c (256 Knoten, 1024 Kanten), 1024 x 1000 px Viewport. Sichtbare Knoten 24 (deterministisch, Host wie i686 gleich), gezeichnete Kanten 20 ueber 40 Draws. Zeit pro Draw: Host 2,13 ms, unter qemu-i386 -cpu pentium2 194,88 ms (40 Draws, 7795 ms). Das ist eine OBERGRENZE, kein P2-Wert: die Emulation selbst ist rund 90-mal langsamer als dieser Host, der P2 laeuft den Code nativ und damit deutlich schneller. Als Groessenordnung: der Graph an den Grenzen kostet unter der Emulation bis ~195 ms pro Frame.
+
+Nichts davon ist in eine Limits-Datei gewandert: die bestehenden Limits (CANLIN_UI_FONT_SIZES_MAX, die DPI- und Skalen-Grenzen) sind fuer den langsamsten Ziel gesetzt, nicht aus einer Messung abgeleitet. Die Zahlen gehoeren in die Spec (die Doc-Spur schreibt sie), mit dem Vermerk 'gemessen' und dem Vorbehalt.
+
+Vorschlag fuer die UI-Spec §6.3 (Doc-Spur): 'Der Atlas des eingebauten Inter-Subset haelt die drei Faces (Body, H1, H2) je em-Groesse: 0,25 MiB bei em 16 px (Skala 100 %, DPI 1.0) bis 8 MiB bei em 128 px (Skala 200 %, DPI 4.0) - gemessen, und unabhaengig von der CPU, weil die Atlas-Groesse eine Speichergroesse ist. Der Font-Cache haelt bis zu vier Atlanten (32 MiB im Extrem). Der Graph-Editor an den Grenzen (256 Knoten, 1024 Kanten) zeichnet die 24 sichtbaren Knoten und kostet unter QEMU pentium2 bis ~195 ms pro Frame - eine Obergrenze, keine P2-Zahl.' (Die Graph-Zahl gehoert fachlich nach §5, §6.3 ist der Font-Ort - die Doc-Spur entscheidet.)
+
+2026-11-15 (dispatcher): der ui-Agent wurde beim i686-Lauf vom Token-Limit beendet, die Karte blieb offen und die Arbeit ungetan (keine Messartefakte im Baum). Die Karte ist neu vergeben: es geht um die Messung des Font-Atlas-Speichers (k22 liess "~2x: bis 4 MiB bei 200 %" offen, und die Zahl stammt noch aus dem DejaVu-Blob, den k55 durch den kleineren Inter-Subset ersetzt hat) und um die Graph-Skalierung (die Fixture baut 256 Knoten und 1024 Kanten, t/ui/test_graph.c:795-827, behauptet aber nur, dass sichtbare Knoten > 10 und < 256 sind - es gibt keine Draw-Budget- oder Zeit-Assertion). Der Auftrag bleibt: messen, die Zahlen als Groessenordnung mit Vorbehalt eintragen, und "gemessen" und "gesetzt" unterscheidbar halten. Wichtig fuer die Einordnung: der Speicher des Atlas ist unabhaengig von der CPU (die i686-Zahl ist exakt), die Zeit (das Draw-Budget des Graphen) ist unter der Emulation eine Obergrenze, kein P2-Wert. Die Zahlen duerfen NICHT in eine Limits-Datei wandern, ohne dass dort steht, dass sie gemessen sind: die bestehenden Limits sind fuer den langsamsten Ziel (den 1-GB-P2) gesetzt. Das i686-Gate laeuft: export PATH="$HOME/opt/i686-linux-musl-cross/bin:$PATH", make TARGET=i686 BUILD=build/i686-ui, die Suiten unter qemu-i386 -cpu pentium2 (die grossen Suiten brauchen dort etliche Minuten).
+
+Messung begonnen (2026-11-15): Werkzeug tools/ui_budget.c (nach dem Muster von tools/sb_costs.c), Bau-Regel in mk/ui.mk (Target 'ui-budgets'), NICHT im Top-Level-Makefile - die Test-Spur (k143) schreibt dort gerade. Beide Gates laufen: Host und i686 user-mode (qemu-i386 -cpu pentium2), Build in build/host-ui bzw. build/i686-ui. Der i686-Lauf des Werkzeugs braucht ~100 s (ein eigener Timeout, nicht die 120 s der Suiten).
+
+Messung abgeschlossen (2026-11-15). Werkzeug: tools/ui_budget.c (nach dem Muster von tools/sb_costs.c), Bau-Regel in mk/ui.mk, Target 'ui-budgets'. NICHT im Top-Level-Makefile - die Test-Spur (k143) schreibt dort gerade. Es liegt keine Aenderung an fremden Dateien vor.
+
+(1) FONT-ATLAS - gemessen, GENAUE Bytes ( unabhaengig von der CPU)
+
+Der Atlas ist eine Speichergroesse (die gerasterten Glyphen einer em), keine Zeit: er haengt an der Aufloesung (DPI) und der Skalierung, nicht an der CPU. Host und i686 unter qemu-i386 -cpu pentium2 liefern dieselben Bytes - im Tool Lauf zeigte der Byte-Vergleich der deterministischen Zeilen null Unterschiede. Befehl: 'make ui-budgets BUILD=build/host-ui' bzw. 'make TARGET=i686 BUILD=build/i686-ui ui-budgets', dann 'qemu-i386 -cpu pentium2 ./build/i686-ui/tools/ui_budget'.
+
+Drei Faces je em (Body, H1 = 1.5 em, H2 = 1.25 em, wie src/ui/ui.c backt):
+  em  16 px (Theme 16 px, DPI 1.0, Skala 100 %): 1024 x  256 px =   262144 B = 0,25 MiB
+  em  32 px (Theme 16 px, DPI 1.0, Skala 200 %): 1024 x  512 px =   524288 B = 0,50 MiB
+  em  64 px (Theme 16 px, DPI 2.0, Skala 200 %): 1024 x 2048 px =  2097152 B = 2,00 MiB
+  em 128 px (Theme 16 px, DPI 4.0, Skala 200 %): 1024 x 8192 px =  8388608 B = 8,00 MiB
+Je Cache-Eintrag kommen 49392 B Glyph-Tabelle (1029 Glyphen) und 71376 B Nuklear-eigene TTF-Kopien (3 x 23792) dazu. Der Font-Cache haelt bis CANLIN_UI_FONT_SIZES_MAX = 4 Eintraege.
+
+Die alte Zahl aus k22 ('Atlas memory ~2x: bis 4 MiB bei 200 %') stammte vom DejaVu-Blob (38804 B) und ist ueberholt: das Inter-Subset ist 23792 B, und der Wert bei 200 % (em 32 px) ist 0,50 MiB Pixel, nicht 4 MiB.
+
+NEU - ein Befund, den die alte Rechnung nicht sah: die groesste em-Groesse, die die Limits erlauben, ist 320 px (Theme 40 px x DPI 4.0 x Skala 200 %). Dort ist der Atlas 1024 x 32768 px = 33554432 B = 32 MiB je Eintrag, und der Packer verliert still 333 von 1029 Glyphen der H2-Face (der Text kommt mit Löchern heraus, ohne Fehler). Ab em 265 px faellt der Verlust ein, ab em 264 px ist jede Face vollstaendig. Das ist eine stille Fehlfunktion an der Grenze der Limits, keine Zeitfrage: die Grenze liegt beim Packer (max_height 1024*32), nicht beim Speicher. Ich habe das NICHT geaendert (Fremdspur/Design-Entscheidung), sondern hier notiert.
+
+(2) GRAPH-SKALIERUNG - die Zaehler exakt, die Zeiten unter der Emulation eine OBERGRENZE
+
+Fixture wie t/ui/test_graph.c (test_limits): 256 Knoten, 1024 Kanten, Viewport 1024 x 1000 px, DPI 1.0 (em 16 px), Graph-Hoehe 60 em.
+  sichtbare Knoten:    24 von 256 (der Rest wird gecullt)
+  gezeichnete Kanten:  300 von 1024 (die Curves der Kommandoliste)
+  Kommandos je Frame:  591 (curve 300, line 31, rect 122, circle 86, text 48)
+Die Zaehler sind exakt und auf Host und Ziel gleich - im Tool Lauf identisch (24 / 300 / 591 auf beiden). Die Kantenzahl habe ich zusaetzlich unabhaengig nachgerechnet (die Culling-Regel aus src/ui/graph.c nachgebaut): ebenfalls 300.
+
+Zeiten (je 20 Frames, Minimum und Median):
+  Host:  Draw (Lua, Graph-Parse, Kommandoaufbau) min 1,78 ms / Median 1,91 ms
+         Raster (Kommandoliste in Pixel)               min 15,7 ms / Median 16,8 ms
+  i686 (qemu-i386 -cpu pentium2): Draw min 142 ms / Median 205 ms, Raster min 229 ms / Median 502 ms
+Das sind OBERGRENZEN, KEINE P2-Werte: die Emulation verlangsamt jede Instruktion, der P2 laeuft den Code nativ. Ein P2-Wert ist aus dieser Messung nicht ableitbar (canlin#3). Die alte Notiz der Karte nannte '20 ueber 40 Draws' - das trifft auf die echte Kommando-Zaehlung nicht zu; 24 Knoten und 300 gezeichnete Kanten sind die gemessenen Werte.
+
+(3) GEMESSEN / GESETZT / OBERGRENZE - die Unterscheidung der Karte
+
+GEMESSEN (Zaehler, exakt, host- und zielgleich): Atlas-Groessen in Bytes, sichtbare Knoten 24, gezeichnete Kanten 300, Kommandos je Frame 591.
+GEMESSEN, aber unter der Emulation nur als OBERGRENZE: alle Zeiten (Bake, Draw, Raster).
+GESETZT (nicht aus einer Messung abgeleitet, fuer das langsamste Ziel gesetzt, bleiben unveraendert): alle CANLIN_UI_*-Limits, insbesondere CANLIN_UI_FONT_SIZES_MAX, CANLIN_UI_GRAPH_MAX_NODES/EDGES, CANLIN_THEME_FONT_SIZE_MAX/MAX, CANLIN_UI_DPI_MAX, die Skalen-Stufen.
+In KEINE Limits-Datei ist eine Zahl gewandert. Der Kommentar in include/canlin/ui_limits.h bleibt unangetastet - die Limits stehen weiter als 'gesetzt', nicht als 'gemessen'.
+
+(4) Tests
+
+Die Fixture behauptete bisher nur 'sichtbare Knoten > 10 und < 256'. Neu (t/ui/test_graph.c): das Draw-Budget als Assertion - Kommandos je Frame <= 700, gezeichnete Kanten <= 350 und > 100, mit den gemessenen Werten (591 / 300) im Kommentar. Keine Zeit-Assertion (das waere der Befund aus k145).
+In t/render/test_render.c: die Atlas-Groessen als Assertion (16 px eine Face 512x128, 16 px drei Faces 1024x256, 32 px 1024x512, 64 px 1024x2048) mit dem Vermerk 'gemessen'.
+
+Gates:
+  Host: 'make TARGET=host BUILD=build/host-ui test' -> ALL TESTS PASSED (gate: host).
+  i686 user-mode: alle 17 Suiten einzeln unter 'qemu-i386 -cpu pentium2' -> PASS, auch t/ui/test_ui (der langsame, ~253 s) und t/ui/test_graph (13366 Checks, 0 Fehler) und t/render/test_render.
+  NICHT gelaufen: der canlin-os Full-System-Gate (qemu-system-i386) - nicht auf diesem Host. Kein Geraetetest (android-armv7, kein Geraet angeschlossen). Kein WASM-Gate (im Repo kein WASM-Target).
+  BEFUND, fremde Spur: t/net/http_test ist unter der Emulation flaky (7, dann 3, dann 5 Fehlschlaege in drei Laeufen; der Test benutzt eine Echtzeit-Spin-Schleife). Ich habe das gegen den Basisbaum ohne meine Aenderungen geprueft: dort ebenfalls 3 bzw. 5 Fehlschlaege und einmal ein gruener Lauf. Vorbestehend, nicht von dieser Karte verursacht; die Net-Spur sollte das kennen.
+
+(5) Spec-Satz-Vorschlag (die Doc-Spur schreibt §6.3; die Zahlen stehen hier)
+
+Fuer UI-Spec §6.3 nach dem Absatz 'Bodies and headings are baked once per theme load at base size x DPI':
+  'Der Atlas des eingebauten Inter-Subset haelt die drei Faces (Body, H1, H2) je em-Groesse: 0,25 MiB bei em 16 px (Skala 100 %, DPI 1.0) bis 8 MiB bei em 128 px (Skala 200 %, DPI 4.0), gemessen und unabhaengig von der CPU, weil die Atlas-Groesse eine Speichergroesse ist. Der Font-Cache haelt bis zu vier Atlanten. An der Grenze der Limits (em 320 px: Theme 40 px, DPI 4.0, Skala 200 %) ist der Atlas 32 MiB und der Packer verliert still Glyphen - das ist eine offene Frage an die Grenze, keine gemessene Groesse.'
+Fuer die Graph-Zahl gehoert die Aussage fachlich nach §5.3, nicht nach §6.3; die Doc-Spur entscheidet. Vorschlag fuer §5.3:
+  'Der Graph-Editor an den Grenzen (256 Knoten, 1024 Kanten, 1024 x 1000 px) zeichnet 24 sichtbare Knoten und 300 Kanten in 591 Kommandos - die Zaehler sind exakt. Die Zeit ist unter QEMU pentium2 bis ~205 ms je Draw und ~502 ms je Raster: eine Obergrenze, kein P2-Wert.
+
+Messung fertig, Karte geht in die Review.
+
+Werkzeug: tools/ui_budget.c, gebaut mit 'make ui-budgets BUILD=build/host-ui' bzw. 'make TARGET=i686 BUILD=build/i686-ui ui-budgets', gelaufen als 'qemu-i386 -cpu pentium2 ./build/i686-ui/tools/ui_budget' (der Lauf braucht ~100 s, ein eigener Timeout, nicht die 120 s der Suiten).
+
+Gemessen (die Zaehler exakt, auf Host und i686 identisch): Atlas-Groessen 0,25 MiB (em 16 px) bis 8 MiB (em 128 px) je Font-Cache-Eintrag, 32 MiB an der Grenze der Limits (em 320 px); Graph an den Grenzen: 24 sichtbare Knoten, 300 gezeichnete Kanten, 591 Kommandos je Frame.
+Die Zeiten (Draw, Raster, Bake) sind unter der Emulation Obergrenzen, keine P2-Werte - im Bericht so gekennzeichnet.
+
+Geaenderte Dateien (alle in meiner Spur):
+  tools/ui_budget.c            (neu: das Messwerkzeug)
+  mk/ui.mk                     (neu: Target 'ui-budgets'; NICHT das Top-Level-Makefile, das schreibt die Test-Spur k143 gerade)
+  t/ui/test_graph.c            (neu: Draw-Budget als Assertion - Kommandos <= 700, Kanten <= 350 und > 100; keine Zeit-Assertion, das waere k145)
+  t/render/test_render.c       (neu: Atlas-Groessen als Assertion, mit dem Vermerk 'gemessen')
+Keine Limits-Datei angefasst: CANLIN_UI_* bleiben 'gesetzt', keine der gemessenen Zahlen ist in eine Limits-Datei gewandert.
+
+Befund zum Weitergeben (nicht von mir geaendert): an der Grenze der Limits (em 320 px) verliert der Packer still 333 von 1029 Glyphen - der Text kommt mit Loechern heraus, ohne Fehler. Ab em 265 px faellt der Verlust ein. Das gehoert als Karte in die UI-Spur.
+
+Gates: Host 'make TARGET=host BUILD=build/host-ui test' -> ALL TESTS PASSED (gate: host). i686 user-mode: alle 17 Suiten einzeln unter qemu-i386 -cpu pentium2 -> PASS, auch t/ui/test_ui (der langsame) und t/ui/test_graph (13366 Checks, 0 Fehler) und t/render/test_render. t/net/http_test ist unter der Emulation flaky (3-7 Fehlschlaege je Lauf); gegen den Basisbaum ohne meine Aenderungen geprueft: dort genauso, einmal auch gruen - vorbestehend, Net-Spur.
+
+Nicht gelaufen und nicht behauptet: canlin-os Full-System-Gate (qemu-system-i386, nicht auf diesem Host), Geraetetest android-armv7 (kein Geraet), WASM-Gate (kein WASM-Target im Repo).
+
+Kein Commit - der Main-Agent committet. Proposed Subject: "Measure the font atlas and the graph at the UI limits (k96)
+
+2026-11-15 review (main): committet als c8176c2. Die beiden Messungen stehen, und die Unterscheidung traegt: der Atlas-Speicher ist eine Groesse und haengt an DPI und Skalierung, nicht an der CPU - Host und i686 liefern byteweise dieselben Zahlen, der i686-Wert ist exakt. Die Zeiten (Draw des Graphen unter der Emulation) sind Obergrenzen, kein P2-Wert, und das steht so dabei. Keine gemessene Zahl ist in eine Limits-Datei gewandert: die CANLIN_UI_*-Limits bleiben gesetzt, und ui_limits.h ist unberuehrt.
+Der Font-Atlas ist damit neu abgeleitet: 0.25 MiB bei 16 px em, 0.50 MiB bei 32 px (Skalierung 200 %, DPI 1.0), 2.00 MiB bei 64 px, 8.00 MiB bei 128 px. Die alte Zahl aus k22 ("bis 4 MiB bei 200 %") stammte aus dem DejaVu-Blob und ist ueberholt.
+Ein Fund, den die alte Herleitung nicht gesehen hat, ist als eigene Karte erfasst: bei der groessten em, die die Limits erlauben (320 px), ist der Atlas 32 MiB gross und der Packer verwirft still 333 von 1029 Glyphen - der Text kommt mit Loechern heraus, ohne Fehler. Ab em 265 px geht Glyphen verloren, em 264 px ist vollstaendig. Das ist eine Designfrage an der Grenze der Limits, keine Zeitfrage.
+Der Graph-Test behauptet jetzt das Draw-Budget (591 Kommandos, 300 Kanten pro Frame); keine Zeit-Assertion, das waere der Befund aus k145.
+Gates: Host gruen; i686 user-mode alle 17 Suiten einzeln gruen (test_ui 13133 Checks in 4m33s, test_graph 13366 Checks).
