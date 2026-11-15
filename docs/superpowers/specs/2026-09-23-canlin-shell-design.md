@@ -20,6 +20,11 @@ a module gets `draw(ui)` for its view and nothing about where that view sits.
   arbitrary rectangles.
 - **One view per module instance.** A module is shown in at most one place at a time.
   Showing it elsewhere moves the view (`canlin_ui_view_bind`), it does not clone it.
+- **A model pane holds two views.** The model's own view and the module's own view are
+  two views: two identity spaces, two rectangles. The model's widgets live in the
+  model's view, the module's in the module's; a pane without a model view of its own —
+  or too small for two — keeps the old arrangement: the module's own view sits in the
+  frame.
 
 ## 2. Modes
 
@@ -52,6 +57,10 @@ The shell draws, in C with the same theme and widgets internals, outside every v
 - **Dividers** between tiles, and the **focus mark** (accent border) on the focused view.
 - **Model-view frame** around assistant views built by the GUI tool, labelled as
   model-generated with the submit boundary visible (UI spec §4, LLM/UI design §5).
+  The frame frames the model's own view — the label strip and the view — and nothing
+  else: the module's own view sits below it, outside the frame. The submit action of
+  the model's form is drawn inside the frame; the module's own widgets — the
+  assistant's question field among them — sit outside it.
 - **Faulted view**: a faulted module's pane shows the fault and a restart action;
   restart is a user action and creates a new generation (core API §5.3).
 

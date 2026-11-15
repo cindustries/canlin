@@ -29,6 +29,10 @@ handles, `canlin_` naming, limits headers) are those of the core API design.
   targets of graph ports are at least 2.5 em square even when the drawn dot is smaller.
 - **View** = the module's content area, one vertical scroll region owned by the core.
   The module cannot scroll it programmatically in v1.
+- **Model view** = the model's own view, a view of its own: a second vertical scroll
+  region with its own identity space, its own focus and focus order, its own widget
+  state and its own rectangle. An explicit `opts.id` of the module names no identity in
+  the model view, and the module cannot draw into it.
 - **Columns:** below 40 em of content width everything is one column. `ui:columns()`
   (§3) splits into two equal columns at ≥ 40 em and stacks them below. There is no
   automatic multi-column placement of ordinary widgets.
@@ -130,9 +134,10 @@ never inserts a tab character.
 
 The shell draws the status bar, module switcher, settings entry and permission/error
 chrome itself, outside every module view. A view built from the GUI tool (§7) sits in a
-frame labelled as model-generated, with its submit boundary visible. Module and model
-views cannot draw over, restyle or imitate that chrome: the theme applies to them, but
-their widgets have no access to chrome roles or positions.
+frame labelled as model-generated, with its submit boundary visible. The model view
+sits in that frame; the module's own widgets sit outside it, in the module's own view.
+Module and model views cannot draw over, restyle or imitate that chrome: the theme
+applies to them, but their widgets have no access to chrome roles or positions.
 
 ## 5. Graph editor
 
