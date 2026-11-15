@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-15T01:01:54Z
+id: 164
+priority: low
+status: backlog
+tags:
+- runtime
+- ui
+- theme
+title: 'Runtime: the built-in theme''s font size 16 has no constant, although the
+  other factor of the em formula has one'
+updated: 2026-11-15T01:01:54Z
+---
+
+Aus der Arbeit an k117 (2026-11-15): die Fixtures rechnen die em aus "16.0f * scale / base" (t/ui/test_ui.c:1419, :1488, :1613, t/ui/test_graph.c:934) - die Skala und die Basis kommen aus dem Header (CANLIN_UI_SCALE_STEP_*, CANLIN_UI_SCALE_BASE_PERCENT), die 16 (die eingebaute Theme-Schriftgroesse) nicht. Sie ist damit die einzige Zahl der em-Formel ohne Fundort im Header. Ein CANLIN_THEME_FONT_SIZE_DEFAULT (oder ein aehnlicher Name) in include/canlin/ui_limits.h wuerde sie schliessen. Klein, aber es ist dieselbe Luecke, die k117 bei den anderen Literalen schliesst.
