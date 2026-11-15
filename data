@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T00:57:38Z
+id: 160
+priority: medium
+status: backlog
+tags:
+- netllm
+- browser
+- transport
+title: 'Browser: a WebSocket transport - new in the core, not only an adapter'
+updated: 2026-11-15T00:57:38Z
+---
+
+Aus der Recherche k151: in src/net/ gibt es keinen WebSocket-Client - nur http, sse, json, tls, sock, dns. Im Browser ist WebSocket also nicht nur ein Adapter, sondern neue Kern-Arbeit. Die Spec hat die Einschraenkung schon festgehalten: Browser-WebSocket-Konstruktoren koennen keine freien Auth-Header setzen - die Spec verlangt ein kurzlebiges Connection-Ticket oder einen authentifizierten Austausch ueber die erste Nachricht (system-design:403-405). Der Transport muss gegen einen Fixture-Server bestehen, Backpressure explizit melden (event-runtime:114) und die Session-Only-Regel der Spec einhalten (llm-ui:72-77: "No key is embedded in a WASM binary, URL or distributed asset"). Die Karte gehoert in die Netz-Spur, neben den Fetch-Transport.
