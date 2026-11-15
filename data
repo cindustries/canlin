@@ -1,0 +1,43 @@
+---
+claimed_at: 2026-11-15T00:58:00Z
+claimed_by: canlin-scout
+class: standard
+completed: 2026-11-15T00:58:00Z
+created: 2026-11-15T00:49:06Z
+id: 151
+priority: high
+started: 2026-11-15T00:49:17Z
+status: done
+tags:
+- build
+- wasm
+- browser
+title: 'Build: the browser/WASM target is a first-class target in the specs and has
+  no build and no card'
+updated: 2026-11-15T00:58:00Z
+---
+
+Die System-Design-Spec fuehrt den Browser als gleichwertiges Ziel (2026-09-22-canlin-system-design.md §2, Zeile 60: "Browser | Emscripten + SDL2/Canvas, browser I/O adapters | WASM + loader + assets over HTTPS | CanLin"), der Browser-Build ist CanLin selbst, nach WASM uebersetzt, inklusive Lua und der portablen Bibliotheken - kein zweites JavaScript-Frontend (Zeile 79). §12 nennt ein eigenes Gate: "The WASM browser gate exercises the actual compiled runtime with local fixtures: yielding, input/render, Fetch streaming/WebSocket, persistence across reload, quota and permission denial, CORS failure, single-writer storage ownership and suspension." Der Repo-Befund: kein Makefile-Target, kein mk/*.mk fuer WASM, kein Emscripten auf diesem Host (emcc/emcmake fehlen, kein ~/emsdk), und auf dem Board keine Karte fuer den Browser. Das ist ein ganzes Ziel ohne Arbeit. Erster Schritt ist eine Recherche, keine Implementierung: welche Stuecke des Kerns sind ueberhaupt wasm-faehig (der Scheduler braucht einen Browser-Takt, die Sandbox ihre Grenzen im WASM-Speicher, SQLite einen VFS, der Speicher das Modul-Handle-Set), welche Browser-G Glue es braucht (Fetch/Streams/WebSocket, Canvas oder SDL2, Timer, Persistenz ueber Reload) und was die Specs schon entschieden haben. Diese Recherche ist eine Karte fuer die Scout-Spur (nur lesen, nichts aendern). Aus ihr folgen dann die Karten: das Makefile-Target, der Emscripten-Build, die Browser-Adapter und das Gate.
+
+Recherche abgeschlossen. Befund: Der Kern ist ueberraschend weit von WASM entfernt - er ist schon fast fertig, aber nicht wegen des Codes, sondern weil das Repo drei Dinge gar nicht hat.
+
+TRAGFAEHIG ohne Aenderung: src/ev/ (nur stdlib.h/string.h, der Takt ist injiziert: include/canlin/ev.h:35-38), src/sandbox/ (eigener Allokator mit mem_limit: src/sandbox/sandbox.c:52-72, lua_newstate: :549), src/render/ (reiner Software-Rasterizer ohne OS-Aufruf: include/canlin/render.h:1-10), src/module/ (kein FS, kein Socket), src/ui/, src/shell/, src/llm/.
+
+ADAPTER (die Seams existieren schon): Takt+Wait (POSIX nur an 3 Stellen: src/loop/loop.c:54 pipe, :294 poll, :308 clock_gettime; die Seam canlin_loop_wait_fn, include/canlin/loop.h:78-92, traegt), Present (include/canlin/app.h:51-54), Eingabe (canlin_ui_input: include/canlin/ui.h:213-224), Fetch/Streams+WebSocket (die Seam canlin_llm_transport: include/canlin/llm.h:122-131, ist genau richtig; include/canlin/app.h:62 nennt den 'browser adapter' bereits).
+
+BLOCKIERT / gar nicht vorhanden: (a) die Netzschicht als Ganzes ist POSIX (src/net/sock.c:1-11, dns.c:16 pthread, tls.c mbedtls) und darf im Browser nicht mitgebaut werden (system-design Z.116-117) - also aus LIBOBJ ausnehmen. (b) SQLite und das Dateisystem existieren im Repo ueberhaupt nicht: third_party/ hat kein sqlite, docs/THIRD-PARTY.md:19-26 listet SQLite/sqlite-vec als 'Planned', in src/ gibt es kein einziges fopen/mkdir/open. Kein BeePack-Loader, keine Persistenz, kein Settings-Store, Credentials nur session-only im Core-Speicher (include/canlin/llm.h:8-13). Die Browser-Gate-Punkte 'persistence across reload', 'quota', 'single-writer' (system-design Z.437-440) haengen an einer Speicher-Schicht, die es fuer KEINE Plattform gibt - das ist der eigentliche Blocker, nicht der Browser.
+
+UMGEBUNG: kein Makefile-Target, kein mk/*.mk fuer WASM, kein emsdk/emsdk auf diesem Host, kein Chromium/Firefox (nur node v24.19.0), keine Karte auf dem Board. Die Lane-Tabelle kennt keine Browser-Spur.
+
+SPEC ENTSCHIEDEN: Browser gleichwertiges Ziel (system-design Z.51-60, 79-83, 104-106), Build = CanLin nach WASM (Z.79-83), Browser-Transport nutzt Browser-HTTP/TLS statt Tunneln (Z.116-117; event-runtime Z.200-201), Callbacks + rAF bei dirty, kein blockierendes poll (event-runtime Z.61; system-design Z.126-129), ein Canvas (ui-spec Z.73-75), Session-only Credentials, kein Key im WASM (llm-ui Z.72-77), single-writer (event-runtime Z.211-213), Gate-Liste (system-design Z.437-440).
+
+SPEC OFFEN: Canvas oder SDL2 (Z.60 nennt beides), VFS/Flush/Writer-Exclusion (Z.454-455), Groessen-/Ladezeit-Budget (nirgends), Browser-Loop-Spec fehlt (native-loop Z.6 'separate slice', Z.64-80 ohne Browser-Zeile), Browser-Fetch-Spec fehlt (http-transport Z.7), Browser-Fixture-Server (t/net/tsrv.c ist ein geforkter POSIX-TLS-Server, im Browser unbrauchbar), SQLite im Browser.
+
+KLEINSTER EHRLICHER ERSTER SCHRITT: eine dritte Adapter-Spur src/browser/ nach dem Muster src/loop/, src/android/, src/app/ - und zuerst der WASM-Build des vorhandenen Kerns OHNE Netz und OHNE Speicher: die portablen Suiten nach wasm32 und unter node laufen lassen. Das beweist die Portabilitaets-Behauptung (system-design Z.45-46) ohne Browser und ohne die Zielarchitektur umzubauen. Danach der Adapter-Lane, dann der Browser-Gate-Harness mit eigenem Fixture-Server.
+
+Kartenliste (10) im Bericht des Scouts; die Karten legt der Orchestrator an. Ownership: alles Browser-gehoert CanLin (system-design Z.60, Z.90) - kein Cross-Repo-Ticket, ausser der CORS/Origin-Flow mit canlin-server (Z.406), der aber erst mit canlin-server entsteht (Z.94, 409-410).
+
+Recherche fertig, Karte an den Orchestrator zur Karten-Anlage. Kernbefund: der portable Teil des Cores (ev, sandbox, render, module, ui, shell, llm) ist WASM-tauglich und braucht keine Aenderung; die Adapter-Seams (Takt/Wait, Present, Eingabe, canlin_llm_transport) existieren bereits und greifen an den richtigen Stellen. Der Blocker ist nicht der Code, sondern dreierlei Fehlendes: (1) die native Netzschicht (src/net/sock.c, dns.c pthread, tls.c mbedtls) darf im Browser nicht mitgebaut werden und muss aus LIBOBJ ausgenommen werden; (2) SQLite, Dateisystem, BeePack-Loader, Settings und Persistenz existieren im Repo ueberhaupt nicht - die Gate-Punkte 'persistence across reload', 'quota', 'single-writer' (system-design Z.437-440) haengen an einer Speicher-Schicht, die es fuer keine Plattform gibt; (3) kein Build-Target, kein emsdk auf diesem Host, kein Browser installiert, kein Lane-Eintrag fuer src/browser/. Kleinster ehrlicher erster Schritt: dritte Adapter-Spur src/browser/ nach dem Muster src/loop/, src/android/, src/app/, und zuerst der WASM-Build des vorhandenen Kerns ohne Netz und ohne Speicher, mit den portablen Suiten unter node - das beweist die Portabilitaets-Zusage, ohne die Zielarchitektur umzubauen. 10 Karten (Titel, Spur, Abnahmekriterium) stehen im Scout-Bericht; sie werden hier bewusst NICHT angelegt.
+
+2026-11-15 review (main): der Bericht ist gelesen und traegt - er ist der Grund, warum es jetzt ueberhaupt Karten gibt. Der Befund mit der Reichweite: der portable Teil ist fast fertig (der Scheduler nimmt den Takt injiziert, der Renderer ist reiner Software-Rasterizer, der Modul-Layer kennt kein FS), und die Seams fuer eine dritte Adapterspur existieren schon. Was fehlt, ist nicht der Code, sondern dass drei Dinge gar nicht existieren: kein Build-Target, keine Werkzeugkette (kein emsdk auf dem Host), und - der schwerste Befund - keine Speicherschicht fuer irgendeine Plattform (kein fopen in src/, kein SQLite, kein BeePack-Loader, keine Settings; die Credentials leben nur session-only im Core). Ohne Speicherschicht sind drei der neun Browser-Gate-Punkte unerreichbar. Das ist als eigene Karte (k157) erfasst und nicht als Nebensatz versteckt.
+Die neun Karten aus dem Bericht sind angelegt: k153 (Entscheidung: Anzeige-Backend, Wait-Modell, Groessen-Budget), k154 (Spec der Browser-Adapter), k155 (emsdk), k156 (make TARGET=wasm), k157 (Speicherschicht), k158 (Adapter-Spur src/browser), k159 (Fetch/Streams-Transport), k160 (WebSocket-Transport), k161 (Gate-Harness mit Fixture-Server). Die Reihenfolge im Bericht ist uebernommen: Entscheidung und Werkzeugkette vor dem Build, und der Browser ist die dritte Adapterspur neben der nativen und der Android-Spur. Die Karte ist eine Recherche und damit erledigt.
