@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-11-15T05:14:53Z
+claimed_by: canlin-worker-ui
+class: standard
+completed: 2026-11-15T05:14:53Z
+created: 2026-11-14T23:28:23Z
+id: 131
+priority: medium
+started: 2026-11-15T00:36:19Z
+status: done
+tags:
+- shell
+- ui
+- assistant
+title: 'Shell: keys and text never reach the model''s own view'
+updated: 2026-11-15T05:14:53Z
+---
+
+Since canlin#128 a model pane holds two views, and the shell routes the keys and the text to the focused module (src/shell/shell.c:986 key_input, :1214). A text field inside the model's own view - the GUI tool's input - gets no keys. The shell cannot know which of the two views holds the keyboard focus: the ui API has no focus query (the record's CANLIN_UI_P_FOCUS would have to be scanned, and the module's own view can hold a focus at the same time). Decide where the focus lives when both views can have one - the ui layer, the shell, or the app - and route the keys accordingly. Found by the 2026-11-14 work on k128.
+
+Umsetzung (Test zuerst): die Fokus-Abfrage canlin_ui_view_has_focus(v) in der ui-Schicht (include/canlin/ui.h, src/ui/ui.c) - sie fragt den per-View-Fokus ab (v->focus != 0); ein View ohne Fokus hat keinen, zwei Views koennen gleichzeitig einen halten. Der Shell (src/shell/shell.c) benutzt sie nur: model_has_focus() und zwei Verzweigungen - der key_input-Zweig und der Text-Zweig - leiten die Tasten und den Text an die Modell-View, wenn sie den Fokus hat; sonst an das Modul wie bisher.
+
+Gegenprobe (rot): model_has_focus auf 0 gesetzt -> 4 Checks schlagen fehl (H.texts == t0, mvval == 'x', own_value == 'm', H.keys == k0). Mit der Aenderung: shell 4562 Checks gruen.
+
+Test: t/shell/test_shell.c test_model_view_keys - ein Modell-View mit einem Feld (der Test faehrt es mit einem eigenen Lua-State, so wie der Assistant es faehrt) und ein Modul mit einem Feld in der eigenen View. Beide Views halten gleichzeitig einen Fokus; der Text und die Taste (Backspace) gehen in die Modell-View, das Modul bekommt weder Text noch Taste, und ohne den Fokus in der Modell-View geht der Text weiter ins Modul. Dazu in t/ui/test_ui.c: test_view_has_focus (die Abfrage) und test_input_reset (ein queued Klick, der auf den neuen Inhalt wirken wuerde, wenn die View ihr queued input nicht zuruecksetzt - der Reset, den das set_view des Modell-Views braucht).
+
+Sicherheitspunkt (die Meldung der Plattform-Spur, von mir nachgeprueft und im Test verankert): solange der Legacy-Pfad zeichnet - das Binding zeichnet das Modell in die View des Moduls (src/assistant/binding.c:43-49, src/app/assistant.c:171) -, zeigt der Reset des queued input beim set_view auf die FALSCHE View: src/assistant/view.c:1556-1557 setzt canlin_ui_view_input_reset(av->view) zurueck, und av->view ist die Modell-View des App (src/app/assistant.c:277 -> :440), nicht die Modul-View, in die der Legacy-Pfad zeichnet. Ein queued Klick in der Modul-View kann also auf ein neues Modell-Widget wirken. Das ist die Spur des Assistant (k130), nicht meine; der Reset muss mit dem Zeichnen mitwandern. Mein Test haelt den Mechanismus fest (test_input_reset: derselbe queued Druck landet ohne den Reset auf dem Knopf und mit dem Reset nicht).
+
+Host-Gate: alle Suiten gruen ausser dem fremden t/llm/test_llm (netllm-Spur, 1 von 50990 Checks rot - nicht meine). i686-Gate laeuft noch.
+
+2026-11-15 review (main): gelesen und committet als 6763201. Die Fokus-Abfrage liegt in der ui-Schicht (canlin_ui_view_has_focus, pro View), der Shell fragt beide Views und gibt die Tasten und den Text der Modell-View, wenn sie den Fokus haelt - auch dann, wenn die Modul-View ebenfalls einen haelt. Die Begruendung steht im Kommentar und deckt sich mit ADR 0001: die Modell-View ist der Bereich, in dem das Modell spricht, ein Modul, das die Tasten dort abfaengt, koennte dem Benutzer etwas unterstellen, das das Modell nicht gesagt hat.
+Die Dateien ueberschneiden sich mit dem Sweep des Test-Writers (t/ui/test_ui.c, t/shell/test_shell.c) - der Dispatcher hat die Hunks getrennt und beide Commits einzeln committet. Der Test der Karte (test_view_has_focus in t/ui/test_ui.c, test_model_view_keys in t/shell/test_shell.c) liegt beim ui-Agenten; der ui-Agent wurde beim i686-Lauf vom Token-Limit beendet, der Lauf ist im Dispatcher nachgeholt.
