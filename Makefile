@@ -55,6 +55,44 @@ CC := $(ANDROID_NDK)/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-andr
 CFLAGS += -fPIC
 PTHREAD_LIBS :=
 endif
+
+# The emscripten toolchain (k155). It is not a host feature: it is a pinned
+# version at a fixed place outside the repo, the way the i686 cross toolchain
+# sits under ~/opt. The emsdk resolves its own configuration relative to its own
+# directory, so emcc and emcmake work by absolute path -- a wasm build must not
+# need a sourced shell script. EMSDK names another place when the toolchain
+# lives elsewhere, EMSDK_VERSION the pinned version.
+EMSDK ?= $(HOME)/opt/emsdk
+EMSDK_VERSION ?= 7.0.0
+EMCC := $(EMSDK)/upstream/emscripten/emcc
+# emcmake is the cmake entry point: it names the emscripten toolchain file and
+# the node emulator to cmake, for a wasm build that goes through cmake.
+EMCMAKE := $(EMSDK)/upstream/emscripten/emcmake
+# The node of the emsdk: the emulator the emscripten runtime runs under, and
+# the runner of the wasm suites (k156). The host's node is the fallback for an
+# emsdk that carries none.
+EMSDK_NODE ?= $(firstword $(wildcard $(EMSDK)/node/*/bin/node) node)
+
+# The browser build (k155 gives the toolchain, k156 the build itself). The
+# compiler is the emsdk one, found by path: 'make TARGET=wasm' must work
+# without a sourced shell script and without a hand-set PATH.
+ifeq ($(TARGET),wasm)
+CC := $(EMCC)
+# No debug info: emcc links through binaryen, and DWARF forces binaryen into
+# its limited optimization mode, which -Werror then turns into a build error
+# ("running limited binaryen optimizations because DWARF info requested").
+CFLAGS := $(filter-out -g,$(CFLAGS))
+# The toolchain check runs before the first object is built, so a missing
+# emsdk fails loud with the install command and not with 'emcc: not found'.
+# It is an order-only prerequisite, because a phony one would rebuild every
+# object. The order-only marker lives in the variable: a pattern rule does not
+# take its extra prerequisites from a second pattern rule with the same target
+# pattern, so the check has to stand in the rule that compiles.
+WASM_TOOLCHAIN_PREREQ := | wasm-toolchain
+else
+WASM_TOOLCHAIN_PREREQ :=
+endif
+
 BUILD := build/$(TARGET)
 
 # Sanitizer build (k87). 'make SAN=asan test' rebuilds the suites with the address
@@ -101,7 +139,7 @@ all: tests
 
 include $(sort $(wildcard mk/*.mk))
 
-$(BUILD)/%.o: %.c
+$(BUILD)/%.o: %.c $(WASM_TOOLCHAIN_PREREQ)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
@@ -195,4 +233,20 @@ endif
 clean:
 	rm -rf build
 
-.PHONY: all tests test test-san test-device clean
+# The emscripten toolchain check (k155). It names the pinned version and the
+# install command, so a missing toolchain is a named fact and not a search:
+# the emsdk installs itself into its own directory and needs no root.
+wasm-toolchain:
+	@if [ ! -x "$(EMCC)" ] || [ ! -x "$(EMCMAKE)" ]; then \
+	  echo "error: the emscripten toolchain is not complete under $(EMSDK) (version $(EMSDK_VERSION) expected):" >&2; \
+	  echo "       emcc:    $(EMCC)" >&2; \
+	  echo "       emcmake: $(EMCMAKE)" >&2; \
+	  echo "       install it with:" >&2; \
+	  echo "         git clone --depth 1 --branch $(EMSDK_VERSION) https://github.com/emscripten-core/emsdk.git $(EMSDK)" >&2; \
+	  echo "         $(EMSDK)/emsdk install $(EMSDK_VERSION)" >&2; \
+	  echo "         $(EMSDK)/emsdk activate $(EMSDK_VERSION)" >&2; \
+	  exit 1; fi; \
+	echo "emscripten toolchain: $(EMSDK) (version $(EMSDK_VERSION))"; \
+	"$(EMCC)" --version | head -1
+
+.PHONY: all tests test test-san test-device clean wasm-toolchain
