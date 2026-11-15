@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-11-15T18:14:46Z
+claimed_by: canlin-worker-ui
+class: standard
+created: 2026-11-15T17:45:44Z
+id: 169
+priority: high
+started: 2026-11-15T17:49:23Z
+status: in-progress
+tags:
+- ui
+- render
+- theme
+title: 'UI: at the em the limits allow, the font packer silently drops glyphs'
+updated: 2026-11-15T18:14:46Z
+---
+
+Aus der Messung k96 (2026-11-15): die groesste em, die die Limits erlauben, ist 320 px (Theme 40 px x DPI 4.0 x Skalierung 200 %). Dort ist der Font-Atlas 32 MiB gross, und der Packer verwirft still 333 von 1029 Glyphen - der Text kommt mit Loechern heraus, ohne Fehler, ohne Warnung. Der Verlust beginnt bei em 265 px; em 264 px ist vollstaendig. Das ist keine Zeitfrage, sondern eine Frage an der Grenze der Limits: entweder die Grenze der em bzw. der DPI wird so gesetzt, dass der Atlas unter der Kapazitaet bleibt, oder der Packer meldet den Verlust (statt still zu verlieren), oder beides. Bis zur Entscheidung ist der Verlust ein Fehler ohne Meldung - die Art Defekt, die man im Betrieb nicht sieht. Zu pruefen ist auch, ob es eine Obergrenze fuer den Atlas-Speicher geben sollte, die unabhaengig von der em gilt (der Speicher waechst quadratisch mit der em, die Quantisierung nur linear).
+
+k169 - Weg (c): eine Grenze UND eine Meldung. Code fertig, die Gates laufen noch.
+
+BEFUND BESTAETIGT (tools/ui_budget; die Atlas-Groesse ist eine Speichergroesse, also host- und zielgleich): der Verlust beginnt bei em 265 px (30 Glyphen ohne Bitmap), em 264 px ist vollstaendig; bei em 320 px (Theme 40 px x DPI 4.0 x Skala 200 % - die groesste em, die die Limits erlauben) sind 331 der 1029 Glyphen ohne Bitmap. Die Grenze liegt am PACKER (Nuklear nk_font_bake_pack: max_height 1024*32 = 32768 px), nicht am Speicher: der Atlas waechst mit dem QUADRAT der em (8 MiB bei em 128, 16 MiB ab em 134, 32 MiB ab em 187), die Quantisierung nur linear.
+
+(1) DER RENDERER VERWEIGERT EINEN UNVOLLSTAENDIGEN ATLAS (src/render/render.c): nach dem Bake prueft canlin_render_font_default_sizes die Glyphentabelle. Ein Glyphen, das der Packer nicht untergebracht hat, hat weder eine Tintenbox noch einen Vorschub (Nuklear laesst den Slot unberuehrt); ein im Font leeres Zeichen (Leerraum, U+00A0) behaelt seinen Vorschub. Ein solcher Atlas wird nicht mehr herausgegeben, der Bake gibt -1 zurueck: damit kann kein Aufrufer mehr einen Atlas mit Loechern bekommen - ein zurueckgewiesenes Glyphen ist ein Fehler, keine Luecke im Text. (Der Fehlerpfad gibt jetzt auch die gebackenen Pixel frei; nk_font_atlas_clear tut das nicht.)
+
+(2) DIE EM IST GEDECKELT (include/canlin/ui_limits.h: CANLIN_UI_MAX_EM 128.0f und CANLIN_UI_FONT_ATLAS_MAX 8 MiB; src/ui/theme.c canlin_theme_em). Gedeckelt wird an der EINEN Stelle, die die em berechnet, damit Layout, gebackener Font und Shell-Chrome im Schritt bleiben. Budget: 8 MiB je em-Groesse, der Font-Cache haelt CANLIN_UI_FONT_SIZES_MAX = 4 Atlanten -> 32 MiB im Extremfall, ~3 % vom 1-GB-P2. ANNAHME, die der Maintainer bestaetigen soll: 8 MiB je Groesse. 16 MiB erlaubte die em bis 186, 32 MiB (die Grenze des Packers) bis 264.
+
+(3) TEST an der Grenze: t/render/test_render.c test_atlas_refused() - em 264 muss passen (jedes Glyphen mit Bitmap oder mit Vorschub), em 265 muss verweigert werden. Gegenprobe: ohne die Renderer-Aenderung schlaegt der Test fehl ('em 265 px: the atlas must be refused, rc=0'). Dazu t/ui/test_theme.c test_em_cap() (die Deckelung) und in test_atlas_memory() die em 128 = 1024 x 8192 = CANLIN_UI_FONT_ATLAS_MAX.
+
+(4) WERKZEUG aus k96 (tools/ui_budget.c) meldet jetzt 'REFUSED' fuer die em 320 und die em, die die UI benutzt (128 px, 8 MiB).
+
+OFFENE PRODUKTFRAGEN an den Maintainer (im Bericht): (a) das Atlas-Budget (8 MiB je em-Groesse?); (b) ob die Deckelung der em sichtbar sein soll - sie ist es derzeit nicht, und eine sichtbare Meldung braucht einen Log-Kanal im UI plus eine Zeile in src/module/module.c (fremde Spur); (c) die Spec: die em-Deckelung ist eine CanLin-Grenze und steht NICHT in der Spec - die Doc-Spur (spec §2/§6.3/§8) decides whether it is documented there.
