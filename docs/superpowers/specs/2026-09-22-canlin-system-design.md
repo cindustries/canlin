@@ -3,6 +3,8 @@
 Status: draft for review, incorporating the architecture review and the browser target.
 §2 amended 2026-11-15: the i686 gate is split into the user-mode gate that runs today and
 the full-system gate that waits for the canlin-os image.
+§12 amended 2026-11-15: the i686 run has a runner hook, so it is one command, its timeout
+follows the target and its result names the gate that ran.
 This is the family-level design. Each sub-project gets its own spec and plan; the first
 one is `libbee` (`~/dev/libbee/docs/superpowers/specs/`). The runtime's scheduling and
 platform contract is specified in [the event-runtime design](2026-09-22-canlin-event-runtime-design.md).
@@ -430,10 +432,24 @@ create a speculative server implementation in canlin or make up a remote reposit
   SQLite authorizer/native resource limits and per-module event/handle isolation.
 - Every portable core suite runs on the host and on i686 under QEMU. The gate that runs
   today is the user-mode one (system design §2); the full-system P2-QEMU run waits for
-  the canlin-os image. The i686 suites have no runner hook yet — the user-mode gate is
-  started by hand. Backend-specific suites run on their backend; a gate fails on hangs
-  and illegal instructions. The machine-readable result comes with the canlin-os harness.
-  Build a minimal executable gate early.
+  the canlin-os image and is never counted into the user-mode result. The i686 run is
+  one command — `make TARGET=i686 test` — which starts the suites under the emulator's
+  runner (`qemu-i386 -cpu pentium2`), with no hand-started step; a runner missing from
+  PATH is a loud error, never a silent fallback onto the host CPU. The timeout of one
+  suite follows the target: 120 s on the host, 600 s in the target, because the
+  emulation runs the suites slower than the host does — the largest suite needs about
+  253 s under the emulator. The reason for the emulation is in §2. The result names the
+  gate that ran: `host`, `host + sanitizer (asan)` or `i686 user-mode`. The user-mode
+  and the full-system gate are never reported as one "QEMU" result (§2). Backend-specific
+  suites run on their backend; a gate fails on hangs and illegal instructions. The
+  machine-readable result comes with the canlin-os harness. Build a minimal executable
+  gate early.
+- The Android device path (`make TARGET=android-armv7 test-device`,
+  `tools/android-test.sh`) runs the suites on the attached device over adb. It does not
+  go through the runner hook and names no gate of its own — it is the one path where a
+  result can appear without a named gate. A report from it names the device path
+  ("Android device") itself, because no gate name applies to it, and it counts as none
+  of the three gates above.
 - The WASM browser gate exercises the actual compiled runtime with local fixtures:
   yielding, input/render, Fetch streaming/WebSocket, persistence across reload, quota and
   permission denial, CORS failure, single-writer storage ownership and suspension. It cannot substitute for native/P2
