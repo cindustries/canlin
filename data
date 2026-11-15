@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-15T00:57:20Z
+id: 158
+priority: medium
+status: backlog
+tags:
+- platform
+- browser
+title: 'Browser: the adapter trace src/browser - clock, wait, present, input'
+updated: 2026-11-15T00:57:20Z
+---
+
+Aus der Recherche k151: die vier Adapter, die der Browser braucht, docken an vorhandenen Seams an - der Takt an canlin_ev_clock (include/canlin/ev.h:35-38), das Warten an canlin_loop_wait_fn (include/canlin/loop.h:78-92, der Adapter soll schedulen statt blockieren), das Presentieren an den Hook in include/canlin/app.h:51-54 (er kopiert nur die dirty rows - genau das, was ein Canvas braucht), die Eingabe an canlin_ui_input (include/canlin/ui.h:213-224) und canlin_app_input (include/canlin/app.h:87). Das Muster ist der Android-Pure-Part (src/android/adapter.c:1-3: "No Android headers: built and tested on every target") - der Browser-Adapter wird genauso gebaut: kein Emscripten-Header im Port, damit er auf jedem Target testbar ist. Zwei Fallen, die die Karte nennen soll: der Browser-Takt friert bei Suspension ein (das Verhalten ist zu entscheiden, event-runtime:169), und canlin_loop_run darf im Browser nicht laufen (es wuerde bei sofortiger Rueckkehr spinnen) - getrieben wird die Schleife aus dem Browser-Callback. Die Spezifikation fuer diese Spur steht in k154.
