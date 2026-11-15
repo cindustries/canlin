@@ -26,6 +26,10 @@ suites then run under `qemu-i386 -cpu pentium2` — that is user-mode emulation,
 canlin-os full-system harness (`qemu-system-i386 -cpu pentium2 -m 1024`), and the two are
 reported separately.
 
+The browser target is not built yet (no `TARGET=wasm` in the Makefile). Its toolchain
+is: the emsdk 7.0.0 in `~/opt/emsdk` (`emcc`, `emcmake`) and a headless Chrome for
+Testing in `~/opt/chrome-for-testing`.
+
 ## Design
 
 The runtime stands in `src/`, its suites in `t/`, the specs below come first.
