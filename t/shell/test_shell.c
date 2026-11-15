@@ -3,6 +3,8 @@
  * theme: em = 16 px at DPI 1.0 and scale 100 %, 20 px at 125 %. Exits 0 on success. */
 #include "canlin/shell.h"
 
+#include <lauxlib.h>
+#include <lua.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +28,7 @@ static int failures, checks;
 #define MAXW 1600
 #define MAXH 1000
 
-static const char *SRC =
+static const char SRC[] =
     "local M = {}\n"
     "function M.init() end\n"
     "function M.draw(ui)\n"
@@ -34,6 +36,10 @@ static const char *SRC =
     "  ui:text('hello')\n"
     "end\n"
     "return M\n";
+
+/* The source h_init loads: a test that needs a module of its own puts one in place
+ * before it calls h_init; h_init takes it and puts the default back. */
+static const char *src_main = SRC;
 
 typedef struct harness {
     canlin_ev_fake_clock clock;
@@ -46,7 +52,7 @@ typedef struct harness {
     char log[NMOD][LOGMAX];
     size_t loglen[NMOD];
     unsigned draws[NMOD];
-    unsigned keys[NMOD], buttons[NMOD], motions[NMOD];
+    unsigned keys[NMOD], buttons[NMOD], motions[NMOD], texts[NMOD];
     int last_mx[NMOD], last_my[NMOD];
     int64_t wall;
     canlin_render r;
@@ -100,6 +106,8 @@ static void on_deliver(void *ud, canlin_ev *ev, const canlin_ev_delivery *d)
                     H.last_mx[i] = d->a;
                     H.last_my[i] = d->b;
                 }
+                if (t == CANLIN_UI_IN_TEXT)
+                    H.texts[i]++;
             }
             canlin_module_deliver(H.m[i], d);
             return;
@@ -159,8 +167,8 @@ static void h_init(int w, int h, int scale, int nmod, unsigned input)
         memset(&cfg, 0, sizeof cfg);
         H.src[i].name = NAMES[i];
         H.src[i].version = "1";
-        H.src[i].main = SRC;
-        H.src[i].main_len = strlen(SRC);
+        H.src[i].main = src_main;
+        H.src[i].main_len = strlen(src_main);
         cfg.log = log_fn;
         cfg.ud = (void *)(size_t)i;
         H.m[i] = canlin_module_load(H.ev, &H.src[i], &cfg, &err);
@@ -173,6 +181,7 @@ static void h_init(int w, int h, int scale, int nmod, unsigned input)
     CHECK(canlin_render_init(&H.r, H.px, w, h, (size_t)w * 3, H.dirty, NULL) == 0);
     canlin_shell_update(H.sh);
     drain();
+    src_main = SRC; /* the next test gets the default source */
 }
 
 static void h_done(void)
@@ -323,7 +332,7 @@ static void check_min_panes(float em, int row)
 static void test_panes_min(void)
 {
     CHECK(CANLIN_SHELL_PANES_MIN == 2);
-    h_init(1600, 900, 100, 3, CANLIN_SHELL_IN_POINTER);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 3, CANLIN_SHELL_IN_POINTER);
     CHECK(canlin_shell_set_tiling(H.sh, H.out, CANLIN_SHELL_ROW, CANLIN_SHELL_PANES_MIN - 1) ==
           CANLIN_SHELL_EINVAL);
     CHECK(canlin_shell_set_tiling(H.sh, H.out, CANLIN_SHELL_ROW, CANLIN_SHELL_PANES_MIN) ==
@@ -342,7 +351,7 @@ static void test_mode_thresholds(void)
         int avail, auto_tiled;
     } c[] = {{1198, 0, 0}, {1200, 1, 0}, {1598, 1, 0}, {1600, 1, 1}};
     size_t i;
-    h_init(1198, 900, 125, 2, CANLIN_SHELL_IN_POINTER);
+    h_init(1198, 900, CANLIN_UI_SCALE_STEP_125, 2, CANLIN_SHELL_IN_POINTER);
     for (i = 0; i < sizeof c / sizeof c[0]; i++) {
         CHECK(canlin_ui_output_set_size(H.out, c[i].w, 900) == CANLIN_UI_OK);
         CHECK(canlin_shell_set_mode(H.sh, H.out, CANLIN_SHELL_AUTO) == CANLIN_SHELL_OK);
@@ -359,16 +368,16 @@ static void test_mode_thresholds(void)
     /* Scale changes: 1600 px is 80 em at 125 %, 66.7 em at 150 %, 50 em at 200 %. */
     CHECK(canlin_shell_set_mode(H.sh, H.out, CANLIN_SHELL_AUTO) == CANLIN_SHELL_OK);
     CHECK(canlin_shell_mode_of(H.sh, H.out) == CANLIN_SHELL_TILED);
-    CHECK(canlin_ui_output_set_scale(H.out, 150) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(H.out, CANLIN_UI_SCALE_STEP_150) == CANLIN_UI_OK);
     CHECK(canlin_shell_mode_of(H.sh, H.out) == CANLIN_SHELL_FULL);
     CHECK(canlin_shell_tiled_available(H.sh, H.out) == 1);
     CHECK(canlin_shell_set_mode(H.sh, H.out, CANLIN_SHELL_TILED) == CANLIN_SHELL_OK);
     CHECK(canlin_shell_mode_of(H.sh, H.out) == CANLIN_SHELL_TILED);
     check_min_panes(24.0f, 1);
-    CHECK(canlin_ui_output_set_scale(H.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(H.out, CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     CHECK(canlin_shell_mode_of(H.sh, H.out) == CANLIN_SHELL_FULL);
     CHECK(canlin_shell_tiled_available(H.sh, H.out) == 0);
-    CHECK(canlin_ui_output_set_scale(H.out, 100) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(H.out, CANLIN_UI_SCALE_STEP_100) == CANLIN_UI_OK);
     CHECK(canlin_shell_mode_of(H.sh, H.out) == CANLIN_SHELL_TILED);
     h_done();
 }
@@ -380,7 +389,7 @@ static void test_fallback_restore(void)
     canlin_shell_rect bar, v;
     canlin_ui_output *fo;
     int pane;
-    h_init(1600, 900, 100, 3, CANLIN_SHELL_IN_POINTER); /* 100 em: tiled by default */
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 3, CANLIN_SHELL_IN_POINTER); /* 100 em: tiled by default */
     CHECK(canlin_shell_mode_of(H.sh, H.out) == CANLIN_SHELL_TILED);
     CHECK(canlin_shell_panes(H.sh, H.out) == 2);
     CHECK(canlin_shell_pane_module(H.sh, H.out, 0) == H.m[0]);
@@ -434,7 +443,7 @@ static void test_divider_drag(void)
     canlin_ui_input in;
     unsigned draws0, draws1, draws2, b0, b1;
     int minpx = 480;
-    h_init(1600, 900, 100, 3, CANLIN_SHELL_IN_POINTER);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 3, CANLIN_SHELL_IN_POINTER);
     CHECK(canlin_shell_set_tiling(H.sh, H.out, CANLIN_SHELL_ROW, 3) == CANLIN_SHELL_OK);
     settle();
     p2 = part(CANLIN_SHELL_P_VIEW, 2);
@@ -493,7 +502,7 @@ static void test_focus_tap_through(void)
     canlin_ui_input in;
     canlin_shell_rect v1;
     int pane;
-    h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
     settle();
     CHECK(canlin_shell_focused(H.sh, NULL, &pane) == H.m[0] && pane == 0);
     b = go_button(1);
@@ -541,7 +550,7 @@ static void test_secondary_routing(void)
     canlin_ui_input in;
     canlin_shell_rect v0, v1, sw;
     int pane;
-    h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
     settle();
     v0 = part(CANLIN_SHELL_P_VIEW, 0);
     v1 = part(CANLIN_SHELL_P_VIEW, 1);
@@ -587,7 +596,7 @@ static void test_reserved_keys(void)
 {
     canlin_ui_input in;
     int pane;
-    h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_KEYBOARD);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 2, CANLIN_SHELL_IN_KEYBOARD);
     settle();
     in = key(CANLIN_SHELL_KEY_SWITCHER, 1);
     CHECK(canlin_shell_input(H.sh, H.out, &in) == CANLIN_SHELL_R_CHROME);
@@ -656,7 +665,7 @@ static void test_status_bar(void)
     canlin_shell_part parts[3] = {CANLIN_SHELL_P_STORAGE, CANLIN_SHELL_P_MIC, CANLIN_SHELL_P_FAULTED};
 
     canlin_theme_builtin(&t);
-    h_init(1600, 900, 100, 3, CANLIN_SHELL_IN_POINTER);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 3, CANLIN_SHELL_IN_POINTER);
     CHECK(has_part(CANLIN_SHELL_P_CLOCK, 0));
     CHECK(has_part(CANLIN_SHELL_P_STORAGE, 0));
     CHECK(!has_part(CANLIN_SHELL_P_MIC, 0) && !has_part(CANLIN_SHELL_P_FAULTED, 0));
@@ -733,7 +742,7 @@ static void test_fault_restart(void)
     canlin_ui_input in;
     float em;
     canlin_theme_builtin(&t);
-    h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 2, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
     settle();
     CHECK(canlin_shell_restart(H.sh, H.m[1]) == CANLIN_SHELL_ESTATE);
     CHECK(!has_part(CANLIN_SHELL_P_RESTART, 1));
@@ -788,7 +797,7 @@ static void test_switcher(void)
     canlin_shell_rect row, btn, bar;
     canlin_ui_input in;
     int i, found = -1;
-    h_init(1600, 900, 100, 3, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_TOUCH);
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 3, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_TOUCH);
     settle();
     CHECK(canlin_shell_pane_module(H.sh, H.out, 0) == H.m[0]);
     CHECK(canlin_shell_pane_module(H.sh, H.out, 1) == H.m[1]);
@@ -850,7 +859,7 @@ static void test_switcher(void)
 static void test_model_frame(void)
 {
     canlin_shell_rect lab, v, p;
-    h_init(1000, 800, 100, 1, CANLIN_SHELL_IN_POINTER);
+    h_init(1000, 800, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_POINTER);
     CHECK(!has_part(CANLIN_SHELL_P_MODEL_LABEL, 0));
     CHECK(canlin_shell_set_model_view(H.sh, H.m[0], 1) == CANLIN_SHELL_OK);
     lab = part(CANLIN_SHELL_P_MODEL_LABEL, 0);
@@ -880,7 +889,7 @@ static void test_model_view_pane(void)
     unsigned b0;
     size_t pend;
 
-    h_init(1000, 800, 100, 1, CANLIN_SHELL_IN_POINTER);
+    h_init(1000, 800, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_POINTER);
     mv = canlin_ui_view_new(H.ui, H.out, NULL);
     CHECK(mv != NULL);
     CHECK(canlin_shell_attach_model_view(H.sh, H.m[0], mv) == CANLIN_SHELL_OK);
@@ -935,100 +944,6 @@ static void test_model_view_pane(void)
     h_done();
 }
 
-/* ---- §5 drawing: idle clock ---- */
-
-static void test_idle_clock(void)
-{
-    int lo, hi, n, i;
-    unsigned draws[NMOD];
-    canlin_shell_rect bar;
-    h_init(1600, 900, 100, 2, CANLIN_SHELL_IN_POINTER);
-    settle();
-    bar = part(CANLIN_SHELL_P_BAR, 0);
-    CHECK(canlin_shell_update(H.sh) == 0);
-    CHECK(frame(NULL, NULL) == 0);
-    CHECK(canlin_shell_next_tick_ms(H.sh) == 55000);
-    for (i = 0; i < NMOD; i++)
-        draws[i] = H.draws[i];
-    /* Within the minute: nothing. */
-    H.wall += 54;
-    CHECK(canlin_shell_update(H.sh) == 0);
-    CHECK(frame(NULL, NULL) == 0);
-    /* The minute turns: the bar rows, and only those, once. */
-    H.wall += 1;
-    CHECK(canlin_shell_update(H.sh) == 1);
-    n = frame(&lo, &hi);
-    CHECK(n > 0 && lo >= 0 && hi < bar.h);
-    CHECK(frame(NULL, NULL) == 0);
-    H.wall += 59;
-    CHECK(canlin_shell_update(H.sh) == 0);
-    H.wall += 1;
-    CHECK(canlin_shell_update(H.sh) == 1);
-    n = frame(&lo, &hi);
-    CHECK(n > 0 && hi < bar.h);
-    drain();
-    for (i = 0; i < NMOD; i++)
-        CHECK(H.draws[i] == draws[i]);
-    h_done();
-}
-
-/* A view that redraws touches its own rows only; a divider move redraws the two panes. */
-static void test_dirty_regions(void)
-{
-    int lo, hi;
-    canlin_shell_rect v0, bar;
-    h_init(1000, 800, 100, 1, CANLIN_SHELL_IN_POINTER);
-    CHECK(frame(&lo, &hi) == 800); /* first render: whole output */
-    settle();
-    bar = part(CANLIN_SHELL_P_BAR, 0);
-    v0 = part(CANLIN_SHELL_P_VIEW, 0);
-    CHECK(canlin_ev_invalidate(H.ev, canlin_module_gen(H.m[0])) == CANLIN_EV_OK);
-    drain();
-    CHECK(frame(&lo, &hi) > 0);
-    CHECK(lo >= v0.y && hi < v0.y + v0.h && lo >= bar.h);
-    h_done();
-}
-
-/* canlin#45: the shell hands its output input class to the views' output, which decides
- * the on-screen keyboard (touch without keyboard). */
-static void test_input_class(void)
-{
-    h_init(800, 600, 100, 1, CANLIN_SHELL_IN_TOUCH);
-    CHECK(canlin_ui_output_input(H.out) == CANLIN_UI_INPUT_TOUCH);
-    h_done();
-    h_init(800, 600, 100, 1, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
-    CHECK(canlin_ui_output_input(H.out) == (CANLIN_UI_INPUT_POINTER | CANLIN_UI_INPUT_KEYBOARD));
-    h_done();
-    h_init(800, 600, 100, 1, CANLIN_SHELL_IN_TOUCH | CANLIN_SHELL_IN_KEYBOARD);
-    CHECK(canlin_ui_output_input(H.out) == (CANLIN_UI_INPUT_TOUCH | CANLIN_UI_INPUT_KEYBOARD));
-    h_done();
-}
-
-int main(void)
-{
-    test_mode_thresholds();
-    test_panes_min();
-    test_fallback_restore();
-    test_divider_drag();
-    test_focus_tap_through();
-    test_secondary_routing();
-    test_reserved_keys();
-    test_status_bar();
-    test_row_sizes();
-    test_fault_restart();
-    test_switcher();
-    test_model_frame();
-    test_model_view_pane();
-    test_idle_clock();
-    test_dirty_regions();
-    test_input_class();
-    if (failures) {
-        fprintf(stderr, "shell: %d of %d checks failed\n", failures, checks);
-        return 1;
-    }
-    printf("shell: %d checks passed\n", checks);
-    return 0;
-}
 /* ---- §4 the keys and the text reach the model's own view (canlin#131) ---- */
 
 /* The module's own view draws a field, so it can hold a focus of its own. */
@@ -1179,4 +1094,98 @@ static void test_model_view_keys(void)
     h_done();
 }
 
+/* ---- §5 drawing: idle clock ---- */
+
+static void test_idle_clock(void)
+{
+    int lo, hi, n, i;
+    unsigned draws[NMOD];
+    canlin_shell_rect bar;
+    h_init(1600, 900, CANLIN_UI_SCALE_STEP_100, 2, CANLIN_SHELL_IN_POINTER);
+    settle();
+    bar = part(CANLIN_SHELL_P_BAR, 0);
+    CHECK(canlin_shell_update(H.sh) == 0);
+    CHECK(frame(NULL, NULL) == 0);
+    CHECK(canlin_shell_next_tick_ms(H.sh) == 55000);
+    for (i = 0; i < NMOD; i++)
+        draws[i] = H.draws[i];
+    /* Within the minute: nothing. */
+    H.wall += 54;
+    CHECK(canlin_shell_update(H.sh) == 0);
+    CHECK(frame(NULL, NULL) == 0);
+    /* The minute turns: the bar rows, and only those, once. */
+    H.wall += 1;
+    CHECK(canlin_shell_update(H.sh) == 1);
+    n = frame(&lo, &hi);
+    CHECK(n > 0 && lo >= 0 && hi < bar.h);
+    CHECK(frame(NULL, NULL) == 0);
+    H.wall += 59;
+    CHECK(canlin_shell_update(H.sh) == 0);
+    H.wall += 1;
+    CHECK(canlin_shell_update(H.sh) == 1);
+    n = frame(&lo, &hi);
+    CHECK(n > 0 && hi < bar.h);
+    drain();
+    for (i = 0; i < NMOD; i++)
+        CHECK(H.draws[i] == draws[i]);
+    h_done();
+}
+
+/* A view that redraws touches its own rows only; a divider move redraws the two panes. */
+static void test_dirty_regions(void)
+{
+    int lo, hi;
+    canlin_shell_rect v0, bar;
+    h_init(1000, 800, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_POINTER);
+    CHECK(frame(&lo, &hi) == 800); /* first render: whole output */
+    settle();
+    bar = part(CANLIN_SHELL_P_BAR, 0);
+    v0 = part(CANLIN_SHELL_P_VIEW, 0);
+    CHECK(canlin_ev_invalidate(H.ev, canlin_module_gen(H.m[0])) == CANLIN_EV_OK);
+    drain();
+    CHECK(frame(&lo, &hi) > 0);
+    CHECK(lo >= v0.y && hi < v0.y + v0.h && lo >= bar.h);
+    h_done();
+}
+
+/* canlin#45: the shell hands its output input class to the views' output, which decides
+ * the on-screen keyboard (touch without keyboard). */
+static void test_input_class(void)
+{
+    h_init(800, 600, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_TOUCH);
+    CHECK(canlin_ui_output_input(H.out) == CANLIN_UI_INPUT_TOUCH);
+    h_done();
+    h_init(800, 600, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_POINTER | CANLIN_SHELL_IN_KEYBOARD);
+    CHECK(canlin_ui_output_input(H.out) == (CANLIN_UI_INPUT_POINTER | CANLIN_UI_INPUT_KEYBOARD));
+    h_done();
+    h_init(800, 600, CANLIN_UI_SCALE_STEP_100, 1, CANLIN_SHELL_IN_TOUCH | CANLIN_SHELL_IN_KEYBOARD);
+    CHECK(canlin_ui_output_input(H.out) == (CANLIN_UI_INPUT_TOUCH | CANLIN_UI_INPUT_KEYBOARD));
+    h_done();
+}
+
+int main(void)
+{
+    test_mode_thresholds();
+    test_panes_min();
+    test_fallback_restore();
+    test_divider_drag();
+    test_focus_tap_through();
+    test_secondary_routing();
+    test_reserved_keys();
+    test_status_bar();
+    test_row_sizes();
+    test_fault_restart();
+    test_switcher();
+    test_model_frame();
+    test_model_view_pane();
     test_model_view_keys();
+    test_idle_clock();
+    test_dirty_regions();
+    test_input_class();
+    if (failures) {
+        fprintf(stderr, "shell: %d of %d checks failed\n", failures, checks);
+        return 1;
+    }
+    printf("shell: %d checks passed\n", checks);
+    return 0;
+}

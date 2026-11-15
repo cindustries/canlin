@@ -536,7 +536,7 @@ static void test_shell_display(void)
     od.w = SW;
     od.h = SH;
     od.dpi = 1.0f;
-    od.scale = 100;
+    od.scale = CANLIN_UI_SCALE_STEP_100;
     out = canlin_ui_output_new(&od, NULL);
     memset(&sc, 0, sizeof sc);
     sc.ui = ui;

@@ -110,7 +110,7 @@ static void h_init(harness *h, float dpi, const char *src, int w, int vh)
     d.w = w;
     d.h = vh;
     d.dpi = dpi;
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     h->out = canlin_ui_output_new(&d, NULL);
     if (!h->ev || !h->ui || !h->out) {
         fprintf(stderr, "harness init failed\n");
@@ -682,7 +682,7 @@ static void test_port_hit(void)
         const canlin_ui_rect *r, *a, *b;
         int min, ports = 0;
         h_init(&h, dpis[k], module_src("nil", 0, "{ id = 'flow', height = 30 }"), 1600, 1200);
-        min = (int)(2.5f * canlin_ui_view_em(canlin_module_view(h.m)) + 0.999f);
+        min = (int)(CANLIN_UI_MIN_TOUCH_EM * canlin_ui_view_em(canlin_module_view(h.m)) + 0.999f);
         r = rec(&h, &n);
         for (i = 0; i < n; i++)
             if (r[i].kind == CANLIN_UI_W_GRAPH && r[i].part == CANLIN_UI_P_PORT) {
@@ -828,7 +828,7 @@ static void test_limits(void)
     for (i = 0; i < n; i++)
         if (r[i].kind == CANLIN_UI_W_GRAPH && r[i].part == CANLIN_UI_P_NODE)
             nodes++;
-    CHECK(nodes > 10 && nodes < 256); /* visible ones only */
+    CHECK(nodes > 10 && nodes < CANLIN_UI_GRAPH_MAX_NODES); /* visible ones only */
     /* input frames keep working at the limit */
     clear_log(&h);
     drag(&h, 216, 188, 116, 88); /* between nodes: pans */
@@ -915,7 +915,8 @@ static void test_render(void)
  * muted colour (the grid is muted at alpha 96, so never exactly muted). */
 static void test_node_separator_inside(void)
 {
-    static const int scales[] = {100, 150, 200};
+    static const int scales[] = {CANLIN_UI_SCALE_STEP_100, CANLIN_UI_SCALE_STEP_150,
+                                 CANLIN_UI_SCALE_STEP_200};
     enum { W = 1600, H = 1200 };
     static unsigned char px[W * H * 3];
     size_t k;
@@ -931,7 +932,7 @@ static void test_node_separator_inside(void)
         CHECK(canlin_ui_output_set_scale(h.out, s) == CANLIN_UI_OK);
         h_drain(&h);
         em = canlin_ui_view_em(canlin_module_view(h.m));
-        CHECK(em == 16.0f * (float)s / 100.0f);
+        CHECK(em == 16.0f * (float)s / (float)CANLIN_UI_SCALE_BASE_PERCENT);
         CHECK(canlin_render_init(&r, px, w, vh, (size_t)w * 3, NULL, NULL) == 0);
         canlin_render_begin(&r);
         canlin_render_clear(&r, nk_rgb(255, 0, 255));
@@ -940,7 +941,8 @@ static void test_node_separator_inside(void)
         a = grec(&h, 0, CANLIN_UI_P_NODE, 0, 0); /* node A: no port on the title row */
         CHECK(a != NULL);
         if (a) {
-            int sy = a->y + (int)(2.0f * em), th = em / 8.0f < 1.0f ? 1 : (int)(em / 8.0f);
+            int sy = a->y + (int)(CANLIN_UI_GRAPH_TITLE_EM * em),
+                th = em / 8.0f < 1.0f ? 1 : (int)(em / 8.0f);
             int x, y, out = 0;
             CHECK(px_is(px, w, a->x + a->w / 2, sy, t.color[CANLIN_THEME_MUTED]));
             for (y = sy - 2 * th; y <= sy + 2 * th; y++)

@@ -92,7 +92,7 @@ static void h_init(harness *h, unsigned input, float dpi, const char *src, int w
     d.w = w;
     d.h = vh;
     d.dpi = dpi;
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     h->out = canlin_ui_output_new(&d, NULL);
     if (!h->ev || !h->ui || !h->out) {
         fprintf(stderr, "harness init failed\n");
@@ -447,8 +447,9 @@ static void check_tiling(harness *h, int w, float em)
             continue;
         keys++;
         CHECK(r[i].x >= 0 && r[i].x + r[i].w <= w && r[i].w > 0);
-        CHECK(r[i].w <= (int)(5.5f * 2.5f * em) + 1); /* widest key: space, 5.5 columns */
-        CHECK(r[i].h >= (int)(1.5f * em) && r[i].h <= (int)(2.5f * em + 0.5f));
+        CHECK(r[i].w <= (int)(5.5f * CANLIN_UI_KBD_KEY_EM * em) + 1); /* widest key: space, 5.5 columns */
+        CHECK(r[i].h >= (int)(CANLIN_UI_KBD_KEY_MIN_EM * em) &&
+              r[i].h <= (int)(CANLIN_UI_KBD_KEY_EM * em + 0.5f));
         if (prev && prev->y == r[i].y) {
             CHECK(r[i].x == prev->x + prev->w); /* abut */
         } else {

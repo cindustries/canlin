@@ -114,7 +114,7 @@ static void h_init(harness *h, int w, int hh)
     d.w = w;
     d.h = hh;
     d.dpi = 1.0f;
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     h->out = canlin_ui_output_new(&d, NULL);
     h->av = canlin_assistant_view_new();
     h->bind.view = h->av;
@@ -353,7 +353,7 @@ static int json_pairs(const char *json, pairs *p)
     memset(p, 0, sizeof *p);
     lim.max_depth = 16;
     lim.max_string = 200;
-    lim.max_number = 32;
+    lim.max_number = CANLIN_AV_MAX_NUMBER;
     lim.max_total = CANLIN_AV_SUBMIT_MAX;
     if (canlin_json_init(&js, &lim, tok, sizeof tok, pair_token, p) != CANLIN_JSON_OK)
         return 0;

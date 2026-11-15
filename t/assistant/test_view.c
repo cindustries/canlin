@@ -687,7 +687,7 @@ static void vh_init(vh *h, int w, int hh)
     d.w = w;
     d.h = hh;
     d.dpi = 1.0f;
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     h->out = canlin_ui_output_new(&d, NULL);
     h->v = h->ui && h->out ? canlin_ui_view_new(h->ui, h->out, NULL) : NULL;
     h->av = canlin_assistant_view_new();
@@ -1146,7 +1146,7 @@ static void test_shell_frame(void)
     d.w = SW;
     d.h = SH;
     d.dpi = 1.0f;
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     out = canlin_ui_output_new(&d, NULL);
     memset(&sc, 0, sizeof sc);
     sc.ui = ui;

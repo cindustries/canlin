@@ -119,7 +119,7 @@ static void h_init(harness *h, const canlin_theme *theme, float dpi, const char 
         d.w = w;
         d.h = vh;
         d.dpi = dpi;
-        d.scale = 100;
+        d.scale = CANLIN_UI_SCALE_STEP_100;
         h->out = canlin_ui_output_new(&d, NULL);
     }
     if (!h->ev || !h->ui || !h->out) {
@@ -387,7 +387,7 @@ static void test_min_height_rounding(void)
         CHECK(!has(&h, "draw:"));
         em = canlin_ui_view_em(canlin_module_view(h.m));
         CHECK(em == 13.0f * dpis[k]);
-        min = (int)(2.5f * em + 0.999f);
+        min = (int)(CANLIN_UI_MIN_TOUCH_EM * em + 0.999f);
         r = rec(&h, &n);
         CHECK(n > 10);
         for (i = 0; i < n; i++) {
@@ -631,6 +631,95 @@ static void test_focus_identity(void)
         h_drain(&h);
         CHECK(has(&h, "a= b=q"));
         CHECK(!has(&h, "a=q"));
+    }
+    h_done(&h);
+}
+
+/* The focus query (canlin#131): the view holds the focus while one of its widgets has
+ * it. A view that never had a focus has none, and the focus is the per-view one: two
+ * views can hold one at the same time (the shell asks both). */
+static void test_view_has_focus(void)
+{
+    harness h;
+    const canlin_ui_rect *r;
+    canlin_ui_view *other;
+
+    h_init(&h, NULL, 1.0f, focus_src, 400, 800);
+    h_drain(&h);
+    CHECK(!canlin_ui_view_has_focus(canlin_module_view(h.m)));
+    r = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 1); /* B */
+    CHECK(r != NULL);
+    if (r) {
+        click(&h, r);
+        h_drain(&h);
+        CHECK(canlin_ui_view_has_focus(canlin_module_view(h.m)));
+    }
+    /* A view of its own has a focus of its own: none. */
+    other = canlin_ui_view_new(h.ui, h.out, NULL);
+    CHECK(other != NULL);
+    CHECK(!canlin_ui_view_has_focus(other));
+    canlin_ui_view_free(other);
+    h_done(&h);
+}
+
+/* A click that was queued against the old content must not act on the content that
+ * comes next: the view that holds the new content drops its queued input (the model
+ * view's set_view does it, canlin#131 - the reset must reach the view that holds the
+ * model, or a click made against the old model acts on the new one). */
+static void test_input_reset(void)
+{
+    harness h;
+    const canlin_ui_rect *b;
+    int x, y;
+
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (b) {
+        x = b->x + b->w / 2;
+        y = b->y + b->h / 2;
+        /* The press waits in the view's queue: it was delivered, the frame that would
+         * apply it has not come yet. */
+        {
+            canlin_ui_input in;
+            memset(&in, 0, sizeof in);
+            in.type = CANLIN_UI_IN_BUTTON;
+            in.x = x;
+            in.y = y;
+            in.down = 1;
+            CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
+        }
+        CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) > 0);
+        input(&h, CANLIN_UI_IN_MOTION, x, y, 0); /* the module draws again */
+        h_drain(&h);
+        CHECK(count(&h, "clicked") == 1); /* the queued press landed on the button */
+    }
+    h_done(&h);
+
+    h_init(&h, NULL, 1.0f, button_src, 300, 300);
+    h_drain(&h);
+    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
+    CHECK(b != NULL);
+    if (b) {
+        x = b->x + b->w / 2;
+        y = b->y + b->h / 2;
+        /* The same press, but the content is replaced before the frame that would apply
+         * it: the queued input is dropped and the press does not land. */
+        {
+            canlin_ui_input in;
+            memset(&in, 0, sizeof in);
+            in.type = CANLIN_UI_IN_BUTTON;
+            in.x = x;
+            in.y = y;
+            in.down = 1;
+            CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
+        }
+        CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) > 0);
+        canlin_ui_view_input_reset(canlin_module_view(h.m));
+        input(&h, CANLIN_UI_IN_MOTION, x, y, 0); /* the module draws again */
+        h_drain(&h);
+        CHECK(count(&h, "clicked") == 0);
     }
     h_done(&h);
 }
@@ -1311,7 +1400,8 @@ static void test_render_e2e(void)
 
 /* ---- canlin#36 polish: pixel checks at 100/150/200 % ---- */
 
-static const int polish_scales[] = {100, 150, 200};
+static const int polish_scales[] = {CANLIN_UI_SCALE_STEP_100, CANLIN_UI_SCALE_STEP_150,
+                                     CANLIN_UI_SCALE_STEP_200};
 
 enum { PW = 1000, PH = 1000 }; /* largest view: 5 x 200 */
 static unsigned char polish_px[PW * PH * 3];
@@ -1326,7 +1416,8 @@ static void polish_render(harness *h, const char *src, int s)
     CHECK(canlin_ui_output_set_scale(h->out, s) == CANLIN_UI_OK);
     h_drain(h);
     CHECK(!has(h, "draw:"));
-    CHECK(canlin_ui_view_em(canlin_module_view(h->m)) == 16.0f * (float)s / 100.0f);
+    CHECK(canlin_ui_view_em(canlin_module_view(h->m)) ==
+          16.0f * (float)s / (float)CANLIN_UI_SCALE_BASE_PERCENT);
     CHECK(canlin_render_init(&r, polish_px, w, w, (size_t)w * 3, NULL, NULL) == 0);
     canlin_render_begin(&r);
     canlin_render_clear(&r, nk_rgb(255, 0, 255));
@@ -1356,7 +1447,7 @@ static void test_view_background_square(void)
     size_t k;
     canlin_theme t;
     canlin_theme_builtin(&t);
-    CHECK(t.radius > 0.0f); /* otherwise the test proves nothing */
+    CHECK(t.radius > CANLIN_THEME_RADIUS_MIN); /* otherwise the test proves nothing */
     for (k = 0; k < 3; k++) {
         int s = polish_scales[k], w = 5 * s, x, y, magenta = 0;
         harness h;
@@ -1394,7 +1485,8 @@ static void test_toggle_geometry(void)
         int s = polish_scales[k], w = 5 * s;
         harness h;
         const canlin_ui_rect *r;
-        float em = 16.0f * (float)s / 100.0f, unit = t.spacing * CANLIN_UI_UNIT_SCALE * em;
+        float em = 16.0f * (float)s / (float)CANLIN_UI_SCALE_BASE_PERCENT,
+              unit = t.spacing * CANLIN_UI_UNIT_SCALE * em;
         canlin_theme_rgb bg = t.color[CANLIN_THEME_BACKGROUND];
         gaps[k] = 0;
         polish_render(&h, toggle_src, s);
@@ -1404,7 +1496,7 @@ static void test_toggle_geometry(void)
             int bs = (int)(CANLIN_UI_TOGGLE_BOX_EM * em + 0.5f), bx = r->x,
                 by = r->y + (r->h - bs) / 2;
             int my = by + bs / 2, x, y, lx0 = w, lx1 = 0;
-            CHECK(r->h >= (int)(2.5f * em + 0.999f));
+            CHECK(r->h >= (int)(CANLIN_UI_MIN_TOUCH_EM * em + 0.999f));
             /* frame (muted) on both sides, surface inside, background right after */
             CHECK(pix(w, bx, my, t.color[CANLIN_THEME_MUTED]));
             CHECK(pix(w, bx + bs - 1, my, t.color[CANLIN_THEME_MUTED]));
@@ -1430,8 +1522,8 @@ static void test_toggle_geometry(void)
                     lsb = x0 < 0.0f ? (int)(x0 - 0.999f) : 0;
                     canlin_render_font_free(&tf);
                 }
-                CHECK(gaps[k] >= (int)(2.0f * unit) + lsb &&
-                      gaps[k] <= (int)(2.0f * unit + 0.25f * em));
+                CHECK(gaps[k] >= (int)(CANLIN_UI_GAP_UNITS * unit) + lsb &&
+                      gaps[k] <= (int)(CANLIN_UI_GAP_UNITS * unit + 0.25f * em));
             }
             /* the hit target covers box and label */
             CHECK(r->x <= bx && r->x + r->w > lx1 && r->y <= by && r->y + r->h >= by + bs);
@@ -1518,7 +1610,7 @@ static void test_section_header_look(void)
         int s = polish_scales[k], w = 5 * s, i;
         harness h;
         const canlin_ui_rect *sec[2], *ch;
-        float em = 16.0f * (float)s / 100.0f;
+        float em = 16.0f * (float)s / (float)CANLIN_UI_SCALE_BASE_PERCENT;
         canlin_theme_rgb tx = t.color[CANLIN_THEME_TEXT], bg = t.color[CANLIN_THEME_BACKGROUND];
         polish_render(&h, section_src, s);
         sec[0] = find(&h, CANLIN_UI_W_SECTION, CANLIN_UI_P_BOX, 0);
@@ -1532,7 +1624,7 @@ static void test_section_header_look(void)
         for (i = 0; i < 2; i++) {
             const canlin_ui_rect *r = sec[i];
             int ax0, ay0, ax1, ay1, tx0, ty0, tx1, ty1, e = (int)em, mid = r->y + r->h / 2;
-            CHECK(r->h >= (int)(2.5f * em + 0.999f));
+            CHECK(r->h >= (int)(CANLIN_UI_MIN_TOUCH_EM * em + 0.999f));
             /* no box fill: background at both ends of the row's centre line */
             CHECK(pix(w, r->x + r->w - 3, mid, bg));
             CHECK(pix(w, r->x + e + 2, r->y + 2, bg));
@@ -1597,7 +1689,7 @@ static void test_scale_doubles(void)
     h_init(&a, NULL, 1.0f, scale_src, 700, 2000);
     h_drain(&a);
     h_init(&b, NULL, 1.0f, scale_src, 1400, 4000);
-    CHECK(canlin_ui_output_set_scale(b.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(b.out, CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     h_drain(&b);
     CHECK(!has(&a, "draw:") && !has(&b, "draw:"));
     CHECK(canlin_ui_view_em(canlin_module_view(a.m)) == 16.0f);
@@ -1633,7 +1725,7 @@ static void test_scale_columns_dirty(void)
     r = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 1);
     CHECK(l && r && l->y == r->y);
     draws = h.draws;
-    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     CHECK(canlin_ui_view_dirty(v));
     h_drain(&h);
     CHECK(h.draws == draws + 1);
@@ -1648,7 +1740,7 @@ static void test_scale_columns_dirty(void)
     }
     /* The same value again changes nothing and requests no draw. */
     draws = h.draws;
-    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     CHECK(!canlin_ui_view_dirty(v));
     h_drain(&h);
     CHECK(h.draws == draws);
@@ -1676,12 +1768,12 @@ static void test_scale_min_touch(void)
         if (k == 1)
             t.font_size = 13;
         h_init(&h, &t, dpis[k], all_src, 400, 2000);
-        CHECK(canlin_ui_output_set_scale(h.out, 75) == CANLIN_UI_OK);
+        CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_75) == CANLIN_UI_OK);
         h_drain(&h);
         CHECK(!has(&h, "draw:"));
         em = canlin_ui_view_em(canlin_module_view(h.m));
         CHECK(em == (float)t.font_size * dpis[k] * 0.75f);
-        min = (int)(2.5f * em + 0.999f);
+        min = (int)(CANLIN_UI_MIN_TOUCH_EM * em + 0.999f);
         r = rec(&h, &n);
         for (i = 0; i < n; i++)
             if (interactive(&r[i])) {
@@ -1720,8 +1812,9 @@ static void test_scale_invalid(void)
     CHECK(canlin_ui_output_set_dpi(h.out, 8.0f) == CANLIN_UI_EINVAL);
     CHECK(canlin_ui_output_set_dpi(h.out, zero / zero) == CANLIN_UI_EINVAL);
     CHECK(canlin_ui_output_set_size(h.out, 0, 10) == CANLIN_UI_EINVAL);
-    CHECK(canlin_ui_output_set_scale(NULL, 100) == CANLIN_UI_EINVAL);
-    CHECK(canlin_ui_output_scale(h.out) == 100 && canlin_ui_output_dpi(h.out) == 1.0f);
+    CHECK(canlin_ui_output_set_scale(NULL, CANLIN_UI_SCALE_STEP_100) == CANLIN_UI_EINVAL);
+    CHECK(canlin_ui_output_scale(h.out) == CANLIN_UI_SCALE_STEP_100 &&
+          canlin_ui_output_dpi(h.out) == 1.0f);
     CHECK(!canlin_ui_view_dirty(v)); /* rejected values invalidate nothing */
     CHECK(canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_75) &&
           canlin_ui_scale_valid(CANLIN_UI_SCALE_STEP_100) &&
@@ -1734,7 +1827,7 @@ static void test_scale_invalid(void)
     d.dpi = 1.0f;
     d.scale = 110;
     CHECK(canlin_ui_output_new(&d, &err) == NULL && err == CANLIN_UI_EINVAL);
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     d.id = "";
     CHECK(canlin_ui_output_new(&d, &err) == NULL && err == CANLIN_UI_EINVAL);
     d.id = NULL;
@@ -1811,7 +1904,7 @@ static void test_output_id_limit(void)
     d.id = id;
     d.w = d.h = 100;
     d.dpi = 1.0f;
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     o = canlin_ui_output_new(&d, &err);
     CHECK(o != NULL && err == CANLIN_UI_OK);
     if (o) {
@@ -1858,7 +1951,7 @@ static void test_scale_keeps_state(void)
     h_drain(&h);
     CHECK(has(&h, "b=ab"));
 
-    CHECK(canlin_ui_output_set_scale(h.out, 150) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_150) == CANLIN_UI_OK);
     h_drain(&h);
     CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 24.0f);
     CHECK(find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0) == NULL); /* still closed */
@@ -1890,7 +1983,7 @@ static void test_two_outputs(void)
     canlin_ui_view *v1, *v2;
     unsigned d1, d2;
     h_init(&h, NULL, 1.0f, columns_src, 640 + 16, 600);
-    h_add_second(&h, "second", 2.0f, 100, columns_src, 640 + 16, 600);
+    h_add_second(&h, "second", 2.0f, CANLIN_UI_SCALE_STEP_100, columns_src, 640 + 16, 600);
     h_drain(&h);
     CHECK(h.draws == 1 && h.draws2 == 1);
     v1 = canlin_module_view(h.m);
@@ -1909,7 +2002,7 @@ static void test_two_outputs(void)
     CHECK(canlin_ui_view_font(v1) != canlin_ui_view_font(v2));
     d1 = h.draws;
     d2 = h.draws2;
-    CHECK(canlin_ui_output_set_scale(h.out2, 75) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(h.out2, CANLIN_UI_SCALE_STEP_75) == CANLIN_UI_OK);
     CHECK(!canlin_ui_view_dirty(v1) && canlin_ui_view_dirty(v2));
     h_drain(&h);
     CHECK(h.draws == d1 && h.draws2 == d2 + 1);
@@ -1921,7 +2014,9 @@ static void test_two_outputs(void)
  * entry a live view uses, LRU among the unused ones. Bare views, no Lua. */
 static void test_font_cache(void)
 {
-    static const int scales[5] = {75, 100, 125, 150, 200};
+    static const int scales[5] = {CANLIN_UI_SCALE_STEP_75, CANLIN_UI_SCALE_STEP_100,
+                                  CANLIN_UI_SCALE_STEP_125, CANLIN_UI_SCALE_STEP_150,
+                                  CANLIN_UI_SCALE_STEP_200};
     canlin_theme t;
     canlin_ui *ui;
     canlin_ui_output *o[5];
@@ -1964,7 +2059,7 @@ static void test_font_cache(void)
     /* All four pinned: a fifth em fails explicitly, nothing is released. */
     CHECK(canlin_ui_view_new(ui, o[4], &err) == NULL && err == CANLIN_UI_EFONT);
     f0 = canlin_ui_view_font(v[0]);
-    CHECK(canlin_ui_output_set_scale(o[0], 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(o[0], CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     CHECK(canlin_ui_view_frame_begin(v[0]) == CANLIN_UI_EFONT);
     CHECK(canlin_ui_view_frame_begin(v[0]) == CANLIN_UI_EFONT); /* no frame left open */
     CHECK(canlin_ui_view_font(v[0]) == f0 && canlin_ui_view_em(v[0]) == 12.0f);
@@ -2002,7 +2097,7 @@ static void test_font_cache(void)
     canlin_ui_font_stats(ui, &held, &bakes);
     CHECK(held == 4 && bakes == 6);
     /* 75 % was the one evicted: it needs a bake, and every slot is pinned now. */
-    CHECK(canlin_ui_output_set_scale(o[4], 75) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(o[4], CANLIN_UI_SCALE_STEP_75) == CANLIN_UI_OK);
     CHECK(canlin_ui_view_new(ui, o[4], &err) == NULL && err == CANLIN_UI_EFONT);
 
     for (i = 0; i < 5; i++)
@@ -2016,7 +2111,8 @@ static void test_font_cache(void)
  * not run headless and not counted as a module error; it draws once a slot frees. */
 static void test_font_cache_module(void)
 {
-    static const int scales[3] = {75, 125, 150};
+    static const int scales[3] = {CANLIN_UI_SCALE_STEP_75, CANLIN_UI_SCALE_STEP_125,
+                                  CANLIN_UI_SCALE_STEP_150};
     harness h;
     canlin_ui_output *o[3];
     canlin_ui_view *v[3];
@@ -2035,7 +2131,7 @@ static void test_font_cache_module(void)
         CHECK(v[i] != NULL);
     }
     draws = h.draws;
-    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     h_drain(&h);
     CHECK(has(&h, "draw: skipped: every font size slot is pinned"));
     CHECK(h.draws == draws + 1); /* delivered, but Lua was not called */
@@ -2269,7 +2365,8 @@ static void test_tab_scroll(void)
  * skipped; freeing one view wakes it, with no set_ui, invalidate or input from outside. */
 static void test_font_cache_wake(void)
 {
-    static const int scales[3] = {75, 125, 150};
+    static const int scales[3] = {CANLIN_UI_SCALE_STEP_75, CANLIN_UI_SCALE_STEP_125,
+                                  CANLIN_UI_SCALE_STEP_150};
     harness h;
     canlin_ui_output *o[3];
     canlin_ui_view *v[3];
@@ -2287,7 +2384,7 @@ static void test_font_cache_wake(void)
         v[i] = canlin_ui_view_new(h.ui, o[i], &err);
         CHECK(v[i] != NULL);
     }
-    CHECK(canlin_ui_output_set_scale(h.out, 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(h.out, CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     h_drain(&h);
     CHECK(has(&h, "draw: skipped: every font size slot is pinned"));
     CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 16.0f);
@@ -2342,10 +2439,10 @@ static void test_font_cache_wake_init_fail(void)
     d.w = d.h = 300;
     d.dpi = 1.0f;
     d.id = "a";
-    d.scale = 100;
+    d.scale = CANLIN_UI_SCALE_STEP_100;
     o[0] = canlin_ui_output_new(&d, &err);
     d.id = "b";
-    d.scale = 125;
+    d.scale = CANLIN_UI_SCALE_STEP_125;
     o[1] = canlin_ui_output_new(&d, &err);
     v = canlin_ui_view_new(ui, o[0], &err);
     CHECK(v != NULL);
@@ -2353,7 +2450,7 @@ static void test_font_cache_wake_init_fail(void)
 
     /* The view waits for a font slot: the acquire fails, as if every slot were pinned. */
     canlin_ui_test_fail_next(ui, CANLIN_UI_TEST_FAIL_ACQUIRE);
-    CHECK(canlin_ui_output_set_scale(o[0], 200) == CANLIN_UI_OK);
+    CHECK(canlin_ui_output_set_scale(o[0], CANLIN_UI_SCALE_STEP_200) == CANLIN_UI_OK);
     CHECK(canlin_ui_view_frame_begin(v) == CANLIN_UI_EFONT);
     canlin_ui_view_set_dirty_fn(v, count_dirty, &wakes);
 
@@ -2403,7 +2500,7 @@ static void test_lua_no_scale(void)
     CHECK(count(&h, "=nil\n") == 9);
     CHECK(has(&h, "ui is read-only"));
     CHECK(canlin_ui_view_em(canlin_module_view(h.m)) == 16.0f);
-    CHECK(canlin_ui_output_scale(h.out) == 100);
+    CHECK(canlin_ui_output_scale(h.out) == CANLIN_UI_SCALE_STEP_100);
     h_done(&h);
 }
 
@@ -2469,6 +2566,8 @@ int main(void)
     test_button_once();
     test_controls();
     test_focus_identity();
+    test_view_has_focus();
+    test_input_reset();
     test_errors();
     test_after_draw();
     test_columns_pcall();
@@ -2510,94 +2609,3 @@ int main(void)
     printf("ui: %d checks passed\n", checks);
     return 0;
 }
-/* The focus query (canlin#131): the view holds the focus while one of its widgets has
- * it. A view that never had a focus has none, and the focus is the per-view one: two
- * views can hold one at the same time (the shell asks both). */
-static void test_view_has_focus(void)
-{
-    harness h;
-    const canlin_ui_rect *r;
-    canlin_ui_view *other;
-
-    h_init(&h, NULL, 1.0f, focus_src, 400, 800);
-    h_drain(&h);
-    CHECK(!canlin_ui_view_has_focus(canlin_module_view(h.m)));
-    r = find(&h, CANLIN_UI_W_FIELD, CANLIN_UI_P_BOX, 1); /* B */
-    CHECK(r != NULL);
-    if (r) {
-        click(&h, r);
-        h_drain(&h);
-        CHECK(canlin_ui_view_has_focus(canlin_module_view(h.m)));
-    }
-    /* A view of its own has a focus of its own: none. */
-    other = canlin_ui_view_new(h.ui, h.out, NULL);
-    CHECK(other != NULL);
-    CHECK(!canlin_ui_view_has_focus(other));
-    canlin_ui_view_free(other);
-    h_done(&h);
-}
-
-/* A click that was queued against the old content must not act on the content that
- * comes next: the view that holds the new content drops its queued input (the model
- * view's set_view does it, canlin#131 - the reset must reach the view that holds the
- * model, or a click made against the old model acts on the new one). */
-static void test_input_reset(void)
-{
-    harness h;
-    const canlin_ui_rect *b;
-    int x, y;
-
-    h_init(&h, NULL, 1.0f, button_src, 300, 300);
-    h_drain(&h);
-    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
-    CHECK(b != NULL);
-    if (b) {
-        x = b->x + b->w / 2;
-        y = b->y + b->h / 2;
-        /* The press waits in the view's queue: it was delivered, the frame that would
-         * apply it has not come yet. */
-        {
-            canlin_ui_input in;
-            memset(&in, 0, sizeof in);
-            in.type = CANLIN_UI_IN_BUTTON;
-            in.x = x;
-            in.y = y;
-            in.down = 1;
-            CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
-        }
-        CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) > 0);
-        input(&h, CANLIN_UI_IN_MOTION, x, y, 0); /* the module draws again */
-        h_drain(&h);
-        CHECK(count(&h, "clicked") == 1); /* the queued press landed on the button */
-    }
-    h_done(&h);
-
-    h_init(&h, NULL, 1.0f, button_src, 300, 300);
-    h_drain(&h);
-    b = find(&h, CANLIN_UI_W_BUTTON, CANLIN_UI_P_BOX, 0);
-    CHECK(b != NULL);
-    if (b) {
-        x = b->x + b->w / 2;
-        y = b->y + b->h / 2;
-        /* The same press, but the content is replaced before the frame that would apply
-         * it: the queued input is dropped and the press does not land. */
-        {
-            canlin_ui_input in;
-            memset(&in, 0, sizeof in);
-            in.type = CANLIN_UI_IN_BUTTON;
-            in.x = x;
-            in.y = y;
-            in.down = 1;
-            CHECK(canlin_ui_view_input(canlin_module_view(h.m), &in) == CANLIN_UI_OK);
-        }
-        CHECK(canlin_ui_view_pending(canlin_module_view(h.m)) > 0);
-        canlin_ui_view_input_reset(canlin_module_view(h.m));
-        input(&h, CANLIN_UI_IN_MOTION, x, y, 0); /* the module draws again */
-        h_drain(&h);
-        CHECK(count(&h, "clicked") == 0);
-    }
-    h_done(&h);
-}
-
-    test_view_has_focus();
-    test_input_reset();
