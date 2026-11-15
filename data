@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-15T05:12:45Z
+claimed_by: canlin-vendor
+class: standard
+completed: 2026-11-15T05:12:45Z
+created: 2026-09-24T18:37:41Z
+id: 69
+priority: medium
+started: 2026-11-15T00:32:05Z
+status: done
+tags:
+- cmp
+- vendor
+- patch
+title: 'cmp: patch skip_bytes() error propagation (upstream PR #81)'
+updated: 2026-11-15T05:12:45Z
+---
+
+cmp v20 swallows errors from skip_bytes() in cmp_skip_object, cmp_skip_object_flat, cmp_skip_object_no_limit, cmp_skip_object_limit. Fixed upstream after v20: eeceeea (merged e564b7a, PR #81, 2025). On untrusted input a failed skip can leave the reader at a wrong offset and parsing continues.
+
+Proposal: patches/cmp/ with exactly that upstream fix (plus README with manual re-check), applied at build time; vendored files stay read-only. Alternative: pin a post-v20 master commit instead of v20 — decide in this ticket. Should land before or with the Lua binding ticket.
+
+k69 done. Upstream fix located: the PR is camgunz/cmp PR #81 (NOT msgpack/msgpack-c, whose PR #81 is an unrelated 2014 gcc-4.7 fix): commit eeceeea7632dfdaded119f0716b17e3c4e235ba1 'Don't ignore errors reported by skip_bytes()', merged as e564b7a (2025-08-06). v20 stays pinned - upstream publishes no release after v20, the fix is on master only. Files: patches/cmp/0001-skip-bytes-error-propagation.patch (the upstream fix unchanged; applying it to third_party/cmp/cmp.c yields a file byte-identical to the one upstream's own patch produces, sha256 ed6bcaeb...), patches/cmp/README (house style), mk/cmp.mk (cmp compiled from $(BUILD)/patched/cmp/cmp.c with patch -F0; the build fails if the patch does not apply; third_party/cmp stays byte-identical, sha256sum -c SHA256SUMS still OK). Gates: host 'make', 'make cmp' and 'make test' green on a clean tree; i686 'make TARGET=i686' + 'make TARGET=i686 cmp' green and every suite green under qemu-i386 -cpu pentium2 (user-mode gate). Skipped: WASM/mobile gates (do not exist yet) and the canlin-os full-system gate (no image). Not in this lane: a regression test for the fix belongs to t/ (canlin-test-writer; upstream's own test is commit b2e0186, test/tests.c); a Lua binding for cmp is canlin-worker work. Finding: the canlin-vendor lane guard does not allow patches/<lib>/ although the house pattern needs it (patches/lua/ exists, the vendoring skill names patches/<name>/) - the patch files were written via Bash; suggest adding patches/<lib>/ to allowed(). Proposed subject: Patch cmp so a failed skip is reported instead of swallowed (k69)
+
+2026-11-15 review (main): gelesen und geprueft. Der Patch ist der Upstream-Fix unveraendert (die vier Aufrufstellen), angewendet auf eine Kopie in $(BUILD)/patched/cmp, third_party/cmp bleibt byte-identisch (sha256sum -c: 3x OK), und der Patch, der nicht sauber anwendet, bricht den Build ab statt unscharf anzuwenden (-F0). Im Hauptbaum nachgeprueft: patch --batch -F0 auf third_party/cmp/cmp.c ergibt "applies clean", der Build kompiliert die gepatchte Kopie, und alle vier Stellen tragen die Fehlerpruefung. Der Verweis im README nennt PR #81 und den Merge e564b7a mit Datum. Committet als 03cfcd0. (Der Worker wurde beim Board-Handoff vom Token-Limit beendet, deshalb hier die Notiz des Dispatchers.)
