@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-15T00:57:43Z
+id: 161
+priority: medium
+status: backlog
+tags:
+- test
+- browser
+- gate
+title: 'Gate: a headless browser and a browser fixture server for the WASM gate'
+updated: 2026-11-15T00:57:43Z
+---
+
+Aus der Recherche k151: t/net/tsrv.c ist fuer den Browser unbrauchbar (ein geforktes Kind, POSIX-TLS, eine Verbindung zur Zeit). Ein Browser braucht einen Fixture-Server mit CORS-Headern, SSE, WebSocket sowie Quota- und Permission-Simulation, und einen headless Browser, um das Gate zu fahren. Auf diesem Host ist keiner installiert (nur node v24.19.0 - node kann Canvas, CORS, Quota und IndexedDB nicht beweisen). Das Gate selbst ist in der Spec festgelegt (system-design:437-440): "The WASM browser gate exercises the actual compiled runtime with local fixtures: yielding, input/render, Fetch streaming/WebSocket, persistence across reload, quota and permission denial, CORS failure, single-writer storage ownership and suspension." Die Karte gehoert zur Test-Spur: ein Runner startet den Browser gegen den Fixture-Server und faehrt die neun Punkte der Liste ab, jeder Fall einzeln benannt. Die Punkte, die ohne die Speicherschicht (k157) nicht erreichbar sind, sind als offen zu benennen, nicht als bestanden.
