@@ -25,7 +25,8 @@ Start Claude in this folder. The session you talk to hands the work to the right
 - `canlin-worker-netllm`: transport, dialects and the assistant — `src/net/`, `src/llm/`, `src/assistant/`.
 - `canlin-worker-ui`: widgets, renderer and shell — `src/ui/`, `src/render/`, `src/shell/`.
 - `canlin-worker-platform`: main loop, Android adapter, bootstrap — `src/loop/`, `src/android/`, `src/app/`.
-- `canlin-test-writer`: writes the tests and owns the build spine (the top-level `Makefile`).
+- `canlin-test-writer`: owns the build spine (the top-level `Makefile`) and the shared test
+  tools; the test file of a part (`t/<part>/`) belongs to that part's worker.
 - `canlin-vendor`: brings in third-party code and runs its gates (sonnet, own worktree).
 - `canlin-doc-writer`: writes the specs under `docs/superpowers/specs/`.
 - `canlin-adr-auditor`: records the decisions in `docs/adr/`.
