@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-11-15T18:33:49Z
+claimed_by: canlin-test-writer
+class: standard
+created: 2026-11-15T00:57:02Z
+id: 156
+priority: high
+started: 2026-11-15T18:00:06Z
+status: in-progress
+tags:
+- build
+- wasm
+- browser
+title: 'Build: make TARGET=wasm - the core without network and without storage, and
+  its portable suites under node'
+updated: 2026-11-15T18:33:49Z
+---
+
+Aus der Recherche k151 - der kleinste ehrliche erste Schritt zum Browser: ein WASM-Build des vorhandenen Kerns ohne Netz und ohne Speicher, dessen portable Suiten (ev, sandbox, render, module, ui, llm) unter node laufen. Das beweist die Portabilitaetszusage der Spec (system-design:45-46, :79-83) ohne Browser und ohne Zielentscheidung (Canvas/SDL2, VFS, Groessen-Budget) - und es erzwingt die erste echte Build-Entscheidung: welche Objekte nicht gelinkt werden. Die Seams dafuer existieren schon: der Loop laesst sich mit Fake-Clock und Fake-Wait fahren (include/canlin/loop.h:139-156), t/loop/test_loop.c nutzt das bereits. Zwei Dinge, die der Build entscheiden muss: der Browser-Takt ist performance.now() ueber canlin_ev_clock (die Spec sagt: requestAnimationFrame bei dirty, kein blockierendes poll, keine simulierte synchrone Netz-I/O auf dem Browser-Thread, event-runtime:61), und der WASM-Build darf keine src/net/{http,sock,dns,tls}.o und keine mbedtls-Quelle linken (dns.c zieht pthread, der oeffentliche Header include/canlin/http.h:20-23 zieht poll.h und sys/socket.h in jede UEsung, die ihn braucht). Die Karte gehoert zur Test-Spur (Build-Geruest, mk/wasm.mk).
+
+Werkzeugkette steht (emsdk 7.0.0, node 24.19.0). Bau-Spine angefasst: Makefile (Gate, Runner, Stack, Heap, Modul-Pruefung) und neu mk/wasm.mk (Suiten-Auswahl, Ziel-Pruefung, Objekt-Sperre). Der WASM-Lauf ist ein eigenes Gate: 'wasm under node (emscripten 7.0.0)'. Suites: ev, sandbox, render, module, ui (theme/ui/graph/kbd), shell, llm, assistant (view/response/binding). Gemessen: -sSTACK_SIZE=1048576 (der Default von 64 KB laesst die ev-Suite ueberlaufen) und -sALLOW_MEMORY_GROWTH=1 (der Renderer braucht mehr als die 16 MB Default-Heap: 'Aborted(OOM)'). Der Lauf im Gange.
