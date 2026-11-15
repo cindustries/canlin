@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-11-15T18:01:49Z
+claimed_by: canlin-doc-writer
+class: standard
+completed: 2026-11-15T18:01:49Z
+created: 2026-11-15T17:58:33Z
+id: 172
+priority: medium
+started: 2026-11-15T17:58:39Z
+status: done
+tags:
+- docs
+- spec
+- browser
+title: 'Docs: the system design still offers SDL2 for the browser'
+updated: 2026-11-15T18:01:49Z
+---
+
+Aus k154 (2026-11-15): ADR 0003 hat die Canvas-Haelfte der Browser-Stelle genommen und SDL2 aus dem Browser-Build gestrichen. Die System-Design-Spec nennt den Browser aber weiterhin an zwei Stellen als "Emscripten + SDL2/Canvas" (2026-09-22-canlin-system-design.md:60, die Zielfabelle) und als "sdl2 uploads the buffer as a texture, including through Emscripten in the browser" (:130-133, der Abschnitt ueber die Darstellung). Beide Stellen widersprechen jetzt der entschiedenen Sache: der Browser zeichnet ueber den vorhandenen present-Hook in ein Canvas, SDL2 ist kein Bestandteil des Browser-Builds. Die Spec soll das mitziehen - und dabei sagen, was mit dem Desktop-Weg (SDL2, bleibt) und mit iOS (SDL2, bleibt) passiert, damit die Aenderung nicht als Absage an SDL2 ueberhaupt gelesen wird. Die Browser-Adapter-Spec (2026-11-15-canlin-browser-adapter-design.md) traegt den Rest.
+
+2026-11-15 canlin-doc-writer: die System-Design-Spec an ADR 0003 angeglichen, an genau den beiden ueberholten Stellen.
+
+§2 Zielfabelle (jetzt system-design:65): die Browser-Zeile lautet jetzt 'Emscripten, Canvas over the present hook, browser I/O adapters'. SDL2 ist aus dem Browser-Build gestrichen; Emscripten bleibt als Werkzeug (das README nennt emsdk/emcc als Werkzeug des Browser-Builds), der Build selbst ist davon unberuehrt.
+
+§2 Absatz hinter der Tabelle (system-design:84-92): ein Satz, dass das Anzeige-Backend des Browsers der Canvas ueber den vorhandenen present-Hook ist und dass SDL2 nicht in das Browser-Modul kompiliert wird, waehrend Desktop und iOS es behalten; dazu der Verweis auf ADR 0003 und auf die Browser-Adapter-Spec fuer die Details der vier Adapter (Takt, Wait, Present, Eingabe). Damit steht die Absage an SDL2 im Browser an beiden Stellen der Zielbeschreibung, ohne eine Absage an SDL2 ueberhaupt.
+
+§4 render (system-design:139-143): sdl2 uploads the buffer as a texture gilt jetzt nur noch fuer Desktop und iOS; der Browser zeigt den Frame ueber den Canvas, und der present-Hook kopiert die dirty rows aus dem RGB-Puffer heraus. Der Rest der Zeile bleibt unveraendert (Nuklear mit Software-Rasterizer in einen RGB-Puffer im RAM, Redraw on invalidation, ein DPI-Faktor).
+
+Erhalten geblieben: die Desktop-Zeile (SDL2) und die iOS-Zeile (SDL2 + Xcode) der Zielfabelle sind unveraendert, §4 input (evdev, SDL2 oder browser input) und §4 audio (SDL2/native oder browser adapters) nennen SDL2 weiterhin fuer die nicht-browser Wege. Ebene: die System-Design-Spec bleibt die Ebene des Ziels und der Gates; die Adapter-Details stehen in der Browser-Adapter-Spec, die System-Design-Spec verweist dorthin statt sie zu wiederholen. Die Status-Zeile traegt Amendment-Eintraege fuer §2 und §4, wie es das Hausformat vorsieht.
+
+Nicht angefasst, weil fremde Spur und eigene Karte: docs/superpowers/specs/2026-11-15-canlin-browser-adapter-design.md:55-62 markiert als Seam, dass die system-design den Browser noch als Emscripten + SDL2/Canvas nenne und dass die beiden Texte sich heute widerspraechten - dieser Vermerk ist durch diese Karte ueberholt und gehoert in die Browser-Spur. Ebenso sind die Zeilenzitate der Browser-Adapter-Spec durch den gewachsenen Kopf verschoben; die neuen Stellen: system-design:62 -> :65, :118 -> :125, :129-130 -> :136-137, :133-134 -> :139-143, :261-262 -> :269-270, :405-406 -> :413-414, :453-455 -> :461-463.
+
+Nur Doku: eine Datei, docs/superpowers/specs/2026-09-22-canlin-system-design.md (+16/-8). Kein Code, kein Makefile, docs/adr/ unberuehrt, keine andere Spec angefasst. Kein Build und kein Testlauf - die Aenderung ist Fliesstext in einer Spec-Datei. Fremde Arbeit im Baum (Makefile, include/canlin/, src/app/, src/backend/, t/backend/, docs/adr/0003) ist unberuehrt.
+
+Fertig fuer den Review: die System-Design-Spec traegt ADR 0003 an beiden Stellen nach - die Browser-Zeile der Zielfabelle nennt jetzt das Canvas ueber den present-Hook statt Emscripten + SDL2/Canvas, und §4 render laesst sdl2 fuer Desktop und iOS stehen und schickt den Browser ueber den Canvas. Desktop- und iOS-Zeile bleiben unveraendert, damit die Aenderung nicht als Absage an SDL2 ueberhaupt gelesen wird; der §2-Absatz benennt ADR 0003 und verweist auf die Browser-Adapter-Spec fuer die Adapter-Details, die Ebene des Ziels und der Gates bleibt hier.
+
+Diff: eine Datei, docs/superpowers/specs/2026-09-22-canlin-system-design.md (+16/-8). Nur Doku, kein Code, kein Build und kein Testlauf noetig (Fliesstext in einer Spec-Datei). Fremde Arbeit im Baum unberuehrt.
+
+Hinweis fuer die Wartung, nicht hier entschieden: (a) der Seam-Vermerk in der Browser-Adapter-Spec (2026-11-15-canlin-browser-adapter-design.md:55-62), der die beiden Texte als heute widersprechend markiert, ist durch diese Karte ueberholt und gehoert in die Browser-Spur; (b) deren Zeilenzitate in die system-design sind um +3 bis +8 Zeilen verschoben (die neuen Stellen stehen in der Karte); (c) die Groessen-Obergrenze von 1 MiB komprimiert steht nur in ADR 0003 und in der Browser-Adapter-Spec §7 - die System-Design-Spec widerspricht ihr nicht, erwaehnt sie aber auch nicht; ob §12 die Browser-Gate-Zeile um das Budget ergaenzen soll, ist eine Entscheidung des Maintainers.
+
+Proposed Subject: Drop SDL2 for the browser target in the system design (k172)
+
+2026-11-15 review (main): gelesen und committet. Die Browser-Zeile der Zielfabelle nennt jetzt Emscripten und das Canvas ueber den present-Hook (Emscripten bleibt - es ist die Werkzeugkette); der Absatz hinter der Tabelle sagt ausdruecklich, dass SDL2 nicht in das Browser-Modul kompiliert wird, Desktop und iOS es aber behalten, und verweist auf ADR 0003 und die Browser-Adapter-Spec. Die Render-Zeile gilt jetzt fuer Desktop und iOS, der Browser zeichnet ueber den Hook. Der Status-Kopf traegt die Amendment-Zeilen fuer §2 und §4.
+Die zwei Befunde des Workers sind uebernommen: die Browser-Spec traegt noch einen Seam-Hinweis, der behauptet, die beiden Texte widerspruechen sich HEUTE (das ist nach dieser Aenderung ueberholt) und ihre Zeilenangaben sind um 3 bis 8 Zeilen gewandert - beides gehoert in die Browser-Spec und ist als Karte erfasst. Und das Groessen-Budget von 1 MiB (ADR 0003) steht in keiner Gate-Zeile der System-Design-Spec - das ist entschieden: das Budget kommt in den WASM-Gate-Abschnitt (§12), denn ein Gate ohne eine Zahl, gegen die es prueft, ist kein Gate.
