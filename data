@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-11-15T18:20:02Z
+claimed_by: canlin-worker-netllm
+class: standard
+created: 2026-11-15T00:57:33Z
+id: 159
+priority: medium
+started: 2026-11-15T18:20:02Z
+status: in-progress
+tags:
+- netllm
+- browser
+- transport
+title: 'Browser: a Fetch/Streams transport over the canlin_llm_transport seam'
+updated: 2026-11-15T18:20:02Z
+---
+
+Aus der Recherche k151: die Spec verlangt, dass der Browser-Transport die Browser-HTTP-Faehigkeiten benutzt und nicht den nativen Socket/TLS-Stack durchtunnelt (system-design:116-117, event-runtime:200-201). Die Seam existiert: canlin_llm_transport mit open/close (include/canlin/llm.h:122-131), und include/canlin/app.h:62 nennt den "browser adapter" bereits ausdruecklich als eine der drei Transport-Implementierungen neben dem nativen HTTP-Client und dem Fixture-Transport der Tests (das Muster ist src/llm/fixture.c). Die Karte gehoert in die Netz-Spur: ein Browser-Transport liefert status/header/body/end/error in der Reihenfolge der Seam, injiziert das Credential nur fuer die gebundene Origin (das Kern-Credential ist ein Header, include/canlin/llm.h:89-96 - der Browser verbietet viele Header und nutzt Cookies/CORS, die Abbildung ist offen, llm-ui:72-77), und ein CORS-Fehler erscheint als explizite Transport-Fehlermeldung (llm-providers:154 nennt "browser CORS" bereits als eigene Fehlerkategorie).
