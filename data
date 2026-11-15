@@ -1,0 +1,48 @@
+---
+claimed_at: 2026-11-15T17:44:24Z
+claimed_by: canlin-adr-auditor
+class: standard
+completed: 2026-11-15T17:44:24Z
+created: 2026-11-15T00:37:13Z
+id: 149
+priority: medium
+started: 2026-11-15T00:37:28Z
+status: done
+tags:
+- adr
+- docs
+- assistant
+- security
+title: 'ADR: the module receives the submission as the core''s JSON bytes, not as
+  a Lua table'
+updated: 2026-11-15T17:44:24Z
+---
+
+Entscheidung vom 2026-11-14 (k115), umgesetzt in 0ba2432: canlin.view.submission() gibt dem Modul die JSON-Bytes der Submission, die der Kern gebaut hat, und keine Lua-Tabelle, die der Kern selbst gebaut und wieder gelesen haette. Zwei Wege standen offen: (a) die Bytes direkt, (b) ein begrenzter JSON-Writer im Kern, den das Modul benutzt. Gewaehlt wurde (a), weil der Kern die Bytes ohnehin baut und weil sie der Vertrag sind - und weil (b) eine neue canlin.*-API ueber die Sicherheitsgrenze waere. Der Befund, der die Entscheidung trug: der handgeschriebene Writer des Moduls (jstr/jval in src/app/assistant.c) verlor, was die JSON traeg - jval(sub.values, 1) erreicht bei einem Graphknoten die Tiefe 5, jedes Knotenfeld (id, title, x, y) und jeder Port kam als null heraus. Die Messung: 19 von 130 Checks der Binding-Suite fielen gegen die alte Bindung. Der ADR-Auditor bestaetigt die Begruendung am Code und an der Historie und schreibt sie als ADR (die Nummer folgt der bestehenden, docs/adr/0001 ist die View-Trennung) - er haelt die Entscheidung fest, nicht den Umsetzungsstand. Der Weg zum Modul hin (die App-Haelfte, k137) gehoert nicht in den ADR, sondern in die Karten.
+
+ADR 0002 geschrieben: docs/adr/0002-the-module-takes-the-submission-as-the-cores-json-bytes.md (Form wie ADR 0001, Nummer 0002, Kopf mit Status/Datum/Tags, Englisch). Die Begruendung wurde am Code und an der Historie bestaetigt, nicht nur aus der Karte uebernommen:
+
+- der Legacy-Writer: jstr/jval in src/app/assistant.c (Stand 0ba2432, Zeilen 50-88), mit der Tiefenschranke 'if depth > 4 then return null end' (Zeile 67) und dem Aufruf jval(sub.values, 1) (Zeile 224). Die Tiefenrechnung nachgevollzogen: die Knotenfelder (id, title, x, y), die Portlisten und die Kanten-from/to liegen bei Tiefe 5 und kamen als null heraus.
+- die Bindung: canlin.view.submission() gibt die Bytes (src/assistant/binding.c:55-77 -> canlin_assistant_view_take_json, src/assistant/view.c:1796-1813); der Header nennt die drei Faelle (include/canlin/assistant_view.h:262-271).
+- die Tests: t/assistant/test_binding.c, test_submission_json ab Zeile 418; die Wertechecks Zeile 441-452, der Bytevergleich Zeile 464.
+
+Die Messung reproduziert, nicht nur uebernommen: in einer Wegwerf-Kopie ausserhalb des Repos die Bindungsseite auf 0ba2432^ zurueckgesetzt und gegen die heutige Suite gebaut -> 19 von 130 Checks fielen, exakt wie in der Karte. Der Gegenlauf auf einem sauberen HEAD: 130 Checks gruen. Der volle Host-Lauf (make BUILD=build/adr test) war ALL TESTS PASSED, gate: host.
+
+Zwei Praezisierungen, die die Karte nicht sagte und die ich am Code belegt habe, bevor ich sie schrieb:
+1. Verlustort: nicht die Tabelle, sondern der Writer des Moduls. Die alte Tabellen-Leseseite (canlin_assistant_view_take_lua, src/assistant/view.c:1788-1959 vor 0ba2432) las mit Tiefengrenze 15 und war vollstaendig; der alte Test las die Knoten und Kanten ohne Muehe aus der Tabelle (t/assistant/test_binding.c:307 vor 0ba2432). Der Verlust passierte beim zweiten Serialisieren im Modul. Der ADR sagt das so.
+2. Die Werte lagen bei Tiefe 5 (nicht die Portfelder bei 7): auch die Portlisten und die Kanten-from/to liegen auf Tiefe 5, also direkt hinter der Schranke.
+
+Offen gelassen (nicht entschieden): ein canlin.*-JSON-Leser fuer Module gibt es nicht; ein Modul, das die Werte lesen will, hat heute keinen Haus-Leser dafuer. Das ist eine eigene Frage und gehoert nicht in diesen ADR.
+
+Kein Commit. Nur docs/adr/ angefasst, keine Specs, kein Code. Achtung: der Baum traegt parallel die unkommittierten Aenderungen eines anderen Agenten (Makefile, include/canlin/assistant_binding.h, include/canlin/assistant_view.h, src/assistant/binding.c, src/assistant/view.c, t/app/test_assistant.c, t/assistant/test_binding.c) - die gehoeren nicht zu dieser Karte. Die Zeilenangaben im ADR verweisen deshalb auf den committeten HEAD (21b3246), nicht auf den Arbeitsbaum.
+
+ADR 0002 liegt fertig unter docs/adr/0002-the-module-takes-the-submission-as-the-cores-json-bytes.md. Entscheidung und Begruendung am Code und an der Historie bestaetigt, die 19-von-130-Messung in einer Wegwerf-Kopie reproduziert (alte Bindungsseite aus 0ba2432^ gegen die heutige Suite gebaut: 19 von 130 Checks fielen), der Gegenlauf auf sauberem HEAD: 130 Checks gruen, voller Host-Lauf ALL TESTS PASSED (gate: host).
+
+Geaenderte Datei: nur die neue ADR-Datei (docs/adr/0002-the-module-takes-the-submission-as-the-cores-json-bytes.md). Keine Specs, kein Code, kein Commit.
+
+Hinweis fuer den Reviewer: der Arbeitsbaum traegt parallel die unkommittierten Aenderungen eines anderen Agenten (Makefile, include/canlin/assistant_binding.h, include/canlin/assistant_view.h, src/assistant/binding.c, src/assistant/view.c, t/app/test_assistant.c, t/assistant/test_binding.c) - sie gehoeren zu einer anderen Karte und sind beim Diff auszublenden. Die Zeilenangaben im ADR verweisen auf den committeten HEAD (21b3246), damit sie stabil bleiben.
+
+Proposed subject: Record the decision that the module takes the submission as the core's JSON bytes (k149)
+
+2026-11-15 review (main): gelesen und committet als e51493c. Der ADR haelt die Entscheidung fest (die Bytes des Kerns sind der Vertrag, das Modul bekommt sie und nicht eine Lua-Tabelle) und ihre Begruendung: der Modul-schreiber verlor, was die JSON trug - die Knotenfelder eines Graphen liegen auf Tiefe 5 und kamen als null heraus. Der Worker hat die Messung nicht uebernommen, sondern nachgestellt: gegen die alte Bindung fallen 19 von 130 Checks der Suite durch, gegen den heutigen Stand bestehen alle 130. Zwei Korrekturen an der Karte sind uebernommen: der Verlust passierte nicht beim Lesen der Tabelle (das las bis Tiefe 15 und war vollstaendig), sondern in der zweiten Serialisation des Moduls; und die Kanten von/from/to liegen ebenfalls auf Tiefe 5 (die Port-Felder auf 7, wenn man ueber die schon null gewordene Liste hinauszaehlt).
+Als offene Frage im ADR festgehalten, nicht entschieden: es gibt kein modulseitiges canlin.*-JSON-Leser - ein Modul, das die Werte lesen will, hat keinen Haus-Leser dafuer.
