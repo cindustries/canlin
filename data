@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-15T17:45:33Z
+id: 168
+priority: high
+status: backlog
+tags:
+- android
+- packaging
+- licences
+title: 'APK: the licence texts of the linked components do not ship with the package'
+updated: 2026-11-15T17:45:33Z
+---
+
+Aus der Release-Pruefung k43 (2026-11-15): das APK ist heute das einzige auslieferbare Artefakt dieses Repos, und es traegt keine Lizenztexte. unzip -l build/android-armv7/canlin.apk zeigt genau sechs Eintraege: Manifest, resources.arsc, lib/armeabi-v7a/libcanlin.so und drei META-INF-Signaturdateien - kein assets/, keine NOTICE. In der .so steht kein Apache-, kein MIT- und kein OFL-Text; die uebernommenen Kommentare (src/render/render.c:3-19, nuklear.h) ueberleben die Uebersetzung nicht, weil die Dateien nicht mitgeliefert werden. Was mitmuss, ist die Liste der GELINKTEN Komponenten - nicht die Tabelle in docs/THIRD-PARTY.md: im APK stecken Nuklear, stb_truetype und Lua, aber nicht mbedtls und nicht cmp (mk/app.mk:28-30 nennt weder MBEDTLS_OBJ noch CMP_OBJ, obwohl beide in LIBOBJ stehen). Fuer die eingebetteten Komponenten heisst das: der Font-Subset (src/render/font_builtin.c) nennt die OFL in der Name-Table und traegt den Copyright-Hinweis, der Name bleibt "Inter" (kein Reserved Font Name) - aber der vollstaendige OFL-Text muss als Datei mitreisen, ebenso die MIT- und Apache-2.0-Texte der gelinkten Komponenten.
+Zwei Eigner: die Verpackungsregel in mk/android.mk (Plattform-Spur) und die gemeinsame Regel, ein licenses/-Verzeichnis aus dem vendorten Baum zu erzeugen und jede Verpackung es mitkopieren zu lassen (Build-Spine, Test-Spur) - die zweite bedient spaeter auch die statische Runtime-Binary. Der Gegenpart auf dem canlin-os-Board (das Image) ist eine eigene Karte dort.
