@@ -3,6 +3,11 @@
  * canlin_ev clock driving every transport timeout and a fake wall clock for certificate
  * dates. No external network. Exit 0 = pass.
  *
+ * Every wait is on a condition (the callback fired, the stream is closed, the phase is
+ * reached, the server saw the request); a budget of wall clock time is only the guard
+ * against a hang. The suite must not be a function of the machine's speed: the emulated
+ * P2 target needs about ten times the time of the host for the same handshake.
+ *
  * Environment: CANLIN_HTTP_BENCH=1 prints HTTPS round trips including the handshake (real
  * clock, client and forked server on the same machine; a number for the evidence record,
  * not a pass/fail criterion). TSRV_HOLD=<seconds> only starts the test server, prints
@@ -113,6 +118,17 @@ static void block(int on)
         block_entered = 0;
     pthread_cond_broadcast(&rcv);
     pthread_mutex_unlock(&rmu);
+}
+
+/* The number of resolver calls that sit in the blocking branch: the worker runs the
+ * job, so a cancel of its stream orphans it (and only then). */
+static int blocked_entered(void)
+{
+    int n;
+    pthread_mutex_lock(&rmu);
+    n = block_entered;
+    pthread_mutex_unlock(&rmu);
+    return n;
 }
 
 /* ---- recording consumer ---- */
@@ -254,26 +270,101 @@ static int done(const rec *r)
     return r->ended || r->errored || r->closed;
 }
 
-/* Drive until every rec is done or `ms` of real time passed. */
-static void run(canlin_http *h, rec **rs, int n, int ms)
+/* The budget of a condition wait. It is a guard against a hang, not the condition:
+ * every wait below waits for a state the test asserts (the callback fired, the stream
+ * is closed, the phase is reached) and gives up only after this long. The emulated
+ * target needs about ten times the time of the host for the same handshake (a TLS
+ * round trip is ~500 ms under qemu-i386 against ~50 ms on the host), so the budget is
+ * generous. A wait that runs out fails its check; it never lets one pass. */
+#define WAIT_MS 10000
+
+/* The budget of the big-body transfer: the consumer pauses after every piece, so the
+ * transfer takes one step per piece. */
+#define BIG_WAIT_MS 20000
+
+/* The window for a check that a request must not happen: a wrongly followed redirect
+ * needs a new connection and a request to reach the test server, and the emulated
+ * target needs about ten times the time of the host for it. */
+#define NO_FOLLOW_MS 3000
+
+/* The number of transport steps a negative check gets: enough for the transport to
+ * deliver a callback it must not deliver. The unit is a step, not a millisecond, so
+ * the window is the same on a slow machine as on a fast one. */
+#define GUARD_STEPS 5
+
+/* Drive until every rec is done or the budget is spent. */
+static void run(canlin_http *h, rec **rs, int n)
 {
     long t0 = real_ms();
     for (;;) {
         int i, all = 1;
         for (i = 0; i < n; i++)
             all &= done(rs[i]);
-        if (all || real_ms() - t0 > ms)
+        if (all || real_ms() - t0 > WAIT_MS)
             break;
         iterate(h);
     }
 }
 
-/* Drive for a while (real time) without expecting completion. */
-static void spin(canlin_http *h, int ms)
+/* Drive the transport for a fixed number of steps. */
+static void steps(canlin_http *h, int n)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        iterate(h);
+}
+
+/* Wait for the stream to be closed from inside one of its callbacks. */
+static int wait_closed(canlin_http *h, rec *r)
 {
     long t0 = real_ms();
-    while (real_ms() - t0 < ms)
+    while (!r->closed && real_ms() - t0 < WAIT_MS)
         iterate(h);
+    return r->closed;
+}
+
+/* Wait until the stream has reached the phase (the phases advance in order). */
+static int wait_phase(canlin_http *h, canlin_http_stream *s, canlin_http_phase ph)
+{
+    long t0 = real_ms();
+    while (canlin_http_stream_phase(s) < ph && real_ms() - t0 < WAIT_MS)
+        iterate(h);
+    return canlin_http_stream_phase(s) >= ph;
+}
+
+/* Wait until the consumer has received n body bytes. */
+static int wait_body(canlin_http *h, rec *r, size_t n)
+{
+    long t0 = real_ms();
+    while (r->blen < n && real_ms() - t0 < WAIT_MS)
+        iterate(h);
+    return r->blen >= n;
+}
+
+/* Wait until the resolver holds no job: the worker collected the answer or the cancel
+ * of its stream freed it. */
+static int wait_no_dns_job(canlin_http *h)
+{
+    long t0 = real_ms();
+    canlin_http_stats st;
+    for (;;) {
+        canlin_http_get_stats(h, &st);
+        if (st.dns_jobs == 0)
+            return 1;
+        if (real_ms() - t0 >= WAIT_MS)
+            return 0;
+        iterate(h);
+    }
+}
+
+/* Wait until the resolver worker sits in the blocking test resolver: the job runs,
+ * so a cancel of its stream orphans it. */
+static int wait_blocked(canlin_http *h)
+{
+    long t0 = real_ms();
+    while (blocked_entered() == 0 && real_ms() - t0 < WAIT_MS)
+        iterate(h);
+    return blocked_entered() > 0;
 }
 
 static canlin_http_stream *go(canlin_http *h, rec *r, const char *method, const char *url,
@@ -305,7 +396,7 @@ static void one(canlin_http *h, rec *r, const char *method, const char *url,
     rs[0] = r;
     go(h, r, method, url, cred, body);
     if (r->s)
-        run(h, rs, 1, 15000);
+        run(h, rs, 1);
     CHECK(done(r), "%s did not finish", url);
     CHECK(r->after_done == 0, "%s: callback after end/error", url);
 }
@@ -439,7 +530,7 @@ static void test_backpressure(void)
     canlin_http *h = mk(tsrv_ca_file(), test_resolve);
     rec r;
     size_t i;
-    unsigned steps = 0;
+    unsigned nsteps = 0;
     long t0;
     int k;
     for (k = 0; k < 2; k++) {
@@ -447,10 +538,10 @@ static void test_backpressure(void)
            NULL, NULL);
         r.pause = 1;
         t0 = real_ms();
-        while (!done(&r) && real_ms() - t0 < 20000) {
+        while (!done(&r) && real_ms() - t0 < BIG_WAIT_MS) {
             unsigned before = r.bodies;
             iterate(h);
-            steps++;
+            nsteps++;
             /* a pausing consumer gets at most one body callback per step */
             CHECK(r.bodies - before <= 1, "%u body callbacks in one step", r.bodies - before);
         }
@@ -463,7 +554,7 @@ static void test_backpressure(void)
             }
         rec_free(&r);
     }
-    (void)steps;
+    (void)nsteps;
     canlin_http_free(h);
 }
 
@@ -521,7 +612,7 @@ static void test_redirects(void)
     tsrv_clear(srv);
     one(h, &r, "POST", U(0, "https", "localhost", TS_EC, "/r?c=302&l=/echo"), &cred, "{}");
     CHECK(err_is(&r, "redirect:") && r.status == 0, "POST 302: '%s'", r.err);
-    CHECK(tsrv_wait(srv, 2, 300) == 1, "a refused redirect was followed");
+    CHECK(tsrv_wait(srv, 2, NO_FOLLOW_MS) == 1, "a refused redirect was followed");
     rec_free(&r);
     /* POST on 307 is followed with the same method and body */
     tsrv_clear(srv);
@@ -670,13 +761,17 @@ static void go_backlog(canlin_http *h, rec *r)
     int attempt;
     for (attempt = 0; attempt < 8; attempt++) {
         go(h, r, "GET", U(0, "http", "localhost", TS_BACKLOG, "/"), NULL, NULL);
-        spin(h, 100);
+        wait_phase(h, r->s, CANLIN_HTTP_PH_CONNECT);
+        /* the kernel may answer the SYN anyway: give the transport a few steps to
+         * leave the connect phase, then take the phase it holds */
+        steps(h, GUARD_STEPS);
         if (canlin_http_stream_phase(r->s) == CANLIN_HTTP_PH_CONNECT)
             return;
         rec_free(r);
     }
     go(h, r, "GET", U(0, "http", "localhost", TS_BACKLOG, "/"), NULL, NULL);
-    spin(h, 100);
+    wait_phase(h, r->s, CANLIN_HTTP_PH_CONNECT);
+    steps(h, GUARD_STEPS);
 }
 
 static void test_timeouts(void)
@@ -694,29 +789,25 @@ static void test_timeouts(void)
 
     /* handshake stall: fires exactly at CANLIN_NET_HANDSHAKE_TIMEOUT_MS */
     go(h, &r, "GET", U(0, "https", "localhost", TS_STALL, "/"), NULL, NULL);
-    spin(h, 200);
+    wait_phase(h, r.s, CANLIN_HTTP_PH_TLS);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_TLS, "phase %d", canlin_http_stream_phase(r.s));
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_HANDSHAKE_TIMEOUT_MS - 1);
-    spin(h, 50);
+    steps(h, GUARD_STEPS);
     CHECK(!done(&r), "handshake timed out early");
     canlin_ev_fake_clock_advance(&clk, 1);
-    run(h, rs, 1, 2000);
+    run(h, rs, 1);
     CHECK(err_is(&r, "timeout: TLS handshake"), "handshake stall: '%s'", r.err);
     rec_free(&r);
 
     /* idle stall inside the body */
     go(h, &r, "GET", U(0, "https", "localhost", TS_EC, "/stall-body"), NULL, NULL);
-    {
-        long t0 = real_ms();
-        while (r.blen < 10 && real_ms() - t0 < 5000)
-            iterate(h);
-    }
+    wait_body(h, &r, 10);
     CHECK(r.status == 200 && r.blen == 10, "stall-body prefix %u", (unsigned)r.blen);
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_IDLE_TIMEOUT_MS - 1);
-    spin(h, 50);
+    steps(h, GUARD_STEPS);
     CHECK(!done(&r), "idle timeout early");
     canlin_ev_fake_clock_advance(&clk, 1);
-    run(h, rs, 1, 2000);
+    run(h, rs, 1);
     CHECK(err_is(&r, "timeout: no data"), "idle stall: '%s'", r.err);
     rec_free(&r);
 
@@ -725,17 +816,18 @@ static void test_timeouts(void)
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_CONNECT, "connect phase %d",
           canlin_http_stream_phase(r.s));
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_CONNECT_TIMEOUT_MS);
-    run(h, rs, 1, 2000);
+    run(h, rs, 1);
     CHECK(err_is(&r, "timeout: connect"), "connect stall: '%s'", r.err);
     rec_free(&r);
 
     /* DNS: no answer within CANLIN_NET_DNS_TIMEOUT_MS; the late result is dropped */
     block(1);
     go(h, &r, "GET", "http://block.test/", NULL, NULL);
-    spin(h, 100);
+    wait_phase(h, r.s, CANLIN_HTTP_PH_DNS);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_DNS, "dns phase");
+    wait_blocked(h); /* the job runs: the timeout orphans it */
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_DNS_TIMEOUT_MS);
-    run(h, rs, 1, 2000);
+    run(h, rs, 1);
     CHECK(err_is(&r, "dns: lookup timed out"), "dns timeout: '%s'", r.err);
     rec_free(&r);
     {
@@ -744,7 +836,7 @@ static void test_timeouts(void)
         CHECK(st.dns_jobs == 1 && st.dns_orphans == 1, "orphan while blocked: %u/%u", st.dns_jobs,
               st.dns_orphans);
         block(0);
-        spin(h, 100);
+        wait_no_dns_job(h);
         canlin_http_get_stats(h, &st);
         CHECK(st.dns_jobs == 0 && st.streams == 0, "orphan not freed: %u", st.dns_jobs);
     }
@@ -766,19 +858,20 @@ static void test_cancel(void)
     go(h, &r, "GET", U(0, "http", "localhost", TS_PLAIN, "/ok"), NULL, NULL);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_QUEUED, "queued");
     r_close(&r);
-    spin(h, 100);
+    steps(h, GUARD_STEPS);
     CHECK(r.calls == 0, "callbacks after cancel while queued");
 
     /* during DNS: the worker's late answer is freed, never delivered */
     block(1);
     go(h, &r, "GET", "http://block.test/", NULL, NULL);
-    spin(h, 100);
+    wait_phase(h, r.s, CANLIN_HTTP_PH_DNS);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_DNS, "dns phase");
+    wait_blocked(h); /* the job runs: the cancel orphans it */
     r_close(&r);
     canlin_http_get_stats(h, &st);
     CHECK(st.streams == 0 && st.dns_orphans == 1, "orphan %u", st.dns_orphans);
     block(0);
-    spin(h, 150);
+    wait_no_dns_job(h); /* the worker came back and freed the orphan */
     canlin_http_get_stats(h, &st);
     CHECK(r.calls == 0 && st.dns_jobs == 0, "dns cancel: calls %d jobs %u", r.calls, st.dns_jobs);
 
@@ -787,31 +880,27 @@ static void test_cancel(void)
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_CONNECT, "connect phase");
     r_close(&r);
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_CONNECT_TIMEOUT_MS * 2);
-    spin(h, 100);
+    steps(h, GUARD_STEPS);
     CHECK(r.calls == 0, "connect cancel");
 
     /* during the handshake */
     go(h, &r, "GET", U(0, "https", "localhost", TS_STALL, "/"), NULL, NULL);
-    spin(h, 100);
+    wait_phase(h, r.s, CANLIN_HTTP_PH_TLS);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_TLS, "tls phase");
     r_close(&r);
     canlin_ev_fake_clock_advance(&clk, CANLIN_NET_HANDSHAKE_TIMEOUT_MS * 2);
-    spin(h, 100);
+    steps(h, GUARD_STEPS);
     CHECK(r.calls == 0, "handshake cancel");
 
     /* during the body, from outside a callback */
     go(h, &r, "GET", U(0, "https", "localhost", TS_EC, "/stall-body"), NULL, NULL);
-    {
-        long t0 = real_ms();
-        while (r.blen < 10 && real_ms() - t0 < 5000)
-            iterate(h);
-    }
+    wait_body(h, &r, 10);
     CHECK(canlin_http_stream_phase(r.s) == CANLIN_HTTP_PH_RECV && r.blen == 10, "body phase");
     {
         int calls = r.calls;
         r_close(&r);
         canlin_ev_fake_clock_advance(&clk, CANLIN_NET_IDLE_TIMEOUT_MS * 2);
-        spin(h, 100);
+        steps(h, GUARD_STEPS);
         CHECK(r.calls == calls, "body cancel: more callbacks");
     }
     free(r.body);
@@ -820,13 +909,14 @@ static void test_cancel(void)
     {
         int at_;
         for (at_ = 1; at_ <= 3; at_++) {
-            int calls;
             go(h, &r, "GET", U(0, "https", "localhost", TS_EC, "/big"), NULL, NULL);
             r.close_at = at_;
-            spin(h, 300);
-            calls = r.calls;
+            /* the condition: the callback fired and closed the stream */
+            wait_closed(h, &r);
+            /* the transport must not call back after the close */
+            steps(h, GUARD_STEPS);
             CHECK(r.closed && r.after_done == 0, "close inside callback %d: after %d", at_, r.after_done);
-            CHECK(calls == (at_ == 1 ? 1 : at_ == 2 ? 2 : 3), "close at %d: %d calls", at_, calls);
+            CHECK(r.calls == (at_ == 1 ? 1 : at_ == 2 ? 2 : 3), "close at %d: %d calls", at_, r.calls);
             free(r.body);
         }
     }
@@ -856,7 +946,9 @@ static void test_admission(void)
     memset(&r[i], 0, sizeof r[i]);
     CHECK(canlin_http_open(h, &q, &rcb, &r[i], &msg) == NULL && msg && strncmp(msg, "limit:", 6) == 0,
           "5th stream admitted (%s)", msg ? msg : "");
-    spin(h, 200);
+    /* the condition: all four streams wait for their handshake */
+    for (i = 0; i < CANLIN_NET_STREAMS_MAX; i++)
+        wait_phase(h, r[i].s, CANLIN_HTTP_PH_TLS);
     /* all four are waiting on sockets now */
     CHECK(canlin_http_pollfds(h, p, CANLIN_HTTP_POLLFDS_MAX, &dl) == CANLIN_NET_STREAMS_MAX &&
               dl == clk.now + CANLIN_NET_HANDSHAKE_TIMEOUT_MS,
