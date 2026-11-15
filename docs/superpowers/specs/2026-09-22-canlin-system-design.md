@@ -7,7 +7,7 @@ browser shows the frame through the canvas over the runtime's present hook (ADR 
 while the desktop and the iOS rows keep SDL2.
 §4 amended 2026-11-15: the render line no longer routes the browser through SDL2.
 §12 amended 2026-11-15: the i686 run has a runner hook, so it is one command, its timeout
-follows the target and its result names the gate that ran.
+follows the target and its result names the gate that ran; the WASM gate has a size budget.
 This is the family-level design. Each sub-project gets its own spec and plan; the first
 one is `libbee` (`~/dev/libbee/docs/superpowers/specs/`). The runtime's scheduling and
 platform contract is specified in [the event-runtime design](2026-09-22-canlin-event-runtime-design.md).
@@ -462,6 +462,12 @@ create a speculative server implementation in canlin or make up a remote reposit
   yielding, input/render, Fetch streaming/WebSocket, persistence across reload, quota and
   permission denial, CORS failure, single-writer storage ownership and suspension. It cannot substitute for native/P2
   tests; nor does a host test prove browser persistence.
+- The same gate measures the module it delivers: the transferred, compressed bytes of the
+  `.wasm` file must not exceed **524,288 bytes (512 KiB)** (ADR 0003 §3). The gate fails
+  when the module is larger. The bound covers the module only; the loader and the glue
+  get their own budget when the browser slice has one. The
+  [browser adapter design](2026-11-15-canlin-browser-adapter-design.md) §7 carries the
+  same bound and the measurement it comes from.
 - Manual hardware qualification measures real P2 timing and checks native/mobile audio,
   drivers and lifecycle separately. Report this separately from automated fixture tests.
 

@@ -4,13 +4,16 @@ Status: draft for review (2026-11-15). It carries out
 [ADR 0003](../../adr/0003-the-browser-slice-has-one-display-backend-one-wait-model-and-a-size-budget.md)
 (accepted 2026-11-15): one display backend (the canvas over the existing present hook),
 one wait model (an animation frame when dirty, a timer for the deadline) and one size
-budget (at most 1 MiB compressed). It adds the browser row to the
+budget (at most 512 KiB compressed). It adds the browser row to the
 [native loop](2026-09-24-canlin-native-loop-design.md) §4 and states the contract of the
 four adapters of the third trace — clock, wait, present, input — on the seams that exist
 today. **None of the browser slice is built yet**: the build (k156), the adapter trace
 (k158), the transports (k159, k160) and the browser gate (k161) are open. The seams this
 spec names exist and carry the native and the Android trace; their browser bindings do not
 exist yet. Every section says which part is which.
+Amended 2026-11-15: the seam notes are closed — the system design carries the ADR 0003
+decision now — the references into the system design are corrected, and §7 carries the
+size budget of ADR 0003 §3.
 
 ## 1. Scope
 
@@ -49,17 +52,15 @@ draw into the canvas itself.
 **Decision — no native TLS stack in the module.** The browser transport uses the
 browser's HTTP, WebSocket and TLS facilities rather than tunnelling the native
 socket/TLS stack ([system design](2026-09-22-canlin-system-design.md) §4,
-system-design:118). The module therefore carries no mbedtls; the build (k156) has to keep
+system-design:125-126). The module therefore carries no mbedtls; the build (k156) has to keep
 the socket and DNS objects out of the link as well.
 
-*Seam to mark for the maintainer:* the [system design](2026-09-22-canlin-system-design.md)
-§2 target table still names the browser as "Emscripten + SDL2/Canvas"
-(system-design:62), and §4 render still says that "`sdl2` uploads the buffer as a texture,
-including through Emscripten in the browser" (system-design:133-134). ADR 0003 takes the
-Canvas half of the first line and drops SDL2 from the browser build. The system design
-text is not updated by this spec — the maintainer decides whether to amend it there or to
-leave the decision to live in ADR 0003 and here. The two texts disagree today; the ADR
-is the newer one and says so.
+*Seam — closed 2026-11-15:* the [system design](2026-09-22-canlin-system-design.md) was
+amended on that day and carries this decision now: §2 names the browser as "Emscripten,
+Canvas over the present hook" (system-design:65), and §4's render line says that the
+browser has no SDL2 and shows the frame through the canvas over the present hook
+(system-design:139-143). The decision is in ADR 0003 §1; both texts carry it and neither
+contradicts the other.
 
 ## 3. The clock (Takt)
 
@@ -104,7 +105,7 @@ The browser has no descriptor to poll and may not block. The event runtime names
 wait model in its own words (event runtime §3, the Browser/WASM row: "Schedule work
 through browser callbacks/tasks; return control after each turn. Request animation frames
 when dirty. No blocking `poll()`, busy-wait or simulated synchronous network I/O on the
-browser thread"), and the system design repeats it (system-design:129-130).
+browser thread"), and the system design repeats it (system-design:136-137).
 
 Two facts of the native loop do not survive the move:
 
@@ -250,18 +251,35 @@ stay pressed.
 
 ## 7. The size budget of the module
 
-**Decision — the WASM module the browser downloads is at most 1,048,576 bytes (1 MiB)
+**Decision — the WASM module the browser downloads is at most 524,288 bytes (512 KiB)
 compressed.** The number is the size of the transferred bytes: the content-encoded body
-over HTTPS, as the delivery of the browser target has it (system-design:62, "WASM +
-loader + assets over HTTPS").
+over HTTPS, as the delivery of the browser target has it (system-design:65, "WASM +
+loader + assets over HTTPS"). The bound is the one ADR 0003 §3 sets, and the
+[system design](2026-09-22-canlin-system-design.md) §12 carries the same number for the
+browser gate.
 
-The number's origin (ADR 0003, "The size of the WASM module"): the measurement was made
-before the browser build existed — the runtime's loadable C content was measured on the
-host build and compressed as a proxy. The measurement is the sum of the loadable
-sections (.text, .rodata*, .data*) over a partial link of the objects the browser module
-would carry: CanLin's own C, Nuklear, Lua 5.4 with its libraries and the embedded font —
-mbedtls is not in that set, because the browser transport uses the browser's own
-facilities.
+**The number's origin (ADR 0003, "The size of the WASM module").** The runtime was
+compiled for wasm32 with emcc 7.0.0 at `-Os` and linked with every symbol the runtime
+defines exported, so that the linker keeps the whole runtime instead of dropping the
+parts the browser glue does not call yet. The result is a **604,772 byte** wasm module;
+compressed with gzip -9 it is **286,727 bytes**, with zstd -19 **254,293 bytes**. The
+number is measured with gzip, the more conservative of the two encodings a server may
+use: a server that serves brotli or zstd has more room, not less. Neither the
+optimisation level nor the transport moves the figure much: at `-O2` the module is
+632,275 bytes and 280,469 bytes compressed, and without the native socket stack — which
+the browser's own transport replaces — it is 587,791 bytes and 278,291 bytes compressed.
+The measurement repeats from the ADR's recipe: the runtime's sources with `emcc -Os
+-Iinclude -Ithird_party/lua/src -isystem third_party/nuklear`, the link with
+`--export=<symbol>` for each of the 1,233 symbols the objects define, so that nothing is
+collected away.
+
+The bound is a bound, not a target. It sits about 1.8 times above the measured module:
+room for the browser adapter, the fetch transport and the growth the slice still needs,
+and tight enough that a second runtime or a large vendored dependency cannot be added
+unnoticed.
+
+Where the weight is, measured on the host objects as the loadable sections (`.text`,
+`.rodata*`, `.data*`) of the object files the module carries:
 
 | part | loadable bytes |
 |---|---|
@@ -271,10 +289,11 @@ facilities.
 | the embedded Inter Latin subset | 23,972 |
 | **sum over the partial link** | **732,738** |
 
-gzip -9 takes that to **333,319 bytes** (45.5 %). The real wasm module will be larger:
-the wasm encoding carries its own per-function overhead, and the module adds the wasm C
-library and the toolchain's runtime glue. The estimate is roughly 1.0–1.3 MB
-uncompressed and 0.45–0.65 MB compressed, which leaves room inside the bound.
+The table is where the weight sits — the bound comes from the measurement above, not
+from this sum. mbedtls is in neither the table nor the module: a browser transport uses
+the browser's own HTTP, WebSocket and TLS facilities rather than tunnelling the native
+socket/TLS stack (system-design:125-126). The loader Emscripten emits beside the module
+is a separate download and not part of this number (144,342 bytes here, uncompressed).
 
 The budget covers the WASM module only. The loader and the browser glue are a separate
 download and get their own budget when the browser slice has one (§8).
@@ -286,21 +305,21 @@ browser gate (k161) is what proves it.
 
 What this spec does not decide, with the card that owns it.
 
-1. **The storage backing.** OPFS or IndexedDB (system-design:261-262). Its flush, quota,
+1. **The storage backing.** OPFS or IndexedDB (system-design:269-270). Its flush, quota,
    multi-tab writer ownership and recovery behaviour are a decision of their own (event
    runtime §8) — and they decide whether SQLite comes into the browser at all. The
    storage layer does not exist for any platform yet; k157 owns it.
 2. **SQLite in the browser.** SQLite is not in the tree: docs/THIRD-PARTY.md:19-26 still
    lists SQLite and sqlite-vec under "Planned". The size budget constrains the answer —
    a wasm build of the SQLite amalgamation is of the order of a megabyte before
-   compression, which does not fit inside the 1 MiB bound (ADR 0003, rationale).
+   compression, which does not fit inside the 512 KiB bound (ADR 0003, rationale).
 3. **The credential path.** The core hands a transport a credential as a header bound to
    an origin (include/canlin/llm.h:89-96); the browser forbids many headers and the
    mapping is undecided (llm-ui:72-77: browser-direct credentials share the page's and
    the origin's trust boundary, session-only by default). k159 owns the Fetch transport;
    where the credential is stored follows from the storage choice (point 1).
 4. **The WebSocket constructor.** It cannot set arbitrary auth headers
-   (system-design:405-406): a short-lived connection ticket or an authenticated
+   (system-design:413-414): a short-lived connection ticket or an authenticated
    first-message exchange is needed, and the server spec picks the flow. k160 owns the
    transport.
 5. **Text input beyond the printable key.** IME composition, dead keys and the browser's
@@ -323,7 +342,7 @@ The trace this spec describes does not exist yet.
 | k158 | the adapter trace `src/browser` — clock, wait, present, input — in the Android pattern: pure C in the port, no browser header |
 | k159 | the Fetch/Streams transport over the `canlin_llm_transport` seam |
 | k160 | the WebSocket transport — new in the core, not only an adapter |
-| k161 | the browser gate: a headless browser and a fixture server, running the nine cases of system-design:453-455 |
+| k161 | the browser gate: a headless browser and a fixture server, running the nine cases of system-design:461-463 |
 
 The evidence follows the house rule: the host suite proves the portable parts (the
 conversion, the input mapping, the arming logic), the wasm build proves the module, the
