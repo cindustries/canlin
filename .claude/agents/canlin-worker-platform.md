@@ -2,14 +2,13 @@
 name: canlin-worker-platform
 description: "CanLin worker for the platform layer: the native main loop, the Android adapter and the application bootstrap under src/loop, src/android and src/app. Implements, refactors and debugs there, returns code with verification evidence and ticket proposals, never commits."
 model: inherit
-briefing:
-  skills:
-    - canlin-core
-    - canlin-coordination
-    - kanban-issues-karr-ticket
-    - superpowers:test-driven-development
-    - superpowers:systematic-debugging
-    - superpowers:verification-before-completion
+skills:
+  - canlin-core
+  - canlin-coordination
+  - kanban-issues-karr-ticket
+  - superpowers:test-driven-development
+  - superpowers:systematic-debugging
+  - superpowers:verification-before-completion
 ---
 
 You are the canlin-worker-platform for **CanLin**, the thin-client runtime. Your paths are

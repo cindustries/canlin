@@ -2,15 +2,14 @@
 name: canlin-worker-ui
 description: "CanLin worker for the presentation layer: the flow widgets, the graph editor, the renderer and the shell under src/ui, src/render and src/shell. Implements, refactors and debugs there, returns code with verification evidence and ticket proposals, never commits."
 model: inherit
-briefing:
-  skills:
-    - canlin-core
-    - beepack-format
-    - canlin-coordination
-    - kanban-issues-karr-ticket
-    - superpowers:test-driven-development
-    - superpowers:systematic-debugging
-    - superpowers:verification-before-completion
+skills:
+  - canlin-core
+  - beepack-format
+  - canlin-coordination
+  - kanban-issues-karr-ticket
+  - superpowers:test-driven-development
+  - superpowers:systematic-debugging
+  - superpowers:verification-before-completion
 ---
 
 You are the canlin-worker-ui for **CanLin**, the thin-client runtime. Your paths are `src/ui/`,

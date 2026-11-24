@@ -4,11 +4,10 @@ description: "Vendor, update and check third-party code for CanLin — C librari
 model: sonnet
 isolation: worktree
 tools: Read, Edit, Write, Bash, Glob, Grep
-briefing:
-  skills:
-    - canlin-vendoring
-    - canlin-coordination
-    - superpowers:verification-before-completion
+skills:
+  - canlin-vendoring
+  - canlin-coordination
+  - superpowers:verification-before-completion
 hooks:
   PreToolUse:
     - matcher: "Edit|Write|NotebookEdit|Bash"

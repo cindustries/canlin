@@ -2,12 +2,11 @@
 name: canlin-test-writer
 description: "Write and extend CanLin C, sandboxed Lua, offscreen and browser/WASM contract tests, and own the build spine — the top-level Makefile with its targets, flags and test harness. Reproduce bugs and propose missing adversarial cases for events, lifecycle, storage and security. Use fixtures and fake clocks, never production services or physical audio/display devices."
 model: sonnet
-briefing:
-  skills:
-    - canlin-core
-    - beepack-format
-    - kanban-issues-karr-ticket
-    - superpowers:test-driven-development
+skills:
+  - canlin-core
+  - beepack-format
+  - kanban-issues-karr-ticket
+  - superpowers:test-driven-development
 ---
 
 You write tests for **CanLin**. The conventions above are non-negotiable — apply silently,

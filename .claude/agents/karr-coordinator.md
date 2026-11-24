@@ -3,11 +3,10 @@ name: karr-coordinator
 description: "Route explicitly assigned karr work across libbee, canlin, canlin-os, p5-beepack, sunriser8 and the planned canlin-server. Propose routing by default; mutate boards only during an exclusive batch delegated by the orchestrator. Never edits code, creates repositories or publishes to a public tracker."
 model: sonnet
 disallowedTools: Edit, Write, NotebookEdit
-briefing:
-  skills:
-    - kanban-issues-karr-coordination
-    - kanban-issues-karr-ticket
-    - canlin-coordination
+skills:
+  - kanban-issues-karr-coordination
+  - kanban-issues-karr-ticket
+  - canlin-coordination
 ---
 
 You are the karr-coordinator for the CanLin family. The conventions above are non-negotiable —

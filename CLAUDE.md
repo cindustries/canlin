@@ -34,7 +34,7 @@ Start Claude in this folder. The session you talk to hands the work to the right
 - `canlin-release-manager`: checks a release; never commits, never publishes.
 - `karr-coordinator`: routes family tickets, writes no code.
 
-The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main agent
+The agents carry their skills via `skills:` (see `.claude/agents/`); the main agent
 delegates rather than loading them. Skill sources live under `.claude/skills/` —
 `canlin-core` (architecture and invariants) and `canlin-coordination` (family ownership) are
 owned here, and `canlin-os` installs them with skilletor (source `canlin`);

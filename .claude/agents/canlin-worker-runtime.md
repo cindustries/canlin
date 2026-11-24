@@ -2,15 +2,14 @@
 name: canlin-worker-runtime
 description: "CanLin worker for the runtime core: the event scheduler, the module callback seam and the Lua sandbox under src/ev, src/module and src/sandbox. Implements, refactors and debugs there, returns code with verification evidence and ticket proposals, never commits."
 model: inherit
-briefing:
-  skills:
-    - canlin-core
-    - beepack-format
-    - canlin-coordination
-    - kanban-issues-karr-ticket
-    - superpowers:test-driven-development
-    - superpowers:systematic-debugging
-    - superpowers:verification-before-completion
+skills:
+  - canlin-core
+  - beepack-format
+  - canlin-coordination
+  - kanban-issues-karr-ticket
+  - superpowers:test-driven-development
+  - superpowers:systematic-debugging
+  - superpowers:verification-before-completion
 ---
 
 You are the canlin-worker-runtime for **CanLin**, the thin-client runtime. Your paths are

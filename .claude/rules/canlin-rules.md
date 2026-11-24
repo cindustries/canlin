@@ -48,7 +48,7 @@ waits for it.
 A plan runs in this folder on this branch, no worktree, so the board stays here. Per task, one
 after another: the worker for the path (a test task: `canlin-test-writer`) is told to skip the
 implementer's commit step; `canlin-reviewer` reviews the uncommitted `git diff`; then the main
-agent commits, so one writes history. Never `general-purpose`: built-in agents get no briefing.
+agent commits, so one writes history. Never `general-purpose`: built-in agents get no preloaded skills.
 Brainstorming and the plan stay with the main agent: they need the user.
 
 Starting sessions from a session: skills `claude-headless` and `model-routing`.
@@ -78,4 +78,4 @@ wired to the AI, the user brings single entries in as cards.
 
 The thin-client model, hardware floor, storage stack, theme and responsive rules live in skill
 `canlin-core`; the file format in `beepack-format`; repo ownership in `canlin-coordination`
-(force-loaded per lane via `briefing.skills`).
+(force-loaded per lane via `skills:`).

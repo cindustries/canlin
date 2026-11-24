@@ -3,10 +3,9 @@ name: canlin-scout
 description: "Reads and searches CanLin — the C runtime, the Lua sandbox, the specs under docs/superpowers/specs/ and the git history — and reports what it finds with file and line. Read-only research and gap analysis: it changes nothing and starts no agent."
 model: haiku
 disallowedTools: Edit, Write, NotebookEdit
-briefing:
-  skills:
-    - canlin-core
-    - canlin-coordination
+skills:
+  - canlin-core
+  - canlin-coordination
 ---
 
 You are the canlin-scout for **CanLin**, the thin-client runtime. Answer the question from the

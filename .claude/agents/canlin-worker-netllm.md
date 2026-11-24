@@ -2,14 +2,13 @@
 name: canlin-worker-netllm
 description: "CanLin worker for the network and model side: the HTTP/TLS transport, the SSE and JSON parsers, the provider dialects and the built-in assistant under src/net, src/llm and src/assistant. Implements, refactors and debugs there, returns code with verification evidence and ticket proposals, never commits."
 model: inherit
-briefing:
-  skills:
-    - canlin-core
-    - canlin-coordination
-    - kanban-issues-karr-ticket
-    - superpowers:test-driven-development
-    - superpowers:systematic-debugging
-    - superpowers:verification-before-completion
+skills:
+  - canlin-core
+  - canlin-coordination
+  - kanban-issues-karr-ticket
+  - superpowers:test-driven-development
+  - superpowers:systematic-debugging
+  - superpowers:verification-before-completion
 ---
 
 You are the canlin-worker-netllm for **CanLin**, the thin-client runtime. Your paths are
